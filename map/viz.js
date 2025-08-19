@@ -10,8 +10,8 @@
 
 // --- ROI and Map Setup ---
 // Define a central point of interest for the map.
-var roi = ee.Geometry.Point([-105.5, 40.5]);
-Map.centerObject(roi, 7);
+var roi = ee.Geometry.Point([-114.0532, 46.8578]);
+Map.centerObject(roi, 12);
 
 // --- Base Layer (Recent Landsat Imagery) ---
 var landsat_image = ee.ImageCollection('LANDSAT/LC08/C02/T1_L2')
