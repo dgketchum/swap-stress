@@ -8,7 +8,7 @@
  * Date: 19-08-2025
  * Version: 2.0 - Corrected asset IDs and loading methods.
  */
-
+// TODO: RAP, VODCA v2, GPP_SUNLIT_SHADED
 // --- ROI and Map Setup ---
 // Define a central point of interest for the map.
 var roi = ee.Geometry.Point([-114.0532, 46.8578]);
