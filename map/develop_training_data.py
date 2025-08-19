@@ -8,7 +8,7 @@ from map.call_ee import is_authorized
 from map.call_ee import stack_bands_climatology
 
 
-def get_bands(shapefile_path, bucket, file_prefix, extract_alpha_earth=False):
+def get_bands(shapefile_path, bucket, file_prefix, resolution):
     """
     Extract climatological data for a set of points from a local shapefile.
     """
@@ -22,22 +22,19 @@ def get_bands(shapefile_path, bucket, file_prefix, extract_alpha_earth=False):
         tile_df = points_df[points_df['MGRS_TILE'] == tile]
         tile_points = ee.FeatureCollection(tile_df.__geo_interface__)
 
-        desc = f'climatology_{tile}'
-        if extract_alpha_earth:
-            desc = f'{desc}_ae'
-
+        desc = f'swapstress_{tile}'
         roi = mgrs_ee_tiles.filter(ee.Filter.eq('MGRS_TILE', tile))
 
         try:
-            stack = stack_bands_climatology(roi, alpha_earth=extract_alpha_earth)
+            stack = stack_bands_climatology(roi, resolution=resolution)
         except ee.ee_exception.EEException as exc:
             print(f'{desc} error: {exc}')
             continue
 
         plot_sample_regions = stack.sampleRegions(
             collection=tile_points,
-            properties=['MGRS_TILE', 'POINT_TYPE'],
-            scale=30,
+            properties=['MGRS_TILE', 'site_id'],
+            scale=resolution,
             tileScale=16)
 
         task = ee.batch.Export.table.toCloudStorage(
@@ -67,6 +64,6 @@ if __name__ == '__main__':
     get_bands(shapefile_path=shapefile,
               bucket=gcs_bucket,
               file_prefix=output_prefix,
-              extract_alpha_earth=True)
+              resolution=4000)
 
 # ========================= EOF ====================================================================

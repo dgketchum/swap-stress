@@ -4,86 +4,67 @@ from map.ee_utils import get_world_climate, landsat_composites
 from map.cdl import get_cdl
 
 
-def stack_bands_climatology(roi, start_yr=1991, end_yr=2020, alpha_earth=False):
+def stack_bands_climatology(roi, start_yr=1991, end_yr=2020, resolution=4000):
     """
     Create a stack of climatological bands for the roi specified.
     """
-
-    if alpha_earth:
-        dataset = (ee.ImageCollection('GOOGLE/SATELLITE_EMBEDDING/V1/ANNUAL')
-                   .filterDate(f'{start_yr}-01-01', f'{end_yr}-12-31').filterBounds(roi).mean())
-        dataset = dataset.clip(roi)
-        return dataset
-
     years = ee.List.sequence(start_yr, end_yr)
 
-    spring_s, spring_e = '03-01', '05-01'
-    late_spring_s, late_spring_e = '05-01', '07-15'
-    summer_s, summer_e = '07-15', '09-30'
-    fall_s, fall_e = '09-30', '12-31'
-
-    periods = [('gs', spring_e, fall_s),
-               ('1', spring_s, spring_e),
-               ('2', late_spring_s, late_spring_e),
-               ('3', summer_s, summer_e),
-               ('4', fall_s, fall_e)]
+    # spring: 60-121, late spring: 121-196, summer: 196-273, fall: 273-365
+    periods = [('gs', 121, 273),
+               ('1', 60, 121),
+               ('2', 121, 196),
+               ('3', 196, 273),
+               ('4', 273, 365)]
 
     band_list = []
-    for name, start, end in periods:
-        def annual_composite(y):
-            y = ee.Number(y).toInt()
-            s = ee.String(y.format()).cat('-').cat(start)
-            e = ee.String(y.format()).cat('-').cat(end)
-            return landsat_composites(y, s, e, roi, name, composites_only=False)
+    for name, start_doy, end_doy in periods:
+        landsat_stats = landsat_composites(start_yr, end_yr, start_doy, end_doy, roi, name)
+        band_list.append(landsat_stats)
 
-        collection = ee.ImageCollection.fromImages(years.map(annual_composite))
-        first_image_bands = collection.first().bandNames()
-        mean = collection.mean().rename(first_image_bands.map(lambda b: ee.String(b).cat('_mean')))
-        std_dev = collection.reduce(ee.Reducer.stdDev()).rename(
-            first_image_bands.map(lambda b: ee.String(b).cat('_stdDev')))
-        band_list.append(mean)
-        band_list.append(std_dev)
-
-    input_bands = ee.Image(band_list)
+    input_bands = ee.Image.cat(band_list)
     proj = input_bands.select(0).projection()
+
+    ae_bands = (ee.ImageCollection('GOOGLE/SATELLITE_EMBEDDING/V1/ANNUAL')
+                .filterDate(f'2017-01-01', f'2024-12-31').filterBounds(roi).mean())
+
+    input_bands = input_bands.addBands([ae_bands])
+
+    # 4-Season GridMET Climatology
+    seasons = [('winter', 335, 59),
+               ('spring', 60, 151),
+               ('summer', 152, 243),
+               ('autumn', 244, 334)]
 
     gridmet_coll = ee.ImageCollection("IDAHO_EPSCOR/GRIDMET").filterDate(f'{start_yr}-01-01', f'{end_yr}-12-31')
 
-    for s_month, e_month, n, m in [(3, 5, 'spr', (3, 5)),
-                                   (6, 9, 'smr', (6, 9))]:
-        gridmet = gridmet_coll.filter(ee.Filter.calendarRange(s_month, e_month, 'month'))
+    for name, start_doy, end_doy in seasons:
+        if start_doy > end_doy:  # Handle winter case
+            season_filter = ee.Filter.Or(
+                ee.Filter.calendarRange(start_doy, 365, 'day_of_year'),
+                ee.Filter.calendarRange(1, end_doy, 'day_of_year')
+            )
+        else:
+            season_filter = ee.Filter.calendarRange(start_doy, end_doy, 'day_of_year')
 
-        def annual_mean_temp(y):
-            return (gridmet.filter(ee.Filter.calendarRange(y, y, 'year'))
-                    .select(['tmmn', 'tmmx']).mean()
-                    .expression('(b("tmmn") + b("tmmx")) / 2').rename(f'tmp_{n}'))
+        seasonal_gridmet = gridmet_coll.filter(season_filter)
 
-        temp_collection = ee.ImageCollection(years.map(annual_mean_temp))
-        mean_temp = temp_collection.mean()
-        std_dev_temp = temp_collection.reduce(ee.Reducer.stdDev()).rename(f'tmp_{n}_stdDev')
+        reducers = ee.Reducer.mean().combine(ee.Reducer.stdDev(), '', True)
+        climate_stats = (seasonal_gridmet.select(['pr', 'eto', 'tmmn', 'tmmx'])
+                         .reduce(reducers))
 
-        def annual_sum(y):
-            return gridmet.filter(ee.Filter.calendarRange(y, y, 'year')).select(['pr', 'eto']).sum()
+        mean_temp = (climate_stats.select('tmmn_mean').add(climate_stats.select('tmmx_mean'))
+                     .divide(2).rename('tmean_mean'))
 
-        annual_sum_collection = ee.ImageCollection(years.map(annual_sum))
-        mean_annual_sum = annual_sum_collection.mean().rename(f'prec_tot_{n}', f'pet_tot_{n}')
-        std_dev_annual_sum = (annual_sum_collection.reduce(ee.Reducer.stdDev())
-                              .rename(f'prec_tot_{n}_stdDev', f'pet_tot_{n}_stdDev'))
+        climate_stats = climate_stats.addBands(mean_temp)
 
-        wd_estimate = mean_annual_sum.select(f'prec_tot_{n}').subtract(
-            mean_annual_sum.select(f'pet_tot_{n}')).rename(f'cwd_{n}')
+        new_names = climate_stats.bandNames().map(lambda b: ee.String(b).cat('_').cat(name))
+        seasonal_clim_image = climate_stats.rename(new_names)
 
-        worldclim_prec = get_world_climate(proj=proj, months=m, param='prec')
-        anom_prec = mean_annual_sum.select(f'prec_tot_{n}').subtract(worldclim_prec).rename(f'an_prec_{n}')
-        worldclim_temp = get_world_climate(proj=proj, months=m, param='tavg')
-        anom_temp = mean_temp.subtract(worldclim_temp).rename(f'an_temp_{n}')
+        input_bands = input_bands.addBands(seasonal_clim_image)
 
-        input_bands = input_bands.addBands([mean_temp, std_dev_temp, mean_annual_sum, std_dev_annual_sum,
-                                        wd_estimate, anom_temp, anom_prec])
-
-    s1_start_yr = ee.Number.max(start_yr, 2015)
     s1_coll = (ee.ImageCollection("COPERNICUS/S1_GRD")
-               .filterDate(ee.Date.fromYMD(s1_start_yr.toInt(), 1, 1), ee.Date.fromYMD(ee.Number.parse(end_yr), 12, 31))
+               .filterDate(ee.Date.fromYMD(2015, 1, 1), ee.Date.fromYMD(2024, 12, 31))
                .filterBounds(roi)
                .filter(ee.Filter.listContains('transmitterReceiverPolarisation', 'VV'))
                .filter(ee.Filter.listContains('transmitterReceiverPolarisation', 'VH'))
@@ -100,6 +81,30 @@ def stack_bands_climatology(roi, start_yr=1991, end_yr=2020, alpha_earth=False):
     s1_clim = ee.Image.cat([s1_mean, s1_stdDev])
     input_bands = input_bands.addBands(s1_clim)
 
+    smap_l3_coll = (ee.ImageCollection("NASA/SMAP/SPL3SMP_E/005")
+                    .filterDate('2015-03-31T12:00:00', '2023-12-03T12:00:00')
+                    .filterBounds(roi))
+
+    smap_l3_am_good = smap_l3_coll.filter(ee.Filter.eq('retrieval_qual_flag_am', 0))
+    smap_l3_pm_good = smap_l3_coll.filter(ee.Filter.eq('retrieval_qual_flag_pm', 0))
+
+    smap_l3_am_clim = (smap_l3_am_good.select(['soil_moisture_am', 'vegetation_water_content_am'])
+                       .reduce(ee.Reducer.mean().combine(ee.Reducer.stdDev(), '', True)))
+    smap_l3_pm_clim = (smap_l3_pm_good.select(['soil_moisture_pm', 'vegetation_water_content_pm'])
+                       .reduce(ee.Reducer.mean().combine(ee.Reducer.stdDev(), '', True)))
+
+    smap_l3_clim = ee.Image.cat([smap_l3_am_clim, smap_l3_pm_clim])
+    input_bands = input_bands.addBands(smap_l3_clim)
+
+    smap_l4_bands = ['sm_surface', 'sm_rootzone', 'sm_profile', 'surface_temp', 'leaf_area_index']
+    smap_l4_coll = (ee.ImageCollection("NASA/SMAP/SPL4SMGP/008")
+                    .filterDate('2015-03-31T00:00:00', '2025-08-15T22:30:00')
+                    .filterBounds(roi)
+                    .select(smap_l4_bands))
+
+    smap_l4_clim = smap_l4_coll.reduce(ee.Reducer.mean().combine(ee.Reducer.stdDev(), '', True))
+    input_bands = input_bands.addBands(smap_l4_clim)
+
     coords = ee.Image.pixelLonLat().rename(['lon', 'lat'])
     ned = ee.Image('USGS/3DEP/10m')
     terrain = ee.Terrain.products(ned).select('elevation', 'slope', 'aspect')
@@ -111,7 +116,7 @@ def stack_bands_climatology(roi, start_yr=1991, end_yr=2020, alpha_earth=False):
     tpi_10000 = elev.subtract(elev.focal_mean(10000, 'circle', 'meters')).add(0.5).rename('tpi_10000')
     tpi_22500 = elev.subtract(elev.focal_mean(22500, 'circle', 'meters')).add(0.5).rename('tpi_22500')
 
-    nlcd = ee.Image('USGS/NLCD/NLCD2019').select('landcover').rename('nlcd')
+    nlcd = ee.ImageCollection('USGS/NLCD_RELEASES/2019_REL/NLCD').select('landcover').mosaic().rename('nlcd')
 
     def get_cdl_simple(y):
         return get_cdl(y)[2]
@@ -154,7 +159,6 @@ def stack_bands_climatology(roi, start_yr=1991, end_yr=2020, alpha_earth=False):
         ee.ImageCollection('projects/sat-io/open-datasets/polaris/alpha_mean').mean().rename('alpha_mean')
     ])
 
-    landform = ee.Image('projects/usgs-gap/landform').rename('landform')
 
     static_bands = [coords,
                     terrain,
@@ -170,10 +174,11 @@ def stack_bands_climatology(roi, start_yr=1991, end_yr=2020, alpha_earth=False):
                     ssurgo,
                     prism,
                     additional_terrain,
-                    polaris,
-                    landform]
+                    polaris]
 
-    input_bands = input_bands.addBands(static_bands).resample('bilinear').reproject(crs=proj)
+
+    input_bands = input_bands.addBands(static_bands).resample('bilinear').reproject(crs=proj.crs(),
+                                                                                    scale=resolution)
 
     return input_bands.clip(roi)
 

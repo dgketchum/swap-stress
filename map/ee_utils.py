@@ -77,9 +77,10 @@ def landsat_c2_sr(input_img):
     return image
 
 
-def landsat_masked(yr, roi):
-    start = '{}-01-01'.format(yr)
-    end_date = '{}-01-01'.format(yr + 1)
+def get_landsat_collection(start_yr, end_yr, roi):
+
+    start = f'{start_yr}-01-01'
+    end_date = f'{end_yr}-12-31'
 
     l4_coll = ee.ImageCollection('LANDSAT/LT04/C02/T1_L2').filterBounds(
         roi).filterDate(start, end_date).map(landsat_c2_sr)
@@ -92,44 +93,9 @@ def landsat_masked(yr, roi):
     l9_coll = ee.ImageCollection('LANDSAT/LC09/C02/T1_L2').filterBounds(
         roi).filterDate(start, end_date).map(landsat_c2_sr)
 
-    lsSR_masked = ee.ImageCollection(l7_coll.merge(l8_coll).merge(l9_coll).merge(l5_coll).merge(l4_coll))
+    return ee.ImageCollection(l7_coll.merge(l8_coll).merge(l9_coll).merge(l5_coll).merge(l4_coll))
 
-    return lsSR_masked
-
-
-def long_term_ndvi_stats(roi):
-    start = '1987-01-01'
-    end_date = '2022-12-31'
-
-    l5_coll = ee.ImageCollection('LANDSAT/LT05/C02/T1_L2').filterBounds(
-        roi).filterDate(start, end_date).map(landsat_c2_sr)
-    l7_coll = ee.ImageCollection('LANDSAT/LE07/C02/T1_L2').filterBounds(
-        roi).filterDate(start, end_date).map(landsat_c2_sr)
-    l8_coll = ee.ImageCollection('LANDSAT/LC08/C02/T1_L2').filterBounds(
-        roi).filterDate(start, end_date).map(landsat_c2_sr)
-    l9_coll = ee.ImageCollection('LANDSAT/LC09/C02/T1_L2').filterBounds(
-        roi).filterDate(start, end_date).map(landsat_c2_sr)
-
-    landsat = ee.ImageCollection(l7_coll.merge(l8_coll).merge(l9_coll).merge(l5_coll))
-
-    nd_max = []
-    for yr in range(1987, 2023):
-        s, e = '{}-01-01'.format(yr), '{}-12-31'.format(yr)
-        ndvi_mx = ee.Image(landsat.filterDate(s, e).map(
-            lambda x: x.normalizedDifference(['B5', 'B4'])).max()).rename('nd_max'.format(yr))
-        nd_max.append(ndvi_mx)
-
-    coll = ee.ImageCollection(nd_max)
-    mean_, max_, std_ = coll.mean().rename('nd_lt_mn'), coll.max().rename('nd_lt_mx'), \
-        coll.reduce(ee.Reducer.stdDev()).rename('nd_lt_std')
-
-    return mean_, max_, std_
-
-
-def landsat_composites(year, start, end, roi, append_name, composites_only=False):
-    start_year = datetime.strptime(start, '%Y-%m-%d').year
-    if start_year != year:
-        year = start_year
+def landsat_composites(start_yr, end_yr, start_doy, end_doy, roi, append_name):
 
     def evi_(x):
         return x.expression('2.5 * ((NIR-RED) / (NIR + 6 * RED - 7.5* BLUE +1))', {'NIR': x.select('B5'),
@@ -140,48 +106,30 @@ def landsat_composites(year, start, end, roi, append_name, composites_only=False
         return x.expression('NIR / GREEN', {'NIR': x.select('B5'),
                                             'GREEN': x.select('B3')})
 
-    bands_means = None
-    lsSR_masked = landsat_masked(year, roi)
-    if not composites_only:
-        bands_means = ee.Image(lsSR_masked.filterDate(start, end).map(
-            lambda x: x.select(['B2', 'B3', 'B4', 'B5', 'B6', 'B7', 'B10'],
-                               ['B2_{}'.format(append_name),
-                                'B3_{}'.format(append_name),
-                                'B4_{}'.format(append_name),
-                                'B5_{}'.format(append_name),
-                                'B6_{}'.format(append_name),
-                                'B7_{}'.format(append_name),
-                                'B10_{}'.format(append_name)]
-                               )).mean())
+    lsSR_masked = get_landsat_collection(start_yr, end_yr, roi)
+    lsSR_filtered = lsSR_masked.filter(ee.Filter.calendarRange(start_doy, end_doy, 'day_of_year'))
 
-    if append_name in ['m2', 'm1', 'gs']:
-        ndvi_mx = ee.Image(lsSR_masked.filterDate(start, end).map(
-            lambda x: x.normalizedDifference(['B5', 'B4'])).max()).rename('nd_max_{}'.format(append_name))
+    def _add_indices(img):
+        ndvi = img.normalizedDifference(['B5', 'B4']).rename('nd')
+        ndwi = img.normalizedDifference(['B5', 'B6']).rename('nw')
+        evi = evi_(img).rename('evi')
+        gi = gi_(img).rename('gi')
+        return img.addBands([ndvi, ndwi, evi, gi])
 
-        ndvi_mean = ee.Image(lsSR_masked.filterDate(start, end).map(
-            lambda x: x.normalizedDifference(['B5', 'B4'])).mean()).rename('nd_mean_{}'.format(append_name))
+    lsSR_with_indices = lsSR_filtered.map(_add_indices)
 
-        ndvi = ndvi_mx.addBands([ndvi_mean])
+    bands_to_reduce = ['B2', 'B3', 'B4', 'B5', 'B6', 'B7', 'B10', 'nd', 'nw', 'evi', 'gi']
 
-    else:
-        ndvi = ee.Image(lsSR_masked.filterDate(start, end).map(
-            lambda x: x.normalizedDifference(['B5', 'B4'])).max()).rename('nd_{}'.format(append_name))
+    reducers = ee.Reducer.mean().combine(ee.Reducer.stdDev(), '', True)
+    stats = lsSR_with_indices.select(bands_to_reduce).reduce(reducers)
 
-    ndwi = ee.Image(lsSR_masked.filterDate(start, end).map(
-        lambda x: x.normalizedDifference(['B5', 'B6'])).max()).rename('nw_{}'.format(append_name))
-    evi = ee.Image(lsSR_masked.filterDate(start, end).map(
-        lambda x: evi_(x)).max()).rename('evi_{}'.format(append_name))
-    gi = ee.Image(lsSR_masked.filterDate(start, end).map(
-        lambda x: gi_(x)).max()).rename('gi_{}'.format(append_name))
+    original_names = stats.bandNames()
+    new_names = original_names.map(lambda b: ee.String(b).cat('_').cat(append_name))
 
-    if composites_only:
-        bands = ndvi.addBands([ndwi, evi, gi])
-    else:
-        bands = bands_means.addBands([ndvi, ndwi, evi, gi])
-
-    return bands
+    return stats.rename(new_names)
 
 
 if __name__ == '__main__':
     pass
 # ========================= EOF ====================================================================
+
