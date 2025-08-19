@@ -6,6 +6,7 @@
  *              Google Earth Engine Code Editor for data exploration.
  * Author: Gemini
  * Date: 19-08-2025
+ * Version: 2.0 - Corrected asset IDs and loading methods.
  */
 
 // --- ROI and Map Setup ---
@@ -43,9 +44,10 @@ var s1_mean = ee.ImageCollection("COPERNICUS/S1_GRD")
 Map.addLayer(s1_mean, {min: -15, max: 0}, 'Sentinel-1 VV Mean (2022)', false);
 
 // PRISM Climate Data
-var prism = ee.Image("OREGONSTATE/PRISM/Norm91m").select('ppt');
+// FIX: Added .mean() to reduce the ImageCollection to an Image.
+var prism = ee.ImageCollection("OREGONSTATE/PRISM/Norm91m").mean().select('ppt');
 var prism_vis = {
-    min: 200, max: 1500,
+    min: 0, max: 800,
     palette: ['#ffffcc', '#a1dab4', '#41b6c4', '#2c7fb8', '#253494']
 };
 Map.addLayer(prism, prism_vis, 'PRISM PPT', false);
@@ -90,8 +92,8 @@ Map.addLayer(polaris_clay, {
 // --- Land Cover & Land Use Layers ---
 
 // NLCD
-var nlcd = ee.Image('USGS/NLCD/NLCD2019').select('landcover');
-// Visualization parameters are built-in for NLCD
+// FIX: Corrected asset ID to the 2019 release collection.
+var nlcd = ee.ImageCollection('USGS/NLCD_RELEASES/2019_REL/NLCD').first().select('landcover');
 Map.addLayer(nlcd, {}, 'NLCD', false);
 
 // Global Surface Water
@@ -99,7 +101,8 @@ var gsw = ee.Image('JRC/GSW1_4/GlobalSurfaceWater').select('occurrence');
 Map.addLayer(gsw, {min: 0, max: 100, palette: ['#ffffff', '#0000ff']}, 'Global Surface Water', false);
 
 // Landform
-var landform = ee.Image('projects/usgs-gap/landform').select('landform');
+// FIX: Corrected to a publically accessible asset path.
+var landform = ee.Image('projects/earthengine-legacy/assets/projects/usgs-gap/landform').select('landform');
 var landform_vis = {
     min: 11, max: 42,
     palette: [
