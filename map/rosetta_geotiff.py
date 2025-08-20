@@ -16,7 +16,6 @@ ROSETTA_VG_PARAMS = ['theta_r', 'theta_s', 'log10_alpha', 'log10_n', 'log10_Ks']
 
 
 def worker_extract(raster_path, window, points_gdf):
-
     """Worker function to extract points within a given raster window."""
     with rasterio.open(raster_path) as src:
         window_bounds = bounds(window, src.transform)
@@ -69,12 +68,12 @@ def extract_rosetta_parameters(points_shp, rosetta_dir, out_parquet, num_workers
                     futures = {executor.submit(worker_extract, r_file, window, points_reproj): window for window in
                                jobs}
                     for future in tqdm(as_completed(futures), total=len(jobs)):
-                        # try:
-                        result_chunk = future.result()
-                        if result_chunk is not None:
-                            all_results.append(result_chunk)
-                        # except Exception as e:
-                        #     print(f"A window generated an exception: {e}")
+                        try:
+                            result_chunk = future.result()
+                            if result_chunk is not None:
+                                all_results.append(result_chunk)
+                        except Exception as e:
+                            print(f"A window generated an exception: {e}")
 
     print("Combining results from all chunks...")
     if not all_results:

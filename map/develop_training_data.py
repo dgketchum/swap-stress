@@ -1,7 +1,10 @@
 import os
 import sys
+from glob import glob
+
 import ee
 import geopandas as gpd
+import pandas as pd
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../EEMapper/map')))
 from map.call_ee import is_authorized
@@ -48,22 +51,77 @@ def get_bands(shapefile_path, bucket, file_prefix, resolution):
         print(f'Started export: {file_prefix}/{desc}')
 
 
+def concatenate_and_join(ee_in_dir, rosetta_pqt, out_file):
+    """
+    Concatenates CSVs from Earth Engine extraction, joins with Rosetta data,
+    and saves to a single Parquet file.
+    """
+
+    csv_files = glob(os.path.join(ee_in_dir, '*.csv'))
+    if not csv_files:
+        print(f"No CSV files found in {ee_in_dir}")
+        return
+
+    print(f"Found {len(csv_files)} CSV files to concatenate.")
+    df_list = []
+
+    for f in csv_files:
+        try:
+            df_list.append(pd.read_csv(f))
+        except pd.errors.EmptyDataError:
+            print(f'Found empty file {os.path.basename(f)}, removing')
+            os.remove(f)
+            continue
+
+    ee_df = pd.concat(df_list, ignore_index=True)
+    ee_df = ee_df.drop(columns=['.geo', 'system:index', 'MGRS_TILE'])
+
+    if 'site_id' in ee_df.columns:
+        ee_df.set_index('site_id', inplace=True)
+    else:
+        print("Fatal: 'site_id' column not found in Earth Engine data. Cannot join.")
+        return
+
+    rosetta_df = pd.read_parquet(rosetta_pqt)
+    # TODO: fix extract to properly concat the columns under 'site_id' index, until then:
+    rosetta_df = rosetta_df.groupby('site_id').first()
+
+    final_df = ee_df.join(rosetta_df, how='left')
+
+    out_dir = os.path.dirname(out_file)
+    if not os.path.exists(out_dir):
+        os.makedirs(out_dir)
+
+    final_df.to_parquet(out_file)
+    print(f"Saving final concatenated data to {out_file}")
+
+
 if __name__ == '__main__':
-    is_authorized()
 
-    root = '/media/research/IrrigationGIS'
-    if not os.path.exists(root):
-        root = '/home/dgketchum/data/IrrigationGIS'
+    run_gee_extract = False
+    if run_gee_extract:
+        is_authorized()
+        root = '/media/research/IrrigationGIS'
+        if not os.path.exists(root):
+            root = '/home/dgketchum/data/IrrigationGIS'
 
-    shapefile = os.path.join(root, 'soils', 'gis', 'pretraining-roi-10000_mgrs.shp')
+        shapefile = os.path.join(root, 'soils', 'gis', 'pretraining-roi-10000_mgrs.shp')
+        gcs_bucket = 'wudr'
+        output_prefix = 'swap-stress/training_data'
 
-    gcs_bucket = 'wudr'
+        get_bands(shapefile_path=shapefile,
+                  bucket=gcs_bucket,
+                  file_prefix=output_prefix,
+                  resolution=4000)
 
-    output_prefix = 'swap-stress/training_data'
+    run_concatenate = True
 
-    get_bands(shapefile_path=shapefile,
-              bucket=gcs_bucket,
-              file_prefix=output_prefix,
-              resolution=4000)
+    if run_concatenate:
+        ee_extract_dir_ = '/home/dgketchum/data/IrrigationGIS/soils/swapstress/extracts/'
+        rosetta_file_ = '/home/dgketchum/data/IrrigationGIS/soils/rosetta/extracted_rosetta_points.parquet'
+        output_file_ = '/home/dgketchum/data/IrrigationGIS/soils/swapstress/training/training_data.parquet'
+        concatenate_and_join(ee_in_dir=ee_extract_dir_,
+                             rosetta_pqt=rosetta_file_,
+                             out_file=output_file_)
 
 # ========================= EOF ====================================================================
