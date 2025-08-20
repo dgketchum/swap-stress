@@ -1,6 +1,7 @@
 import os
 import sys
 from glob import glob
+import json
 
 import ee
 import geopandas as gpd
@@ -51,11 +52,14 @@ def get_bands(shapefile_path, bucket, file_prefix, resolution):
         print(f'Started export: {file_prefix}/{desc}')
 
 
-def concatenate_and_join(ee_in_dir, rosetta_pqt, out_file):
+def concatenate_and_join(ee_in_dir, rosetta_pqt, out_file, categorical_mappings_json=None, categories=None):
     """
     Concatenates CSVs from Earth Engine extraction, joins with Rosetta data,
     and saves to a single Parquet file.
     """
+
+    if categorical_mappings_json is not None and categories is None:
+        raise ValueError
 
     csv_files = glob(os.path.join(ee_in_dir, '*.csv'))
     if not csv_files:
@@ -87,6 +91,18 @@ def concatenate_and_join(ee_in_dir, rosetta_pqt, out_file):
     rosetta_df = rosetta_df.groupby('site_id').first()
 
     final_df = ee_df.join(rosetta_df, how='left')
+    final_df = final_df[sorted(final_df.columns.to_list())]
+
+    if categorical_mappings_json:
+        mappings = {}
+        for col in categories:
+            if final_df[col].dtype == 'object':
+                final_df[col] = final_df[col].astype('category')
+            mappings[col] = {k: int(v) for v, k in enumerate(final_df[col].unique())}
+
+        with open(categorical_mappings_json, 'w') as f:
+            json.dump(mappings, f, indent=4)
+        print(f"Saved categorical mappings to {categorical_mappings_json}")
 
     out_dir = os.path.dirname(out_file)
     if not os.path.exists(out_dir):
@@ -115,13 +131,16 @@ if __name__ == '__main__':
                   resolution=4000)
 
     run_concatenate = True
-
     if run_concatenate:
         ee_extract_dir_ = '/home/dgketchum/data/IrrigationGIS/soils/swapstress/extracts/'
         rosetta_file_ = '/home/dgketchum/data/IrrigationGIS/soils/rosetta/extracted_rosetta_points.parquet'
         output_file_ = '/home/dgketchum/data/IrrigationGIS/soils/swapstress/training/training_data.parquet'
+        mappings_json_ = '/home/dgketchum/data/IrrigationGIS/soils/swapstress/training/categorical_mappings.json'
+
         concatenate_and_join(ee_in_dir=ee_extract_dir_,
                              rosetta_pqt=rosetta_file_,
-                             out_file=output_file_)
+                             out_file=output_file_,
+                             categorical_mappings_json=mappings_json_,
+                             categories=['cdl_mode', 'nlcd'])
 
 # ========================= EOF ====================================================================
