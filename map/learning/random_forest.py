@@ -54,6 +54,28 @@ def train_random_forest_vg(f):
 
 
 if __name__ == '__main__':
-    f = '/home/dgketchum/data/IrrigationGIS/soils/swapstress/training/training_data.parquet'
-    all_metrics_ = train_random_forest_vg(f)
+    import os
+    import json
+    from datetime import datetime
+
+    home_ = os.path.expanduser('~')
+    root_ = os.path.join(home_, 'data', 'IrrigationGIS', 'soils', 'swapstress', 'training')
+
+    f_ = os.path.join(root_, 'training_data.parquet')
+    metrics_dir_ = os.path.join(root_, 'metrics')
+
+    if not os.path.exists(metrics_dir_):
+        os.makedirs(metrics_dir_)
+
+    print("=" * 50)
+    print("RUNNING RANDOM FOREST")
+    all_metrics_ = train_random_forest_vg(f_)
+
+    timestamp_ = datetime.now().strftime('%Y%m%d_%H%M%S')
+    metrics_json_ = os.path.join(metrics_dir_, f'RandomForest_{timestamp_}.json')
+
+    with open(metrics_json_, 'w') as f:
+        json.dump(all_metrics_, f, indent=4)
+
+    print(f'Wrote RandomForest metrics to {metrics_json_}')
 # ========================= EOF ====================================================================
