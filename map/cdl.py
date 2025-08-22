@@ -270,39 +270,35 @@ def remap_cdl():
 
 
 def get_cdl(yr):
+    """
+    Creates multi-year modal composites for cultivated land and cropland from the CDL dataset.
+    Selects a single year for cropland if 'yr' is within the available data range.
+    """
     cultivated, crop = None, None
-    cdl_years = [x for x in range(2008, 2021)]
-    cultivated_years = [x for x in range(2013, 2019)]
+    cdl_years_list = list(range(2008, 2021))
+    cultivated_years_list = list(range(2013, 2019))
 
     mode_reduce = ee.Reducer.mode()
 
-    first = True
-    for y in cultivated_years:
-        image = ee.Image('USDA/NASS/CDL/{}'.format(y))
-        cultivated = image.select('cultivated')
-        cultivated = cultivated.remap([1, 2], [0, 1])
-        if first:
-            cultivated = cultivated.rename('clt_{}'.format(y))
-            first = False
-        else:
-            cultivated.addBands(cultivated.rename('clt_{}'.format(y)))
+    def get_cultivated_band(year):
+        img = ee.Image(f'USDA/NASS/CDL/{year}')
+        return img.select('cultivated').remap([1, 2], [0, 1])
 
-    cultivated = cultivated.reduce(mode_reduce).resample('bilinear').rename('cdl')
+    cultivated_coll = ee.ImageCollection.fromImages(
+        [get_cultivated_band(y) for y in cultivated_years_list]
+    )
+    cultivated = cultivated_coll.reduce(mode_reduce).resample('bilinear').rename('cdl')
 
-    if yr in cdl_years:
-        image = ee.Image('USDA/NASS/CDL/{}'.format(yr))
-        crop = image.select('cropland')
+    def get_cropland_band(year):
+        return ee.Image(f'USDA/NASS/CDL/{year}').select('cropland')
+
+    if yr in cdl_years_list:
+        crop = get_cropland_band(yr)
     else:
-        first = True
-        for y in cdl_years:
-            image = ee.Image('USDA/NASS/CDL/{}'.format(y))
-            crop = image.select('cropland')
-            if first:
-                crop = crop.rename('crop_{}'.format(y))
-                first = False
-            else:
-                crop.addBands(crop.rename('crop_{}'.format(y)))
-        crop = crop.reduce(mode_reduce).rename('cropland')
+        cropland_coll = ee.ImageCollection.fromImages(
+            [get_cropland_band(y) for y in cdl_years_list]
+        )
+        crop = cropland_coll.reduce(mode_reduce).rename('cropland')
 
     cdl_keys, our_keys = remap_cdl()
     simple_crop = crop.remap(cdl_keys, our_keys).rename('crop5c').resample('bilinear')
