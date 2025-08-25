@@ -1,9 +1,14 @@
 import os
+import json
+
 import pandas as pd
 import geopandas as gpd
 
+from retention_curve import map_empirical_to_rosetta_level
 
-def preprocess_mt_mesonet(swp_csv_path, metadata_csv_path, output_dir):
+
+def preprocess_mt_mesonet(swp_csv_path, metadata_csv_path, output_dir,
+                          summary_csv_path, summary_geojson_path):
 
     """
     Reads Montana Mesonet SWP data, joins it with station metadata, splits
@@ -14,6 +19,8 @@ def preprocess_mt_mesonet(swp_csv_path, metadata_csv_path, output_dir):
         swp_csv_path (str): Path to the source SWP CSV file.
         metadata_csv_path (str): Path to the station metadata CSV file.
         output_dir (str): Path to the directory where output files will be saved.
+        summary_csv_path (str): Path to save the output summary CSV file.
+        summary_geojson_path (str): Path to save the output summary GeoJSON file.
     """
 
     for p in [swp_csv_path, metadata_csv_path]:
@@ -52,7 +59,6 @@ def preprocess_mt_mesonet(swp_csv_path, metadata_csv_path, output_dir):
         station_meta = meta_df.drop_duplicates(subset=[station_col])
         summary_with_meta_df = pd.merge(summary_df, station_meta, on=station_col, how='left')
 
-        summary_csv_path = os.path.join(output_dir, 'station_obs_summary.csv')
         summary_with_meta_df.to_csv(summary_csv_path, index=False)
         print(f"Saved station summary to {summary_csv_path}")
 
@@ -62,7 +68,6 @@ def preprocess_mt_mesonet(swp_csv_path, metadata_csv_path, output_dir):
                 geometry=gpd.points_from_xy(summary_with_meta_df.longitude, summary_with_meta_df.latitude),
                 crs="EPSG:4326"
             )
-            summary_geojson_path = os.path.join(output_dir, 'station_obs_summary.geojson')
             gdf.to_file(summary_geojson_path, driver='GeoJSON')
             print(f"Saved station summary to {summary_geojson_path}")
         else:
@@ -80,15 +85,67 @@ def preprocess_mt_mesonet(swp_csv_path, metadata_csv_path, output_dir):
     print("Preprocessing complete.")
 
 
+def get_modeling_levels(station_obs_summary_csv, station_name=None):
+    """
+    Identifies the Rosetta levels that have corresponding empirical data.
+
+    Args:
+        station_obs_summary_csv (str): Path to the station_obs_summary.csv file.
+        station_name (str, optional): A specific station to query.
+
+    Returns:
+        dict or list: If station_name is None, returns a dict mapping all
+                      stations to their relevant Rosetta levels. Otherwise,
+                      returns a list of levels for the specified station.
+    """
+    summary_df = pd.read_csv(station_obs_summary_csv)
+    summary_df.set_index('station', inplace=True)
+
+    obs_cols = [c for c in summary_df.columns if c.startswith('n_obs_')]
+
+    depth_map = {}
+    for col in obs_cols:
+        try:
+            depth = int(col.replace('n_obs_', '').replace('cm', ''))
+            level = map_empirical_to_rosetta_level(depth)
+            if level:
+                depth_map[col] = level
+        except ValueError:
+            continue
+
+    station_levels = {}
+    for station, row in summary_df.iterrows():
+        levels = set()
+        for col, level in depth_map.items():
+            if row[col] > 0:
+                levels.add(level)
+        station_levels[station] = sorted(list(levels))
+
+    if station_name:
+        return station_levels.get(station_name, [])
+
+    return station_levels
+
+
 if __name__ == '__main__':
     home_ = os.path.expanduser('~')
     root_ = os.path.join(home_, 'data', 'IrrigationGIS', 'soils', 'soil_potential_obs', 'mt_mesonet')
 
     swp_csv_ = os.path.join(root_, 'swp.csv')
     metadata_csv_ = os.path.join(root_, 'station_metadata.csv')
+    summary_csv_ = os.path.join(root_, 'station_obs_summary.csv')
+    summary_geojson_ = os.path.join(root_, 'station_obs_summary.geojson')
 
     preprocess_mt_mesonet(swp_csv_path=swp_csv_,
                           metadata_csv_path=metadata_csv_,
-                          output_dir=root_)
+                          output_dir=root_,
+                          summary_csv_path=summary_csv_,
+                          summary_geojson_path=summary_geojson_)
+
+    if os.path.exists(summary_csv_):
+        modeling_levels = get_modeling_levels(summary_csv_)
+        print("Modeling levels per station:")
+        print(json.dumps(modeling_levels, indent=4))
+
 
 # ========================= EOF ====================================================================
