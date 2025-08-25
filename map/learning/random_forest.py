@@ -1,3 +1,7 @@
+import os
+import json
+from datetime import datetime
+
 import numpy as np
 import pandas as pd
 from sklearn.ensemble import RandomForestRegressor
@@ -5,31 +9,72 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import r2_score, mean_squared_error, mean_absolute_error, root_mean_squared_error
 
 DROP_FEATURES = ['MGRS_TILE', 'lat', 'lon']
+VG_PARAMS = ['theta_r', 'theta_s', 'log10_alpha', 'log10_n', 'log10_Ks']
 
 
-def train_random_forest_vg(f):
+def run_rf_training(f, mode='single', levels=None):
+    if levels is None:
+        levels = list(range(1, 8))
+
     df = pd.read_parquet(f)
-    vg_params = ['theta_r', 'theta_s', 'log10_alpha', 'log10_n', 'log10_Ks']
-    rosetta_cols = [c for c in df.columns if any(p in c for p in vg_params)]
+    rosetta_cols = [c for c in df.columns if any(p in c for p in VG_PARAMS)]
+    feature_cols = [c for c in df.columns if c not in rosetta_cols and c not in DROP_FEATURES]
 
-    all_metrics = {p: {vl: None for vl in range(1, 8)} for p in vg_params}
+    all_metrics = {}
 
-    for param in vg_params:
-        for vert_level in range(1, 8):
-            target = f'US_R3H3_L{vert_level}_VG_{param}'
+    if mode == 'single':
+        all_metrics = {p: {vl: None for vl in range(1, 8)} for p in VG_PARAMS}
+        for param in VG_PARAMS:
+            for vert_level in levels:
+                target = f'US_R3H3_L{vert_level}_VG_{param}'
+                if target not in df.columns:
+                    continue
 
-            assert target in df.columns
+                print(f"\n--- Training RF for {target} ---")
+                data = df[[target] + feature_cols].copy()
+                initial_len = len(data)
+                data[data[target] <= -9999] = np.nan
+                data.dropna(subset=[target], inplace=True)
+                print(f'Dropped {initial_len - len(data)} NaN records for {target}')
 
-            feature_cols = [c for c in df.columns if c not in rosetta_cols and c not in DROP_FEATURES]
+                features = data[feature_cols]
+                y = data[target]
 
-            data = df[[target] + feature_cols].copy()
+                x_train, x_test, y_train, y_test = train_test_split(features, y, test_size=0.2, random_state=42)
+
+                model = RandomForestRegressor(n_estimators=250, random_state=42, n_jobs=-1)
+                model.fit(x_train, y_train)
+
+                y_pred = model.predict(x_test)
+
+                metrics = {
+                    'r2': r2_score(y_test, y_pred),
+                    'mse': mean_squared_error(y_test, y_pred),
+                    'mae': mean_absolute_error(y_test, y_pred),
+                    'rmse': root_mean_squared_error(y_test, y_pred),
+                    'mean_val': y.mean().item(),
+                    'std_val': y.std().item(),
+                }
+                all_metrics[param][vert_level] = metrics
+
+    elif mode == 'combined':
+        for vert_level in levels:
+            targets = [f'US_R3H3_L{vert_level}_VG_{p}' for p in VG_PARAMS]
+            if not all(t in df.columns for t in targets):
+                continue
+
+            level_id = f'L{vert_level}_VG_combined'
+            print(f"\n--- Training combined RF for Level {vert_level} ---")
+
+            data = df[targets + feature_cols].copy()
             initial_len = len(data)
-            data[data[target] <= -9999] = np.nan
-            data.dropna(subset=[target], inplace=True)
-            print(f'Dropped {initial_len - len(data)} NaN records')
+            for t in targets:
+                data[data[t] <= -9999] = np.nan
+            data.dropna(subset=targets, inplace=True)
+            print(f'Dropped {initial_len - len(data)} NaN records for Level {vert_level}')
 
             features = data[feature_cols]
-            y = data[target]
+            y = data[targets]
 
             x_train, x_test, y_train, y_test = train_test_split(features, y, test_size=0.2, random_state=42)
 
@@ -38,25 +83,24 @@ def train_random_forest_vg(f):
 
             y_pred = model.predict(x_test)
 
-            metrics = {
-                'r2': r2_score(y_test, y_pred),
-                'mse': mean_squared_error(y_test, y_pred),
-                'mae': mean_absolute_error(y_test, y_pred),
-                'rmse': root_mean_squared_error(y_test, y_pred),
-                'mean_val': y.mean().item(),
-                'std_val': y.std().item(),
-
-            }
-
-            all_metrics[param][vert_level] = metrics
+            metrics = {}
+            for i, target in enumerate(targets):
+                param_name = VG_PARAMS[i]
+                metrics[param_name] = {
+                    'r2': r2_score(y_test.iloc[:, i], y_pred[:, i]),
+                    'rmse': root_mean_squared_error(y_test.iloc[:, i], y_pred[:, i]),
+                    'mae': mean_absolute_error(y_test.iloc[:, i], y_pred[:, i]),
+                    'mean_val': y[target].mean().item(),
+                    'std_val': y[target].std().item(),
+                }
+            all_metrics[level_id] = metrics
+            print(f"Metrics for combined RF model at level {vert_level}: {metrics}")
 
     return all_metrics
 
 
 if __name__ == '__main__':
-    import os
-    import json
-    from datetime import datetime
+
 
     home_ = os.path.expanduser('~')
     root_ = os.path.join(home_, 'data', 'IrrigationGIS', 'soils', 'swapstress', 'training')
@@ -67,12 +111,26 @@ if __name__ == '__main__':
     if not os.path.exists(metrics_dir_):
         os.makedirs(metrics_dir_)
 
+    # Combined mode
     print("=" * 50)
-    print("RUNNING RANDOM FOREST")
-    all_metrics_ = train_random_forest_vg(f_)
+    print("RUNNING RANDOM FOREST in combined mode")
+    all_metrics_ = run_rf_training(f_, mode='combined',  levels=(2, 3, 5, 6))
 
     timestamp_ = datetime.now().strftime('%Y%m%d_%H%M%S')
-    metrics_json_ = os.path.join(metrics_dir_, f'RandomForest_{timestamp_}.json')
+    metrics_json_ = os.path.join(metrics_dir_, f'RandomForest_combined_{timestamp_}.json')
+
+    with open(metrics_json_, 'w') as f:
+        json.dump(all_metrics_, f, indent=4)
+
+    print(f'Wrote RandomForest metrics to {metrics_json_}')
+
+    # Single-target mode
+    print("\n" + "=" * 50)
+    print("RUNNING RANDOM FOREST in single-target mode")
+    all_metrics_ = run_rf_training(f_, mode='single',  levels=(2, 3, 5, 6))
+
+    timestamp_ = datetime.now().strftime('%Y%m%d_%H%M%S')
+    metrics_json_ = os.path.join(metrics_dir_, f'RandomForest_single_{timestamp_}.json')
 
     with open(metrics_json_, 'w') as f:
         json.dump(all_metrics_, f, indent=4)

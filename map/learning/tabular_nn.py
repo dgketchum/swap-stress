@@ -5,7 +5,14 @@ from torchmetrics.regression import R2Score
 import torch.optim as optim
 from torch.utils.data import Dataset
 
-from map.models import LEARNING_RATE, WEIGHT_DECAY
+import pytorch_lightning as pl
+import torch
+import torch.nn as nn
+from torchmetrics.regression import R2Score
+import torch.optim as optim
+from torch.utils.data import Dataset
+
+from map.learning import LEARNING_RATE, WEIGHT_DECAY
 
 
 class TabularDataset(Dataset):
@@ -14,7 +21,8 @@ class TabularDataset(Dataset):
     def __init__(self, X_num, X_cat, y):
         self.X_num = torch.tensor(X_num, dtype=torch.float32)
         self.X_cat = torch.tensor(X_cat, dtype=torch.int64)
-        self.y = torch.tensor(y, dtype=torch.float32).unsqueeze(1)
+        y_tensor = torch.tensor(y, dtype=torch.float32)
+        self.y = y_tensor.unsqueeze(1) if len(y_tensor.shape) == 1 else y_tensor
 
     def __len__(self):
         return len(self.y)
@@ -28,7 +36,8 @@ class TabularDatasetVanilla(Dataset):
 
     def __init__(self, X, y):
         self.X = torch.tensor(X, dtype=torch.float32)
-        self.y = torch.tensor(y, dtype=torch.float32).unsqueeze(1)
+        y_tensor = torch.tensor(y, dtype=torch.float32)
+        self.y = y_tensor.unsqueeze(1) if len(y_tensor.shape) == 1 else y_tensor
 
     def __len__(self):
         return len(self.y)
@@ -38,7 +47,7 @@ class TabularDatasetVanilla(Dataset):
 
 
 class MLPWithEmbeddings(nn.Module):
-    def __init__(self, n_num_features, cat_cardinalities, embedding_dim=10, hidden_dim=128):
+    def __init__(self, n_num_features, cat_cardinalities, embedding_dim=10, hidden_dim=128, n_outputs=1):
         super().__init__()
         self.cat_cardinalities = cat_cardinalities
         self.embeddings = nn.ModuleList([
@@ -49,7 +58,7 @@ class MLPWithEmbeddings(nn.Module):
         self.layers = nn.Sequential(
             nn.Linear(total_features, hidden_dim), nn.ReLU(), nn.BatchNorm1d(hidden_dim), nn.Dropout(0.3),
             nn.Linear(hidden_dim, hidden_dim // 2), nn.ReLU(), nn.BatchNorm1d(hidden_dim // 2), nn.Dropout(0.2),
-            nn.Linear(hidden_dim // 2, 1)
+            nn.Linear(hidden_dim // 2, n_outputs)
         )
 
     def forward(self, x_num, x_cat):
@@ -75,12 +84,12 @@ class MLPWithEmbeddings(nn.Module):
 
 
 class VanillaMLP(nn.Module):
-    def __init__(self, n_features, hidden_dim=128):
+    def __init__(self, n_features, hidden_dim=128, n_outputs=1):
         super().__init__()
         self.layers = nn.Sequential(
             nn.Linear(n_features, hidden_dim), nn.ReLU(), nn.BatchNorm1d(hidden_dim), nn.Dropout(0.3),
             nn.Linear(hidden_dim, hidden_dim // 2), nn.ReLU(), nn.BatchNorm1d(hidden_dim // 2), nn.Dropout(0.2),
-            nn.Linear(hidden_dim // 2, 1)
+            nn.Linear(hidden_dim // 2, n_outputs)
         )
 
     def forward(self, x):
@@ -90,11 +99,11 @@ class VanillaMLP(nn.Module):
 class TabularLightningModule(pl.LightningModule):
     """A generic LightningModule for any of our tabular models."""
 
-    def __init__(self, model):
+    def __init__(self, model, n_outputs=1):
         super().__init__()
         self.model = model
         self.criterion = nn.MSELoss()
-        self.r2_score = R2Score()
+        self.r2_score = R2Score(num_outputs=n_outputs)
         self.test_preds = []
         self.test_targets = []
 
