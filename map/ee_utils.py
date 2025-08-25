@@ -11,9 +11,6 @@ def add_doy(image):
     return i
 
 
-
-
-
 def landsat_c2_sr(input_img):
     # credit: cgmorton; https://github.com/Open-ET/openet-core-beta/blob/master/openet/core/common.py
 
@@ -62,7 +59,6 @@ def landsat_c2_sr(input_img):
 
 
 def get_landsat_collection(start_yr, end_yr, roi):
-
     start = f'{start_yr}-01-01'
     end_date = f'{end_yr}-12-31'
 
@@ -79,8 +75,8 @@ def get_landsat_collection(start_yr, end_yr, roi):
 
     return ee.ImageCollection(l7_coll.merge(l8_coll).merge(l9_coll).merge(l5_coll).merge(l4_coll))
 
-def landsat_composites(start_yr, end_yr, start_doy, end_doy, roi, append_name):
 
+def landsat_composites(start_yr, end_yr, start_doy, end_doy, roi, append_name):
     def evi_(x):
         return x.expression('2.5 * ((NIR-RED) / (NIR + 6 * RED - 7.5* BLUE +1))', {'NIR': x.select('B5'),
                                                                                    'RED': x.select('B4'),
@@ -116,4 +112,3 @@ def landsat_composites(start_yr, end_yr, start_doy, end_doy, roi, append_name):
 if __name__ == '__main__':
     pass
 # ========================= EOF ====================================================================
-

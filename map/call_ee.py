@@ -1,6 +1,6 @@
 import ee
 
-from map.ee_utils import get_world_climate, landsat_composites
+from map.ee_utils import landsat_composites
 from map.cdl import get_cdl
 
 
