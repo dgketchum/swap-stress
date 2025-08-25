@@ -164,7 +164,7 @@ def plot_parameter_influence(results_dir, output_dir):
 
     print("\nGenerating parameter influence plots...")
 
-    psi_range = np.logspace(0, 7, 100)  # Suction range for plotting curves
+    psi_range = np.logspace(0, 7, 100)  # Soil Water Potential range for plotting curves
 
     for p_influence in parameters:
         plt.style.use('seaborn-v0_8-whitegrid')
@@ -175,7 +175,7 @@ def plot_parameter_influence(results_dir, output_dir):
 
         # Plot curves for 10th, 50th, 90th percentiles
         percentiles = ['p10', 'p50', 'p90']
-        labels = ['10th Percentile', '50th Percentile (Median)', '90th Percentile']
+        labels = ['10th Percentile', 'Median', '90th Percentile']
         colors = ['blue', 'green', 'red']
 
         for i, percentile_key in enumerate(percentiles):
@@ -194,7 +194,7 @@ def plot_parameter_influence(results_dir, output_dir):
             ax.plot(vwc_curve, psi_range, color=colors[i], label=f'{symbol} - {labels[i]} ({param_stats[p_influence][percentile_key]:.3f})')
 
         ax.set_yscale('log')
-        ax.set_ylabel('Suction (cm) - Log Scale', fontsize=12)
+        ax.set_ylabel('Soil Water Potential (cm) - Log Scale', fontsize=12)
         ax.set_xlabel('Volumetric Water Content ($cm^3/cm^3$)', fontsize=12)
         ax.set_xlim(right=0.65)
         ax.set_ylim(top=10 ** 7)
@@ -222,7 +222,7 @@ if __name__ == '__main__':
 
     # plot_parameter_summaries(results_dir=results_dir_,
     #                          output_dir=plot_output_dir_)
-
+    #
     # plot_parameter_histograms(results_dir=results_dir_,
     #                           output_dir=plot_output_dir_)
 
