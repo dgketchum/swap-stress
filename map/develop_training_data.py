@@ -6,88 +6,123 @@ import json
 import ee
 import geopandas as gpd
 import pandas as pd
+from shapely.geometry import box
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../EEMapper/map')))
-from map.call_ee import is_authorized
-from map.call_ee import stack_bands_climatology
+from map.call_ee import is_authorized, stack_bands_climatology
 
 
-def get_bands(shapefile_path, bucket, file_prefix, resolution, subset_bands=None, annex_prefix=None):
+def _export_tile_data(roi, points, desc, bucket, file_prefix, resolution, index_col):
+    """Helper function to run and export data for a given ROI and point set."""
+
+    try:
+        stack = stack_bands_climatology(roi, resolution=resolution)
+    except ee.ee_exception.EEException as exc:
+        print(f'{desc} error: {exc}')
+        return
+
+    plot_sample_regions = stack.sampleRegions(
+        collection=points,
+        properties=['MGRS_TILE', index_col],
+        scale=resolution,
+        tileScale=16)
+
+    task = ee.batch.Export.table.toCloudStorage(
+        plot_sample_regions,
+        description=desc,
+        bucket=bucket,
+        fileNamePrefix=f'{file_prefix}/{desc}',
+        fileFormat='CSV')
+
+    task.start()
+    print(f'Started export: {file_prefix}/{desc}')
+
+
+def get_bands(shapefile_path, mgrs_shp_path, bucket, file_prefix, resolution, index_col=None, split_tiles=False,
+              check_dir=None):
     """
     Extract climatological data for a set of points from a local shapefile.
     """
     points_df = gpd.read_file(shapefile_path)
-    mgrs_ee_tiles = ee.FeatureCollection('users/dgketchum/boundaries/MGRS_TILE')
+    mgrs_gdf = gpd.read_file(mgrs_shp_path)
+
+    if index_col not in points_df.columns:
+        raise ValueError(f"Index column '{index_col}' not found in shapefile.")
 
     mgrs_tiles = points_df['MGRS_TILE'].unique()
 
     for tile in mgrs_tiles:
 
-        tile_df = points_df[points_df['MGRS_TILE'] == tile]
-        tile_points = ee.FeatureCollection(tile_df.__geo_interface__)
-
         desc = f'swapstress_{tile}'
-        roi = mgrs_ee_tiles.filter(ee.Filter.eq('MGRS_TILE', tile))
 
-        try:
-            stack = stack_bands_climatology(roi, resolution=resolution)
-        except ee.ee_exception.EEException as exc:
-            print(f'{desc} error: {exc}')
+        if check_dir:
+            expected_path = os.path.join(check_dir, f'{desc}.csv')
+            if os.path.exists(expected_path):
+                print(f'File already exists: {expected_path}. Skipping export.')
+                continue
+
+        tile_df = points_df[points_df['MGRS_TILE'] == tile]
+        if tile_df.empty:
             continue
 
-        export_prefix = file_prefix
-        if subset_bands:
-            if not isinstance(subset_bands, list):
-                raise ValueError("subset_bands must be a list of band names.")
-            stack = stack.select(subset_bands)
-            if annex_prefix:
-                export_prefix = annex_prefix
-            desc = f'swapstress_annex_{tile}'
+        tile_points = ee.FeatureCollection(tile_df.__geo_interface__)
 
-        plot_sample_regions = stack.sampleRegions(
-            collection=tile_points,
-            properties=['MGRS_TILE', 'site_id'],
-            scale=resolution,
-            tileScale=16)
+        mgrs_tile_gdf = mgrs_gdf[mgrs_gdf['MGRS_TILE'] == tile]
+        if mgrs_tile_gdf.empty:
+            print(f'Warning: MGRS tile {tile} not found in {mgrs_shp_path}. Skipping.')
+            continue
 
-        task = ee.batch.Export.table.toCloudStorage(
-            plot_sample_regions,
-            description=desc,
-            bucket=bucket,
-            fileNamePrefix=f'{export_prefix}/{desc}',
-            fileFormat='CSV')
+        if split_tiles:
+            min_lon, min_lat, max_lon, max_lat = mgrs_tile_gdf.geometry.iloc[0].bounds
+            center_lon = (min_lon + max_lon) / 2
+            center_lat = (min_lat + max_lat) / 2
 
-        task.start()
-        print(f'Started export: {export_prefix}/{desc}')
+            quadrants = {
+                'SW': box(min_lon, min_lat, center_lon, center_lat),
+                'SE': box(center_lon, min_lat, max_lon, center_lat),
+                'NW': box(min_lon, center_lat, center_lon, max_lat),
+                'NE': box(center_lon, center_lat, max_lon, max_lat)
+            }
+
+            for name, geom in quadrants.items():
+                desc = f'swapstress_{tile}_{name}'
+                roi_ee_geom = ee.Geometry(geom.__geo_interface__)
+                _export_tile_data(roi=ee.FeatureCollection(roi_ee_geom),
+                                  points=tile_points.filterBounds(roi_ee_geom),
+                                  desc=desc,
+                                  bucket=bucket,
+                                  file_prefix=file_prefix,
+                                  resolution=resolution,
+                                  index_col=index_col)
+        else:
+            geo_json = mgrs_tile_gdf.geometry.iloc[0].__geo_interface__
+            roi_ee_geom = ee.Geometry(geo_json)
+            _export_tile_data(roi=ee.FeatureCollection(roi_ee_geom),
+                              points=tile_points,
+                              desc=desc,
+                              bucket=bucket,
+                              file_prefix=file_prefix,
+                              resolution=resolution,
+                              index_col=index_col)
 
 
-def concatenate_and_join(ee_in_dirs, rosetta_pqt, out_file, categorical_mappings_json=None, categories=None):
+def concatenate_and_join(ee_in_dir, rosetta_pqt, out_file, categorical_mappings_json=None, categories=None):
     """
     Concatenates CSVs from Earth Engine extraction, joins with Rosetta data,
     and saves to a single Parquet file.
     """
-
     if categorical_mappings_json is not None and categories is None:
         raise ValueError
 
-    if isinstance(ee_in_dirs, str):
-        ee_in_dirs = [ee_in_dirs]
-
-    all_csv_files = []
-    for d in ee_in_dirs:
-        csv_files = glob(os.path.join(d, '*.csv'))
-        if not csv_files:
-            print(f"No CSV files found in {d}")
-        all_csv_files.extend(csv_files)
-
-    if not all_csv_files:
-        print("No CSV files found in any provided directory.")
+    csv_files = glob(os.path.join(ee_in_dir, '*.csv'))
+    if not csv_files:
+        print(f"No CSV files found in {ee_in_dir}")
         return
 
-    print(f"Found {len(all_csv_files)} CSV files to concatenate.")
+    print(f"Found {len(csv_files)} CSV files to concatenate.")
     df_list = []
 
-    for f in all_csv_files:
+    for f in csv_files:
         try:
             df_list.append(pd.read_csv(f))
         except pd.errors.EmptyDataError:
@@ -105,7 +140,6 @@ def concatenate_and_join(ee_in_dirs, rosetta_pqt, out_file, categorical_mappings
         return
 
     rosetta_df = pd.read_parquet(rosetta_pqt)
-    # TODO: fix extract to properly concat the columns under 'site_id' index, until then:
     rosetta_df = rosetta_df.groupby('site_id').first()
 
     final_df = ee_df.join(rosetta_df, how='left')
@@ -132,50 +166,39 @@ def concatenate_and_join(ee_in_dirs, rosetta_pqt, out_file, categorical_mappings
 
 if __name__ == '__main__':
 
-    run_gee_extract_ = False
-    if run_gee_extract_:
+    run_gee_extract = True
+    if run_gee_extract:
         is_authorized()
-        root_ = '/media/research/IrrigationGIS'
-        if not os.path.exists(root_):
-            root_ = '/home/dgketchum/data/IrrigationGIS'
+        root = '/home/dgketchum/data/IrrigationGIS'
 
-        shapefile_ = os.path.join(root_, 'soils', 'gis', 'pretraining-roi-10000_mgrs.shp')
-        gcs_bucket_ = 'wudr'
-        output_prefix_ = 'swap-stress/training_data'
+        shapefile = os.path.join(root, 'soils', 'gis', 'pretraining-roi-10000_mgrs.shp')
+        output_prefix = 'swap-stress/training_data'
 
-        get_bands(shapefile_path=shapefile_,
-                  bucket=gcs_bucket_,
-                  file_prefix=output_prefix_,
-                  resolution=4000)
+        # shapefile = '/home/dgketchum/data/IrrigationGIS/soils/soil_potential_obs/mt_mesonet/station_metadata_mgrs.shp'
+        # output_prefix = 'swap-stress/mesonet_training_data'
 
-    run_annex_extract_ = False
-    if run_annex_extract_:
-        is_authorized()
-        root_ = '/media/research/IrrigationGIS'
-        if not os.path.exists(root_):
-            root_ = '/home/dgketchum/data/IrrigationGIS'
+        check_dir_ = os.path.join(root, 'soils', 'swapstress', 'extracts')
 
-        shapefile_ = os.path.join(root_, 'soils', 'gis', 'pretraining-roi-10000_mgrs.shp')
-        gcs_bucket_ = 'wudr'
-        annex_output_prefix_ = 'swap-stress/training_data_annex'
-        bands_to_extract_ = ['tpi_250', 'tpi_500', 'tpi_1250']
+        mgrs_shapefile = os.path.join(root, 'boundaries', 'mgrs', 'mgrs_wgs.shp')
+        gcs_bucket = 'wudr'
 
-        get_bands(shapefile_path=shapefile_,
-                  bucket=gcs_bucket_,
-                  file_prefix=None,
+        get_bands(shapefile_path=shapefile,
+                  mgrs_shp_path=mgrs_shapefile,
+                  bucket=gcs_bucket,
+                  file_prefix=output_prefix,
                   resolution=4000,
-                  subset_bands=bands_to_extract_,
-                  annex_prefix=annex_output_prefix_)
+                  index_col='site_id',
+                  split_tiles=True,
+                  check_dir=check_dir_)
 
-    run_concatenate_ = True
-    if run_concatenate_:
+    run_concatenate = False
+    if run_concatenate:
         ee_extract_dir_ = '/home/dgketchum/data/IrrigationGIS/soils/swapstress/extracts/'
-        annex_extract_dir_ = '/home/dgketchum/data/IrrigationGIS/soils/swapstress/extracts_annex/'
         rosetta_file_ = '/home/dgketchum/data/IrrigationGIS/soils/rosetta/extracted_rosetta_points.parquet'
-        output_file_ = '/home/dgketchum/data/IrrigationGIS/soils/swapstress/training/training_data_combined.parquet'
+        output_file_ = '/home/dgketchum/data/IrrigationGIS/soils/swapstress/training/training_data.parquet'
         mappings_json_ = '/home/dgketchum/data/IrrigationGIS/soils/swapstress/training/categorical_mappings.json'
 
-        concatenate_and_join(ee_in_dirs=[ee_extract_dir_, annex_extract_dir_],
+        concatenate_and_join(ee_in_dir=ee_extract_dir_,
                              rosetta_pqt=rosetta_file_,
                              out_file=output_file_,
                              categorical_mappings_json=mappings_json_,
