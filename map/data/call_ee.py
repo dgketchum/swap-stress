@@ -1,10 +1,10 @@
 import ee
 
-from map.ee_utils import landsat_composites
-from map.cdl import get_cdl
+from map.data.ee_utils import landsat_composites
+from map.data.cdl import get_cdl
 
 
-def stack_bands_climatology(roi, start_yr=1991, end_yr=2020, resolution=4000):
+def stack_bands_climatology(roi, start_yr=1991, end_yr=2020, resolution=4000, subselection=None):
     """
     Create a stack of climatological bands for the roi specified.
     """
@@ -118,10 +118,11 @@ def stack_bands_climatology(roi, start_yr=1991, end_yr=2020, resolution=4000):
 
     nlcd = ee.ImageCollection('USGS/NLCD_RELEASES/2019_REL/NLCD').select('landcover').mosaic().rename('nlcd')
 
-    def get_cdl_simple(y):
-        return get_cdl(y)[2]
+    def get_all_cdl_bands(y):
+        return ee.Image.cat(get_cdl(y))
 
-    cdl_mode = ee.ImageCollection(years.map(get_cdl_simple)).mode().rename('cdl_mode')
+    cdl_collection = ee.ImageCollection(years.map(get_all_cdl_bands))
+    cdl_bands = cdl_collection.mode().rename(['cdl_cultivated_mode', 'cdl_crop_mode', 'cdl_simple_crop_mode'])
 
     gsw = ee.Image('JRC/GSW1_4/GlobalSurfaceWater').select('occurrence').gt(0).unmask(0).rename('gsw')
 
@@ -159,7 +160,6 @@ def stack_bands_climatology(roi, start_yr=1991, end_yr=2020, resolution=4000):
         ee.ImageCollection('projects/sat-io/open-datasets/polaris/alpha_mean').mean().rename('alpha_mean')
     ])
 
-
     static_bands = [coords,
                     terrain,
                     tpi_1250,
@@ -169,16 +169,17 @@ def stack_bands_climatology(roi, start_yr=1991, end_yr=2020, resolution=4000):
                     tpi_10000,
                     tpi_22500,
                     nlcd,
-                    cdl_mode,
+                    cdl_bands,
                     gsw,
                     ssurgo,
                     prism,
                     additional_terrain,
                     polaris]
 
-
     input_bands = input_bands.addBands(static_bands).resample('bilinear').reproject(crs=proj.crs(),
                                                                                     scale=resolution)
+    if subselection:
+        input_bands = input_bands.select(subselection)
 
     return input_bands.clip(roi)
 
