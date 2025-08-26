@@ -13,8 +13,9 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 from torch.utils.data import DataLoader, random_split
 
-from map.learning.tabular_nn import TabularDataset, TabularDatasetVanilla, VanillaMLP, MLPWithEmbeddings, \
-    TabularLightningModule
+from map.learning.dataset import TabularDataset, TabularDatasetVanilla
+
+from map.learning.tabular_nn import VanillaMLP, MLPWithEmbeddings, TabularLightningModule
 from map.learning import VG_PARAMS, DEVICE, DROP_FEATURES
 
 torch.set_float32_matmul_precision('medium')
@@ -22,7 +23,7 @@ EPOCHS = 200
 BATCH_SIZE = 32
 
 
-def prepare_data(df, target_cols, feature_cols, cat_cols, mappings=None, use_one_hot=False):
+def prepare_data(df, target_cols, feature_cols, cat_cols, mappings=None, use_one_hot=False, unscale_predictions=False):
     if isinstance(target_cols, str):
         target_cols = [target_cols]
 
@@ -67,8 +68,8 @@ def prepare_data(df, target_cols, feature_cols, cat_cols, mappings=None, use_one
         return train_dataset, test_dataset, len(num_cols), cat_cardinalities, target_stats
 
 
-def run_training(f, model_type, mappings_json, checkpoint_dir, metrics_dir, mode='single', levels=None):
-
+def run_training(f, model_type, mappings_json, checkpoint_dir, metrics_dir, mode='single', levels=None,
+                 unscale_predictions=False):
     if levels is None:
         levels = [2]
 
@@ -94,11 +95,12 @@ def run_training(f, model_type, mappings_json, checkpoint_dir, metrics_dir, mode
 
                 if model_type == 'MLP':
                     train_ds, test_ds, n_features, _, target_stats = prepare_data(
-                        df, target, feature_cols, cat_cols, use_one_hot=True)
+                        df, target, feature_cols, cat_cols, use_one_hot=True, unscale_predictions=unscale_predictions)
                     model = VanillaMLP(n_features=n_features, n_outputs=1)
                 else:
                     train_ds, test_ds, n_num, cat_cards, target_stats = prepare_data(
-                        df, target, feature_cols, cat_cols, mappings=mappings, use_one_hot=False)
+                        df, target, feature_cols, cat_cols, mappings=mappings, use_one_hot=False,
+                        unscale_predictions=unscale_predictions)
                     if model_type == 'MLPEmbeddings':
                         model = MLPWithEmbeddings(n_num_features=n_num, cat_cardinalities=cat_cards, n_outputs=1)
                     elif model_type == 'FTTransformer':
@@ -150,11 +152,12 @@ def run_training(f, model_type, mappings_json, checkpoint_dir, metrics_dir, mode
 
             if model_type == 'MLP':
                 train_ds, test_ds, n_features, _, target_stats = prepare_data(
-                    df, targets, feature_cols, cat_cols, use_one_hot=True)
+                    df, targets, feature_cols, cat_cols, use_one_hot=True, unscale_predictions=unscale_predictions)
                 model = VanillaMLP(n_features=n_features, n_outputs=n_outputs)
             else:
                 train_ds, test_ds, n_num, cat_cards, target_stats = prepare_data(
-                    df, targets, feature_cols, cat_cols, mappings=mappings, use_one_hot=False)
+                    df, targets, feature_cols, cat_cols, mappings=mappings, use_one_hot=False,
+                    unscale_predictions=unscale_predictions)
                 if model_type == 'MLPEmbeddings':
                     model = MLPWithEmbeddings(n_num_features=n_num, cat_cardinalities=cat_cards, n_outputs=n_outputs)
                 elif model_type == 'FTTransformer':
@@ -224,6 +227,7 @@ if __name__ == '__main__':
 
         print("\n\n" + "=" * 50)
         print(f"RUNNING {model_name.upper()} in combined-target mode")
-        run_training(f, model_name, mappings_json, checkpoint_dir_, metrics_, mode='combined', levels=(2, 3, 5, 6))
+        run_training(f, model_name, mappings_json, checkpoint_dir_, metrics_, mode='combined',
+                     levels=(2, 3, 5, 6), unscale_predictions=False)
 
 # ========================= EOF ====================================================================

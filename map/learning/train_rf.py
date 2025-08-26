@@ -124,16 +124,4 @@ if __name__ == '__main__':
 
     print(f'Wrote RandomForest metrics to {metrics_json_}')
 
-    # Single-target mode
-    print("\n" + "=" * 50)
-    print("RUNNING RANDOM FOREST in single-target mode")
-    all_metrics_ = run_rf_training(f_, mode='single',  levels=(2, 3, 5, 6))
-
-    timestamp_ = datetime.now().strftime('%Y%m%d_%H%M%S')
-    metrics_json_ = os.path.join(metrics_dir_, f'RandomForest_single_{timestamp_}.json')
-
-    with open(metrics_json_, 'w') as f:
-        json.dump(all_metrics_, f, indent=4)
-
-    print(f'Wrote RandomForest metrics to {metrics_json_}')
 # ========================= EOF ====================================================================
