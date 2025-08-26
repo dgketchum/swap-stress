@@ -1,49 +1,10 @@
 import pytorch_lightning as pl
 import torch
 import torch.nn as nn
-from torchmetrics.regression import R2Score
 import torch.optim as optim
-from torch.utils.data import Dataset
-
-import pytorch_lightning as pl
-import torch
-import torch.nn as nn
 from torchmetrics.regression import R2Score
-import torch.optim as optim
-from torch.utils.data import Dataset
 
 from map.learning import LEARNING_RATE, WEIGHT_DECAY
-
-
-class TabularDataset(Dataset):
-    """Custom Dataset for tabular data with separate numerical and categorical features."""
-
-    def __init__(self, X_num, X_cat, y):
-        self.X_num = torch.tensor(X_num, dtype=torch.float32)
-        self.X_cat = torch.tensor(X_cat, dtype=torch.int64)
-        y_tensor = torch.tensor(y, dtype=torch.float32)
-        self.y = y_tensor.unsqueeze(1) if len(y_tensor.shape) == 1 else y_tensor
-
-    def __len__(self):
-        return len(self.y)
-
-    def __getitem__(self, idx):
-        return (self.X_num[idx], self.X_cat[idx]), self.y[idx]
-
-
-class TabularDatasetVanilla(Dataset):
-    """Custom Dataset for tabular data with a single flattened feature tensor."""
-
-    def __init__(self, X, y):
-        self.X = torch.tensor(X, dtype=torch.float32)
-        y_tensor = torch.tensor(y, dtype=torch.float32)
-        self.y = y_tensor.unsqueeze(1) if len(y_tensor.shape) == 1 else y_tensor
-
-    def __len__(self):
-        return len(self.y)
-
-    def __getitem__(self, idx):
-        return self.X[idx], self.y[idx]
 
 
 class MLPWithEmbeddings(nn.Module):
@@ -101,6 +62,7 @@ class TabularLightningModule(pl.LightningModule):
 
     def __init__(self, model, n_outputs=1):
         super().__init__()
+        self.save_hyperparameters(ignore=['model'])
         self.model = model
         self.criterion = nn.MSELoss()
         self.r2_score = R2Score(num_outputs=n_outputs)
@@ -138,17 +100,25 @@ class TabularLightningModule(pl.LightningModule):
         self.test_preds.append(y_hat.cpu().numpy())
         self.test_targets.append(y.cpu().numpy())
 
+    def predict_step(self, batch, batch_idx, dataloader_idx=0):
+        x, y = batch
+        return self(x)
+
     def configure_optimizers(self):
-        optimizer = optim.AdamW(self.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY)
+        lr = getattr(self, 'learning_rate', LEARNING_RATE)
+        print(f"Configuring optimizer with learning rate: {lr}")
+
+        trainable_params = filter(lambda p: p.requires_grad, self.parameters())
+
+        optimizer = optim.AdamW(trainable_params, lr=lr, weight_decay=WEIGHT_DECAY)
         return {
             'optimizer': optimizer,
             'lr_scheduler': {
                 'scheduler': optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=5,
-                                                                  verbose=True),
+                                                                  verbose=False),
                 'monitor': 'val_loss',
             }
         }
-
 
 if __name__ == '__main__':
     pass
