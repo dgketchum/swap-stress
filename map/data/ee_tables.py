@@ -5,7 +5,8 @@ import json
 import pandas as pd
 
 
-def concatenate_and_join(ee_in_dir, rosetta_pqt, out_file, categorical_mappings_json=None, categories=None):
+def concatenate_and_join(ee_in_dir, rosetta_pqt, out_file, index_col='site_id',
+                         categorical_mappings_json=None, categories=None):
     """
     Concatenates CSVs from Earth Engine extraction, joins with Rosetta data,
     and saves to a single Parquet file.
@@ -32,14 +33,14 @@ def concatenate_and_join(ee_in_dir, rosetta_pqt, out_file, categorical_mappings_
     ee_df = pd.concat(df_list, ignore_index=True)
     ee_df = ee_df.drop(columns=['.geo', 'system:index', 'MGRS_TILE'])
 
-    if 'site_id' in ee_df.columns:
-        ee_df.set_index('site_id', inplace=True)
-    else:
-        print("Fatal: 'site_id' column not found in Earth Engine data. Cannot join.")
-        return
+    ee_df.set_index(index_col, inplace=True)
 
     rosetta_df = pd.read_parquet(rosetta_pqt)
-    rosetta_df = rosetta_df.groupby('site_id').first()
+    rosetta_df = rosetta_df.groupby(index_col).first()
+
+    for col in ee_df.columns.to_list():
+        if col in rosetta_df:
+            ee_df = ee_df.drop(columns=[col])
 
     final_df = ee_df.join(rosetta_df, how='left')
     final_df = final_df[sorted(final_df.columns.to_list())]
@@ -64,6 +65,7 @@ def concatenate_and_join(ee_in_dir, rosetta_pqt, out_file, categorical_mappings_
 
 
 if __name__ == '__main__':
+    """"""
     run_mt_mesonet_workflow = True
     run_general_workflow = False
 
@@ -78,6 +80,7 @@ if __name__ == '__main__':
         concatenate_and_join(ee_in_dir=extracts_dir_,
                              rosetta_pqt=rosetta_file_,
                              out_file=output_file_,
+                             index_col='station',
                              categorical_mappings_json=mappings_json_,
                              categories=['cdl_mode', 'nlcd'])
 
@@ -90,6 +93,7 @@ if __name__ == '__main__':
         concatenate_and_join(ee_in_dir=extracts_dir_,
                              rosetta_pqt=rosetta_file_,
                              out_file=output_file_,
+                             index_col='site_id',
                              categorical_mappings_json=mappings_json_,
                              categories=['cdl_mode', 'nlcd'])
 # ========================= EOF ====================================================================

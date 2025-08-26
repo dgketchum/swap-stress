@@ -4,7 +4,7 @@ import ee
 import geopandas as gpd
 from shapely.geometry import box
 
-from ..call_ee import stack_bands_climatology, is_authorized
+from map.data.call_ee import stack_bands_climatology, is_authorized
 
 
 def _export_tile_data(roi, points, desc, bucket, file_prefix, resolution, index_col):
@@ -102,6 +102,7 @@ def get_bands(shapefile_path, mgrs_shp_path, bucket, file_prefix, resolution, in
 
 
 if __name__ == '__main__':
+    """"""
     run_mt_mesonet_workflow = True
     run_general_workflow = False
 
