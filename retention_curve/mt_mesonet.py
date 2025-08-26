@@ -77,9 +77,12 @@ def preprocess_mt_mesonet(swp_csv_path, metadata_csv_path, output_dir,
     stations = merged_df[station_col].unique()
     print(f"\nFound {len(stations)} unique stations. Splitting full data into Parquet files...")
 
+    parquet_dir = os.path.join(output_dir, 'preprocessed_by_station')
+    os.makedirs(parquet_dir, exist_ok=True)
+
     for station in stations:
         station_df = merged_df[merged_df[station_col] == station]
-        out_filename = os.path.join(output_dir, 'preprocessed_by_station', f'{station}.parquet')
+        out_filename = os.path.join(parquet_dir, f'{station}.parquet')
         station_df.to_parquet(out_filename, index=False)
 
     print("Preprocessing complete.")
