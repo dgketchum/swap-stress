@@ -1,4 +1,5 @@
 import os
+import time
 import json
 import pandas as pd
 import numpy as np
@@ -12,9 +13,10 @@ class SWRC:
     fit the van Genuchten-Mualem model for one or more soil depths,
     and visualize the results.
 
-    This class uses the lmfit library and follows the best practices outlined
-    in the comprehensive guide, including using the Trust Region Reflective ('trf')
-    algorithm and data-driven initial parameter guesses with physical bounds.
+    Reference:
+    Memari, S.S. and Clement, T.P., 2021. PySWR-A Python code for fitting soil water
+    retention functions. Computers & Geosciences, 156, p.104897.
+
     """
 
     def __init__(self, filepath=None, depth_col=None):
@@ -88,10 +90,10 @@ class SWRC:
         params['theta_s'].set(value=theta_s_init, min=theta_s_init * 0.9, max=theta_s_init * 1.1)
         params['theta_r'].set(value=theta_r_init, min=0.0, max=theta_r_init * 1.1)
         params['alpha'].set(value=alpha_init, min=1e-5, max=5.0)
-        params['n'].set(value=n_init, min=1.01, max=10.0)
+        params['n'].set(value=n_init, min=1.001, max=10.0)
         return params
 
-    def fit(self, report=False):
+    def fit(self, report=False, method='nelder-meade'):
         """
         Fits the van Genuchten model to the SWRC data for each depth.
 
@@ -100,13 +102,19 @@ class SWRC:
 
         Returns:
             dict: A dictionary of lmfit.model.ModelResult objects, keyed by depth.
+            :param report:
+            :param method:
         """
         self.fit_results = {}
         for depth, data_df in self.data_by_depth.items():
             print(f"--- Fitting for Depth: {depth} cm ---")
+            print(f"--- {len(data_df)} data points ---")
             initial_params = self._generate_initial_params(data_df)
+            print(f'--- Initial Parameter Values ---')
+            [print(f'{k}: {v.value:.3f}') for k, v in initial_params.items()]
             try:
-                result = self._vg_model.fit(data_df['theta'], initial_params, psi=data_df['suction'], method='trf')
+                result = self._vg_model.fit(data_df['theta'], initial_params, psi=data_df['suction'],
+                                            method=method, nan_policy='raise')
                 self.fit_results[depth] = result
                 if report:
                     print(result.fit_report())
@@ -115,6 +123,89 @@ class SWRC:
                 self.fit_results[depth] = None
         print("\nAll fits complete.")
         return self.fit_results
+
+    def test_fit_methods(self, methods_to_test, depth=None):
+        """
+        Tests multiple fitting algorithms and returns a summary DataFrame.
+
+        Args:
+            methods_to_test (list): A list of strings with the names of the
+                                    fitting methods to test.
+            depth (any, optional): The specific depth to test. If None, the first
+                                   available depth is used.
+
+        Returns:
+            pandas.DataFrame: A DataFrame summarizing the results, sorted by AIC.
+        """
+        if not self.data_by_depth:
+            print("No data loaded.")
+            return
+
+        if depth is None:
+            depth = next(iter(self.data_by_depth))
+
+        data_df = self.data_by_depth.get(depth)
+        if data_df is None:
+            print(f"Depth {depth} not found in data.")
+            return
+
+        print(f"--- Testing Fit Methods for Depth: {depth} cm ---")
+
+        # Clean data once
+        data_df = data_df.dropna(subset=['suction', 'theta'])
+        data_df = data_df[np.isfinite(data_df['suction']) & np.isfinite(data_df['theta'])]
+
+        initial_params = self._generate_initial_params(data_df)
+        results_list = []
+
+        for method in methods_to_test:
+            print(f"\n--- Testing method: {method} ---")
+            start_time = time.time()
+            try:
+                result = self._vg_model.fit(data_df['theta'], initial_params,
+                                            psi=data_df['suction'],
+                                            method=method, nan_policy='raise')
+
+                duration = time.time() - start_time
+                if result.success:
+                    summary = {'method': method, 'success': True, 'AIC': result.aic, 'BIC': result.bic,
+                               'time (s)': duration}
+                    for param_name, param_obj in result.params.items():
+                        summary[f'{param_name}'] = param_obj.value
+                        summary[f'{param_name}_stderr'] = param_obj.stderr
+                    results_list.append(summary)
+                else:
+                    results_list.append(
+                        {'method': method, 'success': False, 'AIC': np.inf, 'BIC': np.inf, 'time (s)': duration})
+
+            except Exception as e:
+                duration = time.time() - start_time
+                print(f"Method '{method}' failed with an error: {e}")
+                results_list.append(
+                    {'method': method, 'success': False, 'AIC': np.inf, 'BIC': np.inf, 'time (s)': duration})
+
+        if not results_list:
+            print("No methods completed successfully.")
+            return pd.DataFrame()
+
+        results_df = pd.DataFrame(results_list)
+        results_df = results_df.sort_values(by='AIC', ascending=True).reset_index(drop=True)
+
+        param_names = ['theta_r', 'theta_s', 'alpha', 'n']
+
+        rel_err_series = []
+        for p in param_names:
+            val_col = f'{p}'
+            err_col = f'{p}_stderr'
+            if val_col in results_df.columns and err_col in results_df.columns:
+                rel_err = (results_df[err_col] / np.abs(results_df[val_col])) * 100
+                rel_err_series.append(rel_err)
+
+        if rel_err_series:
+            avg_rel_err = pd.concat(rel_err_series, axis=1).mean(axis=1)
+            results_df['avg_rel_err (%)'] = avg_rel_err
+
+        return results_df
 
     def plot(self, save_path=None, show=True, colormap='plasma'):
         """
@@ -173,7 +264,7 @@ class SWRC:
         ax.grid(True, which="both", ls="--", c='0.7')
 
         ax.set_xlim(right=0.65)
-        ax.set_ylim(top=10**7)
+        ax.set_ylim(top=10 ** 7)
 
         plt.tight_layout()
 
@@ -243,6 +334,76 @@ class SWRC:
         print(f"Successfully saved fit results to {output_path}")
 
 
+def test_fit_methods_across_stations(station_files, results_dir):
+    """
+    Tests a curated list of fitting methods across multiple station files,
+    aggregates the results, and identifies the best overall method.
+
+    The best method is determined by the lowest total AIC across all successful fits.
+
+    Args:
+        station_files (list): A list of file paths to the station data.
+        results_dir (str): Path to the directory to save the summary CSV.
+
+    Returns:
+        pandas.DataFrame: A summary DataFrame ranking the methods.
+    """
+
+    methods_to_test = [
+        'least_squares',  # Recommended: Local, bound-aware (TRF)
+        'lbfgsb',  # Recommended: General-purpose, bound-aware
+        'trust-constr',  # Recommended: Trust-region for constraints
+        'slsqp',  # Alternate: Constrained optimizer
+        'nelder',  # Fallback: Simplex method (gradient-free)
+        'differential_evolution'  # Global: Very robust, but slower
+    ]
+
+    all_results = []
+    total_files = len(station_files)
+
+    for i, station_file in enumerate(station_files):
+        station_name = os.path.basename(station_file).replace('.parquet', '')
+        print(f"\n--- Processing Station {i + 1}/{total_files}: {station_name} ---")
+
+        if not os.path.exists(station_file):
+            print(f"File not found: {station_file}. Skipping.")
+            continue
+
+        try:
+            swrc_fitter = SWRC(filepath=station_file, depth_col='Depth [cm]')
+            results_df = swrc_fitter.test_fit_methods(methods_to_test)
+
+            if results_df is not None and not results_df.empty:
+                results_df['station'] = station_name
+                all_results.append(results_df)
+        except Exception as e:
+            print(f"Could not process station {station_name}. Error: {e}")
+
+    if not all_results:
+        print("No results were generated. Exiting.")
+        return pd.DataFrame()
+
+    master_df = pd.concat(all_results, ignore_index=True)
+    param_cols = ['theta_r', 'theta_s', 'alpha', 'n']
+    stderr_cols = [f'{c}_stderr' for c in param_cols]
+    dropna_cols = param_cols + stderr_cols
+    master_df = master_df.dropna(subset=dropna_cols)
+    summary = master_df.groupby('method').agg(
+        total_aic=('AIC', 'sum'),
+        avg_theta_r_rel_err=('avg_rel_err (%)', 'mean'),
+        avg_time=('time (s)', 'mean'),
+        num_successes=('success', lambda x: x.sum()),
+        num_runs=('success', 'count')
+    ).reset_index()
+
+    summary['num_failures'] = summary['num_runs'] - summary['num_successes']
+    summary = summary.sort_values(by='total_aic', ascending=True).reset_index(drop=True)
+
+    master_df.to_csv(os.path.join(results_dir, 'all_stations_detailed_fit_results.csv'), index=False)
+    summary.to_csv(os.path.join(results_dir, 'overall_method_summary.csv'), index=False)
+
+    return summary
+
 if __name__ == '__main__':
 
     home_ = os.path.expanduser('~')
@@ -251,21 +412,29 @@ if __name__ == '__main__':
     data_ = os.path.join(root, 'preprocessed_by_station')
     results_ = os.path.join(root, 'results_by_station')
     plots_ = os.path.join(root, 'station_swrc_plots')
+    fitting_comp = os.path.join(root, 'curve_fitting_comparison')
+
+    test_algorithms = False
+    run_fit = True
 
     station_files = [os.path.join(data_, f) for f in os.listdir(data_)]
 
-    for station_file_ in station_files:
+    if test_algorithms:
+        test_fit_methods_across_stations(station_files, fitting_comp)
 
-        plt_file = os.path.join(plots_, os.path.basename(station_file_.replace('parquet', 'png')))
+    if run_fit:
+        method_ = 'slsqp'
+        for station_file_ in station_files:
+            plt_file = os.path.join(plots_, os.path.basename(station_file_.replace('.parquet', f'_{method_}.png')))
 
-        if os.path.exists(station_file_):
-            swrc_fitter_ = SWRC(filepath=station_file_, depth_col='Depth [cm]')
-            swrc_fitter_.fit(report=True)
-            swrc_fitter_.plot(show=False, save_path=plt_file)
-            swrc_fitter_.save_results(output_dir=results_)
-            print(f'processed {station_file_}')
+            if os.path.exists(station_file_):
+                swrc_fitter_ = SWRC(filepath=station_file_, depth_col='Depth [cm]')
+                swrc_fitter_.fit(report=False, method=method_)
+                swrc_fitter_.plot(show=False, save_path=plt_file)
+                swrc_fitter_.save_results(output_dir=results_)
+                print(f'processed {station_file_}')
 
-        else:
-            print(f"Error: Data file not found at {station_file_}")
+            else:
+                print(f"Error: Data file not found at {station_file_}")
 
 # ========================= EOF ====================================================================
