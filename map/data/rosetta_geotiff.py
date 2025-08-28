@@ -10,7 +10,7 @@ import rasterio.sample
 from rasterio.windows import bounds
 from shapely.geometry import box
 
-from map import ROSETTA_CRS
+from map.data import ROSETTA_CRS
 
 ROSETTA_VG_PARAMS = ['theta_r', 'theta_s', 'log10_alpha', 'log10_n', 'log10_Ks']
 
