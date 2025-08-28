@@ -90,7 +90,7 @@ def prepare_finetune_data(empirical_df, training_df, feature_cols, cat_cols, num
                                  features_df[cat_cols].values,
                                  y)
 
-    return dataset
+    return dataset, data
 
 
 class FineTuner:
@@ -170,6 +170,7 @@ class FineTuner:
 def run_finetuning_workflow(rosetta_training_data, empirical_finetune_data, mappings_json, checkpoint_dir, levels):
     training_df_ = pd.read_parquet(rosetta_training_data)
     empirical_df_ = pd.read_parquet(empirical_finetune_data)
+    finetuning_split_path = os.path.join(os.path.dirname(empirical_finetune_data), 'finetuning_split_info.json')
 
     with open(mappings_json, 'r') as f:
         mappings_ = json.load(f)
@@ -194,7 +195,7 @@ def run_finetuning_workflow(rosetta_training_data, empirical_finetune_data, mapp
             if best_ckpt_:
                 print(f"Preparing data for fine-tuning {target_name_}...")
                 use_one_hot_ = model_type_ == 'MLP'
-                finetune_dataset = prepare_finetune_data(
+                finetune_dataset, finetune_df = prepare_finetune_data(
                     empirical_df_,
                     training_df_,
                     feature_cols_,
@@ -208,7 +209,8 @@ def run_finetuning_workflow(rosetta_training_data, empirical_finetune_data, mapp
                 n_outputs_ = len(targets_)
                 if model_type_ == 'MLP':
                     n_features_ = len(
-                        pd.get_dummies(training_df_[feature_cols_], columns=cat_cols_, dummy_na=False, dtype=int).columns)
+                        pd.get_dummies(training_df_[feature_cols_], columns=cat_cols_, dummy_na=False,
+                                       dtype=int).columns)
                     base_model_ = VanillaMLP(n_features=n_features_, n_outputs=n_outputs_)
                 elif model_type_ == 'MLPEmbeddings':
                     base_model_ = MLPWithEmbeddings(n_num_features=len(num_cols_), cat_cardinalities=cat_cardinalities_,
@@ -219,10 +221,24 @@ def run_finetuning_workflow(rosetta_training_data, empirical_finetune_data, mapp
                         ffn_d_hidden=32, residual_dropout=0.0,
                         n_blocks=3, attention_dropout=0.2, ffn_dropout=0.2, d_out=n_outputs_)
 
-                pl_module_ = TabularLightningModule.load_from_checkpoint(best_ckpt_, model=base_model_, n_outputs=n_outputs_)
+                pl_module_ = TabularLightningModule.load_from_checkpoint(best_ckpt_, model=base_model_,
+                                                                         n_outputs=n_outputs_)
 
                 finetune_config_ = {'lr': 5e-6, 'epochs': 30, 'freeze_layers': 2, 'batch_size': 8}
-                train_ds_, val_ds_ = random_split(finetune_dataset, [0.8, 0.2])
+                train_ds_, val_ds_ = random_split(finetune_dataset, [0.8, 0.2],
+                                                  generator=torch.Generator().manual_seed(42))
+
+                train_indices = train_ds_.indices
+                val_indices = val_ds_.indices
+
+                train_info = finetune_df.iloc[train_indices].to_dict(orient='index')
+                val_info = finetune_df.iloc[val_indices].to_dict(orient='index')
+
+                # TODO: read this data into the test function
+                split_data = {'train': train_info, 'validation': val_info}
+                with open(finetuning_split_path, 'w') as f:
+                    json.dump(split_data, f, indent=2)
+                print(f"Saved fine-tuning split info to {finetuning_split_path}")
 
                 tuner_ = FineTuner(pl_module_, train_ds_, val_ds_, config=finetune_config_)
                 finetuned_ckpt_dir_ = os.path.join(checkpoint_dir, 'fine_tuned')
