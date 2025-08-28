@@ -1,14 +1,18 @@
-import os
 import json
+import os
+import re
 from glob import glob
+
+import matplotlib.pyplot as plt
+from matplotlib.patches import Patch
 
 import numpy as np
 import pandas as pd
 import seaborn as sns
-import matplotlib.pyplot as plt
-from sklearn.metrics import r2_score, root_mean_squared_error
+from sklearn.metrics import r2_score, mean_squared_error, mean_absolute_error, root_mean_squared_error
 
-from retention_curve import PARAM_SYMBOLS, ROSETTA_LEVEL_DEPTHS, ROSETTA_NOMINAL_DEPTHS, EMPIRICAL_TO_ROSETTA_LEVEL_MAP, map_empirical_to_rosetta_level
+from retention_curve import PARAM_SYMBOLS, EMPIRICAL_TO_ROSETTA_LEVEL_MAP
+
 
 def _van_genuchten_model(psi, theta_r, theta_s, alpha, n):
     """Helper function to calculate VWC from van Genuchten parameters."""
@@ -26,24 +30,23 @@ class SWRCComparison:
     Sources can include Rosetta, a pre-trained ML model, and a fine-tuned ML model.
     """
 
-    def __init__(self, empirical_results_dir, station_metadata_path,
+    def __init__(self, empirical_results_dir,
                  rosetta_path, pretrained_predictions_path, finetuned_predictions_path,
-                 finetuning_split_path):
+                 finetuning_split_path, levels=None):
         """
         Initializes the comparator.
 
         Args:
             empirical_results_dir (str): Path to the directory with empirical fit JSONs.
-            station_metadata_path (str): Path to the station metadata CSV.
             rosetta_path (str): Path to the Parquet file with Rosetta parameters.
             pretrained_predictions_path (str): Path to the Parquet file with pre-trained ML predictions.
             finetuned_predictions_path (str): Path to the Parquet file with fine-tuned ML predictions.
             finetuning_split_path (str): Path to the JSON file with fine-tuning train/val split info.
         """
         self.metrics = {}
+        self.levels = levels
         self.comparison_df = self._create_comparison_table(
             empirical_results_dir,
-            station_metadata_path,
             rosetta_path,
             pretrained_predictions_path,
             finetuned_predictions_path,
@@ -67,44 +70,72 @@ class SWRCComparison:
                     continue
                 row = {'station': station_name, 'depth': int(depth)}
                 for param, values in results['parameters'].items():
-                    row[f'{param}_emp'] = values['value']
+                    row[f'station_{param}'] = values['value']
                 all_results.append(row)
         return pd.DataFrame(all_results)
 
-    def _create_comparison_table(self, empirical_dir, metadata_path, rosetta_path,
+    def _create_comparison_table(self, empirical_dir, rosetta_path,
                                  pretrained_path, finetuned_path, finetuning_split_path):
         """Merges data from all sources into a single DataFrame for comparison."""
-        empirical_df = self._load_empirical_results(empirical_dir)
-        meta_df = pd.read_csv(metadata_path)
-        base_df = pd.merge(empirical_df, meta_df, on='station', how='left')
 
         params = ['theta_r', 'theta_s', 'alpha', 'n']
+        base_df = self._load_empirical_results(empirical_dir)
+        base_df['rosetta_level'] = base_df['depth'].map(EMPIRICAL_TO_ROSETTA_LEVEL_MAP)
+        params_to_melt = [f'station_{p}' for p in params]
 
-        def merge_source(df, source_path, suffix):
-            if os.path.exists(source_path):
-                source_df = pd.read_parquet(source_path)
+        base_df = base_df.melt(
+            id_vars=['station', 'rosetta_level'],
+            value_vars=params_to_melt,
+            var_name='param',
+            value_name='value'
+        )
+        base_df['level_param'] = base_df.apply(lambda r: f'L{r['rosetta_level']}_{r['param']}', axis=1)
+        base_df = base_df.pivot_table(
+            index='station',
+            columns='level_param',
+            values='value',
+            aggfunc='mean'
+        ).reset_index()
+        pattern = r'L([1-7])_station_'
+        replacement = r'station_L\1_'
+        base_df.columns = base_df.columns.str.replace(pattern, replacement, regex=True)
 
-                # TODO: still with the sparse output from the extract
-                if 'rosetta' in source_path:
-                    source_df = source_df.groupby('station').first()
+        rosetta_df = pd.read_parquet(rosetta_path)
+        rosetta_df = rosetta_df.groupby('station').first()
+        rosetta_df['station'] = rosetta_df.index
+        rosetta_df.index = list(range(len(rosetta_df)))
+        drops = [c for c in rosetta_df.columns if 'US_R3H3' not in c]
+        drops.remove('station')
+        rosetta_df = rosetta_df.drop(columns=drops)
+        pattern = r'US_R3H3_L([1-7])_VG_'
+        replacement = r'rosetta_L\1_'
+        rosetta_df.columns = rosetta_df.columns.str.replace(pattern, replacement, regex=True)
+        base_df = pd.merge(base_df, rosetta_df, on='station', how='left')
 
-                if 'station' not in source_df.columns or 'depth' not in source_df.columns:
-                    print(f"Warning: '{source_path}' is missing 'station' or 'depth' columns.")
-                    return df
+        pretrain_df = pd.read_parquet(pretrained_path)
+        pretrain_df = pretrain_df.drop(columns=['longitude', 'latitude'])
+        pretrain_df['station'] = pretrain_df.index
+        pretrain_df.index = list(range(len(pretrain_df)))
+        pattern = r'US_R3H3_L([1-7])_VG_'
+        replacement = r'pretrain_L\1_'
+        pretrain_df.columns = pretrain_df.columns.str.replace(pattern, replacement, regex=True)
+        base_df = pd.merge(base_df, pretrain_df, on='station', how='left')
 
-                renames = {p: f'{p}{suffix}' for p in params if p in source_df.columns}
-                source_df.rename(columns=renames, inplace=True)
-                merge_cols = ['station', 'depth'] + list(renames.values())
-                df = pd.merge(df, source_df[merge_cols], on=['station', 'depth'], how='left')
-            else:
-                print(f"Warning: Data file not found at {source_path}")
-            return df
+        finetune_df = pd.read_parquet(finetuned_path)
+        finetune_df = finetune_df.drop(columns=['longitude', 'latitude'])
+        finetune_df['station'] = finetune_df.index
+        finetune_df.index = list(range(len(finetune_df)))
+        pattern = r'US_R3H3_L([1-7])_VG_'
+        replacement = r'finetune_L\1_'
+        finetune_df.columns = finetune_df.columns.str.replace(pattern, replacement, regex=True)
+        base_df = pd.merge(base_df, finetune_df, on='station', how='left')
 
-        base_df = merge_source(base_df, rosetta_path, '_ros')
-        base_df = merge_source(base_df, pretrained_path, '_ml_pre')
-        base_df = merge_source(base_df, finetuned_path, '_ml_ft')
+        if self.levels:
+            filtered_strings = [
+                s for s in base_df.columns if (match := re.search(r'L([1-7])', s))
+                                              and int(match.group(1)) in self.levels]
+            base_df = base_df[['station'] + filtered_strings]
 
-        # Add fine-tuning set information
         if os.path.exists(finetuning_split_path):
             with open(finetuning_split_path, 'r') as f:
                 split_info = json.load(f)
@@ -131,28 +162,69 @@ class SWRCComparison:
 
     def calculate_metrics(self, sources):
         """Calculates R² and RMSE for each source against the empirical data."""
+
         params = ['theta_r', 'theta_s', 'alpha', 'n']
+        prefix_map = {'_ros': 'rosetta', '_ml_pre': 'pretrain', '_ml_ft': 'finetune'}
+
+        levels_to_process = self.levels
+        if not levels_to_process:
+            all_levels = set()
+            for col in self.comparison_df.columns:
+                if match := re.search(r'_L(\d+)_', col):
+                    all_levels.add(int(match.group(1)))
+            levels_to_process = sorted(list(all_levels))
+
         for param in params:
-            self.metrics[param] = {}
-            y_true_col = f'{param}_emp'
-            if y_true_col not in self.comparison_df.columns:
+
+            if param not in ['alpha', 'n']:
                 continue
-            clean_df = self.comparison_df.dropna(subset=[y_true_col])
-            y_true = clean_df[y_true_col]
-            for prefix, name in sources.items():
-                y_pred_col = f'{param}{prefix}'
-                if y_pred_col not in clean_df.columns:
+
+            self.metrics[param] = {}
+            for level in levels_to_process:
+                self.metrics[param][level] = {}
+                y_true_col = f'station_L{level}_{param}'
+                if y_true_col not in self.comparison_df.columns:
                     continue
-                y_pred = clean_df[y_pred_col]
-                valid_indices = y_true.index.intersection(y_pred.dropna().index)
-                if valid_indices.empty:
-                    continue
-                y_true_aligned = y_true.loc[valid_indices]
-                y_pred_aligned = y_pred.loc[valid_indices]
-                self.metrics[param][name] = {
-                    'r2': r2_score(y_true_aligned, y_pred_aligned),
-                    'rmse': root_mean_squared_error(y_true_aligned, y_pred_aligned),
-                }
+
+                y_true = self.comparison_df[y_true_col]
+
+                for prefix, name in sources.items():
+                    pred_prefix = prefix_map.get(prefix)
+
+                    if prefix != '_ros':
+                        continue
+
+                    if not pred_prefix:
+                        continue
+
+                    y_pred_col = f'{pred_prefix}_L{level}_{param}'
+                    if y_pred_col not in self.comparison_df.columns:
+                        y_pred_col = f'{pred_prefix}_L{level}_log10_{param}'
+                        assert y_pred_col in self.comparison_df.columns
+                        exponentiate = True
+                    else:
+                        exponentiate = False
+
+                    y_pred = self.comparison_df[y_pred_col]
+                    df = pd.DataFrame({'true': y_true, 'pred': y_pred}).dropna()
+                    if exponentiate:
+                        df['true'] = np.log10(df['true'])
+
+                    if df.empty:
+                        continue
+
+                    metrics = {
+                        'r2': r2_score(df['true'], df['pred']),
+                        'mse': mean_squared_error(df['true'], df['pred']),
+                        'mae': mean_absolute_error(df['true'], df['pred']),
+                        'rmse': root_mean_squared_error(df['true'], df['pred']),
+                        'bias': (df['pred'] - df['true']).mean(),
+                        'mean_val': df['true'].mean().item(),
+                        'std_val': df['true'].std().item(),
+                    }
+
+                    self.metrics[param][level][name] = metrics
+
         print("Metrics calculated.")
         return self.metrics
 
@@ -163,35 +235,72 @@ class SWRCComparison:
 
         params = ['theta_r', 'theta_s', 'alpha', 'n']
         palette = {'Train': 'blue', 'Validation': 'green', 'Not in Set': '#cccccc', 'Unknown': 'black'}
-        markers = {'Train': 'o', 'Validation': 's', 'Not in Set': '.', 'Unknown': 'x'}
+        markers = {'Train': 'o', 'Validation': 's', 'Not in Set': '.', 'Unknown': 'D'}
+        prefix_map = {'_ros': 'rosetta', '_ml_pre': 'pretrain', '_ml_ft': 'finetune'}
+
+        levels_to_process = self.levels
+        if not levels_to_process:
+            all_levels = set()
+            for col in self.comparison_df.columns:
+                if match := re.search(r'_L(\d+)_', col):
+                    all_levels.add(int(match.group(1)))
+            levels_to_process = sorted(list(all_levels))
 
         for param in params:
-            y_true_col = f'{param}_emp'
-            if y_true_col not in self.comparison_df.columns:
-                continue
-
             plt.style.use('seaborn-v0_8-whitegrid')
             fig, axes = plt.subplots(1, len(sources), figsize=(6 * len(sources), 5.5), sharey=True, sharex=True)
             if len(sources) == 1:
                 axes = [axes]
 
-            y_true = self.comparison_df[y_true_col].dropna()
-            min_val, max_val = y_true.min() * 0.9, y_true.max() * 1.1
+            all_true_vals = [self.comparison_df[f'station_L{l}_{param}'] for l in levels_to_process if
+                             f'station_L{l}_{param}' in self.comparison_df]
+            if not all_true_vals:
+                plt.close(fig)
+                continue
+
+            y_true_all = pd.concat(all_true_vals).dropna()
+            min_val, max_val = y_true_all.min() * 0.9, y_true_all.max() * 1.1
 
             for i, (prefix, name) in enumerate(sources.items()):
                 ax = axes[i]
-                y_pred_col = f'{param}{prefix}'
-                if y_pred_col not in self.comparison_df.columns:
+                pred_prefix = prefix_map.get(prefix)
+                if not pred_prefix:
                     ax.text(0.5, 0.5, 'Data not found', ha='center', va='center', transform=ax.transAxes)
                     ax.set_title(f'{name} vs. Empirical')
                     continue
 
-                plot_df = self.comparison_df[[y_true_col, y_pred_col, 'finetune_set']].dropna(
-                    subset=[y_true_col, y_pred_col])
-                r2 = self.metrics.get(param, {}).get(name, {}).get('r2', float('nan'))
+                true_vals, pred_vals = [], []
+                for level in levels_to_process:
+                    y_true_col = f'station_L{level}_{param}'
+                    if y_true_col not in self.comparison_df:
+                        continue
 
-                sns.scatterplot(data=plot_df, x=y_true_col, y=y_pred_col,
-                                hue='finetune_set', style='finetune_set',
+                    y_pred_col = f'{pred_prefix}_L{level}_{param}'
+                    exponentiate = False
+                    if y_pred_col not in self.comparison_df:
+                        y_pred_col = f'{pred_prefix}_L{level}_log10_{param}'
+                        if y_pred_col not in self.comparison_df:
+                            continue
+                        exponentiate = True
+
+                    y_pred = self.comparison_df[y_pred_col]
+                    if exponentiate:
+                        y_pred = 10 ** y_pred
+
+                    true_vals.append(self.comparison_df[y_true_col])
+                    pred_vals.append(y_pred)
+
+                if not pred_vals:
+                    ax.text(0.5, 0.5, 'Data not found', ha='center', va='center', transform=ax.transAxes)
+                    ax.set_title(f'{name} vs. Empirical')
+                    continue
+
+                plot_df = pd.DataFrame({'true': pd.concat(true_vals), 'pred': pd.concat(pred_vals)}).dropna()
+                plot_df['finetune_set'] = self.comparison_df.loc[plot_df.index, 'finetune_set']
+
+                r2 = r2_score(plot_df['true'], plot_df['pred']) if not plot_df.empty else float('nan')
+
+                sns.scatterplot(data=plot_df, x='true', y='pred', hue='finetune_set', style='finetune_set',
                                 palette=palette, markers=markers, ax=ax, alpha=0.8)
 
                 ax.plot([min_val, max_val], [min_val, max_val], 'r--', label='1:1 Line')
@@ -199,12 +308,10 @@ class SWRCComparison:
                 if i == 0:
                     ax.set_ylabel(f'Predicted {PARAM_SYMBOLS.get(param, param)}')
                 ax.set_title(f'{name} vs. Empirical')
-                ax.text(0.05, 0.95, f'R² = {r2:.2f}', transform=ax.transAxes,
-                        fontsize=12, verticalalignment='top',
+                ax.text(0.05, 0.95, f'R² = {r2:.2f}', transform=ax.transAxes, fontsize=12, verticalalignment='top',
                         bbox=dict(boxstyle='round,pad=0.3', fc='white', alpha=0.5))
 
                 handles, labels = ax.get_legend_handles_labels()
-                # Keep only unique legend entries
                 by_label = dict(zip(labels, handles))
                 ax.legend(by_label.values(), by_label.keys())
 
@@ -219,6 +326,127 @@ class SWRCComparison:
             plt.close(fig)
             print(f"Saved scatter plot to {plot_filename}")
 
+    def plot_histogram_comparison(self, output_dir, bins=30):
+        """
+        Plots semi-transparent overlaid histograms comparing empirical (station)
+        parameter estimates to Rosetta estimates for each parameter and level.
+
+        - Uses log10 transform for parameters where Rosetta provides log10 values
+          (e.g., columns like `rosetta_Lx_log10_alpha`). When this occurs, the
+          station values are transformed to log10 for an apples-to-apples
+          comparison.
+        - If multiple levels are requested/available, creates a subplot per
+          level for each parameter.
+        """
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir)
+
+        params = ['theta_r', 'theta_s', 'alpha', 'n']
+        palette = {'Station': '#1f77b4', 'Rosetta': '#ff7f0e'}
+
+        # Determine which levels to plot
+        levels_to_process = self.levels
+        if not levels_to_process:
+            all_levels = set()
+            for col in self.comparison_df.columns:
+                if match := re.search(r'_L(\d+)_', col):
+                    all_levels.add(int(match.group(1)))
+            levels_to_process = sorted(list(all_levels))
+
+        for param in params:
+            # Collect which levels actually have both station and rosetta data
+            available_levels = []
+            for level in levels_to_process:
+                station_col = f'station_L{level}_{param}'
+                ros_col = f'rosetta_L{level}_{param}'
+                ros_log_col = f'rosetta_L{level}_log10_{param}'
+                if station_col in self.comparison_df.columns and \
+                        (ros_col in self.comparison_df.columns or ros_log_col in self.comparison_df.columns):
+                    available_levels.append(level)
+
+            if not available_levels:
+                continue
+
+            plt.style.use('seaborn-v0_8-whitegrid')
+            n_cols = len(available_levels)
+            fig, axes = plt.subplots(1, n_cols, figsize=(6 * n_cols, 5), sharey=False)
+            if n_cols == 1:
+                axes = [axes]
+
+            for ax, level in zip(axes, available_levels):
+                station_col = f'station_L{level}_{param}'
+                ros_col = f'rosetta_L{level}_{param}'
+                ros_log_col = f'rosetta_L{level}_log10_{param}'
+
+                use_log_transform = False
+                if ros_col in self.comparison_df.columns:
+                    ros_vals = self.comparison_df[ros_col]
+                elif ros_log_col in self.comparison_df.columns:
+                    ros_vals = self.comparison_df[ros_log_col]
+                    use_log_transform = True
+                else:
+                    # Nothing to plot for this level
+                    continue
+
+                sta_vals = self.comparison_df[station_col]
+
+                # Align and clean data
+                df_plot = pd.DataFrame({
+                    'Station': sta_vals,
+                    'Rosetta': ros_vals,
+                }).dropna()
+
+                if df_plot.empty:
+                    ax.text(0.5, 0.5, 'No data', ha='center', va='center', transform=ax.transAxes)
+                    ax.set_title(f'L{level} {PARAM_SYMBOLS.get(param, param)}')
+                    continue
+
+                # Apply log10 transform if Rosetta provided log10 values
+                if use_log_transform:
+                    # Remove non-positive station values before log10
+                    df_plot = df_plot[df_plot['Station'] > 0].copy()
+                    df_plot['Station'] = np.log10(df_plot['Station'])
+                    x_label = f'log10({PARAM_SYMBOLS.get(param, param)})'
+                else:
+                    x_label = f'{PARAM_SYMBOLS.get(param, param)}'
+
+                # Build long-form for seaborn overlay
+                long_df = df_plot.melt(var_name='Source', value_name='Value')
+
+                sns.histplot(
+                    data=long_df,
+                    x='Value',
+                    hue='Source',
+                    bins=bins,
+                    element='step',
+                    stat='density',
+                    common_bins=True,
+                    alpha=0.45,
+                    palette=palette,
+                    legend=False,
+                    ax=ax,
+                )
+
+                ax.set_title(f'L{level} {PARAM_SYMBOLS.get(param, param)}', fontsize=13)
+                ax.set_xlabel(x_label)
+                ax.set_ylabel('Density')
+                ax.grid(True, which='major', alpha=0.3)
+
+            for ax in axes:
+                handles = [
+                    Patch(facecolor=palette['Station'], edgecolor=palette['Station'], alpha=0.45, label='Station'),
+                    Patch(facecolor=palette['Rosetta'], edgecolor=palette['Rosetta'], alpha=0.45, label='Rosetta'),
+                ]
+                ax.legend(handles=handles, loc='best', title=None)
+
+            fig.suptitle(f'Distribution Comparison: Station vs Rosetta for {PARAM_SYMBOLS.get(param, param)}',
+                         fontsize=16, fontweight='bold')
+            plt.tight_layout(rect=[0, 0.03, 1, 0.92])
+            out_path = os.path.join(output_dir, f'{param}_hist_comparison.png')
+            plt.savefig(out_path, dpi=300)
+            plt.close(fig)
+            print(f"Saved histogram comparison to {out_path}")
+
 
 if __name__ == '__main__':
     home_ = os.path.expanduser('~')
@@ -230,8 +458,8 @@ if __name__ == '__main__':
     meta_path_ = os.path.join(root_, 'soil_potential_obs', 'mt_mesonet', 'station_metadata.csv')
     rosetta_data_path_ = os.path.join(root_, 'rosetta', 'mt_mesonet', 'extracted_rosetta_points.parquet')
 
-    pretrained_data_path_ = os.path.join(inference_, f'finetuned_predictions.parquet')
-    finetuned_data_path_ = os.path.join(inference_, f'pretrained_predictions.parquet')
+    finetuned_data_path_ = os.path.join(inference_, f'finetuned_predictions.parquet')
+    pretrained_data_path_ = os.path.join(inference_, f'pretrained_predictions.parquet')
 
     finetuning_split_path_ = os.path.join(training_root, 'finetuning_split_info.json')
 
@@ -239,11 +467,11 @@ if __name__ == '__main__':
 
     comparison = SWRCComparison(
         empirical_results_dir=empirical_dir_,
-        station_metadata_path=meta_path_,
         rosetta_path=rosetta_data_path_,
         pretrained_predictions_path=pretrained_data_path_,
         finetuned_predictions_path=finetuned_data_path_,
-        finetuning_split_path=finetuning_split_path_
+        finetuning_split_path=finetuning_split_path_,
+        levels=(2,),
     )
 
     sources_to_compare = {
@@ -253,10 +481,13 @@ if __name__ == '__main__':
     }
 
     metrics_results = comparison.calculate_metrics(sources=sources_to_compare)
-    print("\n--- Calculated Metrics ---")
-    print(json.dumps(metrics_results, indent=2))
+    # print("\n--- Calculated Metrics ---")
+    # print(json.dumps(metrics_results, indent=2))
 
-    comparison.plot_scatter_comparison(output_dir=plots_out_, sources=sources_to_compare)
+    # comparison.plot_scatter_comparison(output_dir=plots_out_, sources=sources_to_compare)
+
+    # Overlay semi-transparent histograms: Station vs Rosetta
+    comparison.plot_histogram_comparison(output_dir=plots_out_)
 
     print("\nComparison complete.")
 
