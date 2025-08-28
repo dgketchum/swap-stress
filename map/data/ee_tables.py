@@ -69,7 +69,8 @@ if __name__ == '__main__':
     run_mt_mesonet_workflow = True
     run_general_workflow = False
 
-    root_ = '/home/dgketchum/data/IrrigationGIS'
+    home = os.path.expanduser('~')
+    root_ = os.path.join(home, 'data', 'IrrigationGIS')
 
     if run_mt_mesonet_workflow:
         extracts_dir_ = os.path.join(root_, 'soils', 'swapstress', 'mt_mesonet_extracts')

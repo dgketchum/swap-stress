@@ -1,6 +1,6 @@
 # SWAP-Stress
 
-Code for the manuscript "Improving regional-scale soil hydraulic property estimates by transfer-learning machine learning models".
+Code for machine learning to infer soil hydraulic parameters at scale.
 
 ## Overview
 
@@ -31,14 +31,12 @@ The repository is organized into two main components:
 The primary workflow involves a transfer learning approach:
 
 1.  **Base Model Training:** A base model (either a neural network or Random Forest) is trained on the extensive Rosetta dataset. See `map/learning/train_nn.py` and `map/learning/train_rf.py`.
-2.  **Fine-Tuning:** The pre-trained base model is then fine-tuned using the smaller, but more accurate, laboratory dataset. The core logic for this is in `map/learning/transfer_learning.py`.
+2.  **Fine-Tuning:** The pre-trained base model is then fine-tuned using the smaller laboratory dataset. The core logic for this is in `map/learning/transfer_learning.py`.
 3.  **Inference:** The final model can be used to predict improved soil parameters.
 
-This approach leverages the broad spatial coverage of the Rosetta model while incorporating the high-fidelity information from laboratory measurements to produce more accurate soil hydraulic property estimates.
+This approach leverages the broad spatial coverage of the Rosetta model while incorporating the high-fidelity information from laboratory measurements in an attempt to produce more accurate soil hydraulic property estimates.
 
 ## How To Run
-
-Below is a practical, end-to-end outline you can adapt to your data paths and environment.
 
 ### Prerequisites
 

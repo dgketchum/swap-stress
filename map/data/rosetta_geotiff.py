@@ -89,10 +89,13 @@ def extract_rosetta_parameters(points_shp, rosetta_dir, out_parquet, num_workers
 
 
 if __name__ == '__main__':
-    rosetta_dir_ = '~/data/IrrigationGIS/soils/rosetta/'
-    # points_shp_ = '/home/dgketchum/data/IrrigationGIS/soils/gis/pretraining-roi-10000_mgrs.shp'
-    points_shp_ = '/home/dgketchum/data/IrrigationGIS/soils/soil_potential_obs/mt_mesonet/station_metadata_mgrs.shp'
-    output_csv_ = '/home/dgketchum/data/IrrigationGIS/soils/rosetta/mt_mesonet/extracted_rosetta_points.parquet'
+    home = os.path.expanduser('~')
+    root_ = os.path.join(home, 'data', 'IrrigationGIS')
+
+    rosetta_dir_ = os.path.join(home, 'IrrigationGIS', 'soils', 'rosetta')
+    # points_shp_ = os.path.join(home,  IrrigationGIS', 'soils', 'gis', 'pretraining-roi-10000_mgrs.shp')
+    points_shp_ = os.path.join(home, 'IrrigationGIS', 'soils', 'soil_potential_obs', 'mt_mesonet', 'station_metadata_mgrs.shp')
+    output_csv_ = os.path.join(home, 'IrrigationGIS', 'soils', 'rosetta', 'mt_mesonet', 'extracted_rosetta_points.parquet')
 
     extract_rosetta_parameters(points_shp=points_shp_,
                                rosetta_dir=os.path.expanduser(rosetta_dir_),
