@@ -2,55 +2,83 @@ import os
 
 import ee
 import os, pyproj
-os.environ.setdefault("PROJ_LIB", pyproj.datadir.get_data_dir())
 
+os.environ.setdefault("PROJ_LIB", pyproj.datadir.get_data_dir())
 
 import geopandas as gpd
 from shapely.geometry import box
 
 from map.data.call_ee import stack_bands_climatology, is_authorized
 
+KNOWN_PROBLEMS = [
+    'elevation',
+    'slope',
+    'aspect',
+    'tpi_10000',
+    'tpi_22500',
+]
 
-def _export_tile_data(roi, points, desc, bucket, file_prefix, resolution, index_col, region):
+
+def _export_tile_data(roi, points, desc, bucket, file_prefix, resolution, index_col, region, diagnose=False):
     """Helper function to run and export data for a given ROI and point set."""
-    try:
-        # Build stack for this ROI
-        stack = stack_bands_climatology(roi, resolution=resolution, region=region)
+    stack = stack_bands_climatology(roi, region=region)
 
-        # Skip no-op tasks
-        if points.size().eq(0).getInfo():
-            print(f'{desc}: no points to sample, skipping.')
-            return
+    if points.size().eq(0).getInfo():
+        print(f'{desc}: no points to sample, skipping.')
+        return
 
-        # Sample with selected properties
-        samples = stack.sampleRegions(
-            collection=points,
-            properties=['MGRS_TILE', index_col],
-            scale=resolution,
-            tileScale=16
-        )
+    # Optional diagnostic: probe one point and check band-by-band values
+    if diagnose:
+        try:
+            print(desc)
+            filtered = ee.FeatureCollection([points.first()])
+            bad_ = []
+            bands = stack.bandNames().getInfo()
+            for b in bands:
+                if b not in KNOWN_PROBLEMS:
+                    continue
+                sel = stack.select([b])
+                sample = sel.sampleRegions(collection=filtered, properties=[], scale=30).first()
+                val = ee.Algorithms.If(sample, ee.Feature(sample).get(b), None)
+                try:
+                    info = ee.Dictionary({'v': val}).get('v').getInfo()
+                    print(b, info)
+                    if info is None:
+                        bad_.append(b)
+                except Exception as e:
+                    print(b, 'not there', e)
+                    bad_.append(b)
+            print('Bands with None or errors:', bad_)
+        except Exception as e:
+            print(f'Diagnostic failed for {desc}: {e}')
+        return
 
-        # Lock output columns (properties + band names)
-        band_names = stack.bandNames()
-        selectors = ee.List(['MGRS_TILE', index_col]).cat(band_names)
+    stack = stack.select(KNOWN_PROBLEMS)
 
-        task = ee.batch.Export.table.toCloudStorage(
-            samples,
-            description=desc,
-            bucket=bucket,
-            fileNamePrefix=f'{file_prefix}/{desc}',
-            fileFormat='CSV',
-            selectors=selectors
-        )
-        task.start()
-        print(f'Started export: {file_prefix}/{desc} (task: {task.id})')
+    samples = stack.sampleRegions(
+        collection=points,
+        properties=['MGRS_TILE', index_col],
+        scale=resolution,
+        tileScale=16
+    )
 
-    except Exception as exc:
-        print(f'{desc} error: {exc}')
+    band_names = stack.bandNames()
+    selectors = ['MGRS_TILE', index_col] + band_names.getInfo()
+
+    task = ee.batch.Export.table.toCloudStorage(
+        samples,
+        description=desc,
+        bucket=bucket,
+        fileNamePrefix=f'{file_prefix}/{desc}',
+        fileFormat='CSV',
+        selectors=selectors
+    )
+    task.start()
+    print(f'Started export: {file_prefix}/{desc} (task: {task.id})')
 
 
 def get_bands(shapefile_path, mgrs_shp_path, bucket, file_prefix, resolution, index_col=None, split_tiles=False,
-              check_dir=None, region='conus'):
+              check_dir=None, region='conus', diagnose=False):
     """
     Extract climatological data for a set of points from a local shapefile.
     """
@@ -112,24 +140,25 @@ def get_bands(shapefile_path, mgrs_shp_path, bucket, file_prefix, resolution, in
                     file_prefix=file_prefix,
                     resolution=resolution,
                     index_col=index_col,
-                    region=region
+                    region=region,
+                    diagnose=diagnose
                 )
         else:
             geo_json = mgrs_tile_gdf.geometry.iloc[0].__geo_interface__
             roi_ee_geom = ee.Geometry(geo_json)
 
-            # Symmetric: ensure points lie in the tile bounds
             tile_points_bounded = tile_points.filterBounds(roi_ee_geom)
 
             _export_tile_data(
-                roi=roi_ee_geom,  # pass Geometry (not FC)
+                roi=roi_ee_geom,
                 points=tile_points_bounded,
                 desc=desc,
                 bucket=bucket,
                 file_prefix=file_prefix,
                 resolution=resolution,
                 index_col=index_col,
-                region=region
+                region=region,
+                diagnose=diagnose
             )
 
 
@@ -144,7 +173,7 @@ if __name__ == '__main__':
     gcs_bucket_ = 'wudr'
 
     if run_mt_mesonet_workflow:
-        extracts_dir_ = os.path.join(root_, 'soils', 'swapstress', 'mt_mesonet_extracts')
+        extracts_dir_ = os.path.join(root_, 'soils', 'swapstress', 'extracts', 'mt_mesonet_extracts')
         shapefile_ = os.path.join(root_, 'soils', 'soil_potential_obs', 'mt_mesonet', 'station_metadata_mgrs.shp')
         index_ = 'station'
         output_prefix_ = 'swap-stress/mesonet_training_data'
@@ -161,7 +190,7 @@ if __name__ == '__main__':
                   check_dir=extracts_dir_)
 
     elif run_general_workflow:
-        extracts_dir_ = os.path.join(root_, 'soils', 'swapstress', 'extracts')
+        extracts_dir_ = os.path.join(root_, 'soils', 'swapstress', 'extracts', 'conus_extracts')
         shapefile_ = os.path.join(root_, 'soils', 'gis', 'pretraining-roi-10000_mgrs.shp')
         index_ = 'site_id'
         output_prefix_ = 'swap-stress/training_data'
@@ -178,13 +207,11 @@ if __name__ == '__main__':
                   check_dir=extracts_dir_)
 
     elif run_global_workflow:
-        extracts_dir_ = os.path.join(root_, 'soils', 'swapstress', 'global_extracts')
-        # shapefile_ = os.path.join(root_, 'soils', 'soil_potential_obs', 'global', 'station_metadata_mgrs.shp')
-        shapefile_ = '/home/dgketchum/Downloads/wrc_aggregated_mgrs.shp'
-        index_ = 'layer_id'
+        extracts_dir_ = os.path.join(root_, 'soils', 'swapstress', 'extracts', 'global_extracts')
+        shapefile_ = os.path.join(root_, 'soils', 'vg_paramaer_databases', 'wrc', 'wrc_aggregated_mgrs.shp')
+        index_ = 'uid'
         output_prefix_ = 'swap-stress/global_training_data'
-        # mgrs_shapefile_ = os.path.join(root_, 'boundaries', 'mgrs', 'mgrs_wgs.shp')
-        mgrs_shapefile_ = '/home/dgketchum/Downloads/mgrs/mgrs_world_attr.shp'
+        mgrs_shapefile_ = os.path.join(root_, 'boundaries', 'mgrs', 'mgrs_world_attr.shp')
 
         is_authorized()
         get_bands(shapefile_path=shapefile_,
@@ -194,6 +221,7 @@ if __name__ == '__main__':
                   resolution=4000,
                   index_col=index_,
                   split_tiles=False,
+                  diagnose=False,
                   check_dir=extracts_dir_,
                   region='global')
 # ========================= EOF ====================================================================

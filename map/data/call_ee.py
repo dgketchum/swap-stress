@@ -10,19 +10,7 @@ def _prefixed(img, prefix):
     return ee.Image(img).rename(new)
 
 
-def _add_optional_bands(base, make_img, prefix, categorical=False):
-    # Wrap optional datasets so a missing/permissioned asset doesn't crash the build.
-    try:
-        img = make_img()
-        img = _prefixed(img, prefix)
-        img = img.resample('nearest') if categorical else img.resample('bilinear')
-        return base.addBands(img)
-    except Exception:
-        # Silently skip if unavailable
-        return base
-
-
-def get_world_climate(months, param='prec', collection_name='WORLDCLIM/V1/MONTHLY', band_name=None):
+def get_world_climate(months, param='prec', band_name=None):
     if band_name is None:
         band_name = param
 
@@ -31,30 +19,41 @@ def get_world_climate(months, param='prec', collection_name='WORLDCLIM/V1/MONTHL
     else:
         month_numbers = list(range(months[0], months[1] + 1))
 
-    collection = ee.ImageCollection(collection_name)
+    if param in ['prec', 'tmin', 'tavg', 'tmax']:
+        collection = ee.ImageCollection('WORLDCLIM/V1/MONTHLY')
+        monthly_images = []
+        for m in month_numbers:
+            img = collection.filter(ee.Filter.eq('month', m)).first().select(band_name)
+            monthly_images.append(img)
 
-    monthly_images = []
-    for m in month_numbers:
-        img = collection.filter(ee.Filter.eq('month', m)).first().select(band_name)
-        monthly_images.append(img)
+        image_coll = ee.ImageCollection.fromImages(monthly_images)
 
-    image_coll = ee.ImageCollection.fromImages(monthly_images)
+        if param == 'prec':
+            agg_image = image_coll.sum()
+        else:
+            agg_image = image_coll.mean()
 
-    if param == 'prec':
+    elif param == 'eto':
+        monthly_root = 'projects/sat-io/open-datasets/global_et0/global_et0_monthly'
+        monthly_images = []
+        for m in month_numbers:
+            if m in list(range(5, 10)):
+                mi = ee.Image(f'{monthly_root}/et0_V3_{str(m).rjust(2, "0")}')
+            else:
+                mi = ee.Image(f'{monthly_root}/et0_v3_{str(m).rjust(2, "0")}')
+            monthly_images.append(mi)
+        image_coll = ee.ImageCollection.fromImages(monthly_images)
         agg_image = image_coll.sum()
+
     else:
-        agg_image = image_coll.mean()
+        raise ValueError
 
     return agg_image
 
 
-def stack_bands_climatology(roi, start_yr=1991, end_yr=2020, resolution=4000, subselection=None, region='conus'):
-    """
-    Create a stack of climatological bands for the roi specified.
-    """
+def stack_bands_climatology(roi, start_yr=1991, end_yr=2020, subselection=None, region='conus'):
     years = ee.List.sequence(start_yr, end_yr)
 
-    # spring: 60-121, late spring: 121-196, summer: 196-273, fall: 273-365
     periods = [('gs', 121, 273),
                ('1', 60, 121),
                ('2', 121, 196),
@@ -75,7 +74,6 @@ def stack_bands_climatology(roi, start_yr=1991, end_yr=2020, resolution=4000, su
     input_bands = input_bands.addBands([ae_bands])
 
     if region == 'conus':
-        # 4-Season GridMET Climatology
         seasons = [('winter', 335, 59),
                    ('spring', 60, 151),
                    ('summer', 152, 243),
@@ -84,7 +82,7 @@ def stack_bands_climatology(roi, start_yr=1991, end_yr=2020, resolution=4000, su
         gridmet_coll = ee.ImageCollection("IDAHO_EPSCOR/GRIDMET").filterDate(f'{start_yr}-01-01', f'{end_yr}-12-31')
 
         for name, start_doy, end_doy in seasons:
-            if start_doy > end_doy:  # Handle winter case
+            if start_doy > end_doy:
                 season_filter = ee.Filter.Or(
                     ee.Filter.calendarRange(start_doy, 365, 'day_of_year'),
                     ee.Filter.calendarRange(1, end_doy, 'day_of_year')
@@ -109,28 +107,22 @@ def stack_bands_climatology(roi, start_yr=1991, end_yr=2020, resolution=4000, su
             input_bands = input_bands.addBands(seasonal_clim_image)
 
     elif region == 'global':
-        # WorldClim and ETo Climatology
         seasons = [('winter', (12, 2)),
                    ('spring', (3, 5)),
                    ('summer', (6, 8)),
                    ('autumn', (9, 11))]
 
         for s_name, s_months in seasons:
-            # WorldClim
             wc_params = ['prec', 'tavg', 'tmin', 'tmax']
             for p_name in wc_params:
                 clim_band = get_world_climate(s_months, param=p_name)
                 band_name = f'wc_{p_name}_{s_name}'
                 input_bands = input_bands.addBands(clim_band.rename(band_name))
 
-            # Monthly ETo
-            eto_band = get_world_climate(s_months, param='eto',
-                                         collection_name='projects/sat-io/open-datasets/global_et0/global_et0_monthly',
-                                         band_name='b1')
+            eto_band = get_world_climate(s_months, param='eto', band_name='b1')
             band_name = f'eto_{s_name}'
             input_bands = input_bands.addBands(eto_band.rename(band_name))
 
-        # Yearly ETo
         et_yearly = ee.Image("projects/sat-io/open-datasets/global_et0/global_et0_yearly").rename('eto_yearly_mean')
         et_yearly_sd = ee.Image("projects/sat-io/open-datasets/global_et0/global_et0_yearly_sd").rename('eto_yearly_sd')
         input_bands = input_bands.addBands(et_yearly).addBands(et_yearly_sd)
@@ -154,15 +146,12 @@ def stack_bands_climatology(roi, start_yr=1991, end_yr=2020, resolution=4000, su
     input_bands = input_bands.addBands(s1_clim)
 
     smap_l3_coll = (ee.ImageCollection("NASA/SMAP/SPL3SMP_E/005")
-                    .filterDate('2015-03-31T12:00:00', '2023-12-03T12:00:00')
+                    .filterDate('2015-01-01', '2025-12-31')
                     .filterBounds(roi))
 
-    smap_l3_am_good = smap_l3_coll.filter(ee.Filter.eq('retrieval_qual_flag_am', 0))
-    smap_l3_pm_good = smap_l3_coll.filter(ee.Filter.eq('retrieval_qual_flag_pm', 0))
-
-    smap_l3_am_clim = (smap_l3_am_good.select(['soil_moisture_am', 'vegetation_water_content_am'])
+    smap_l3_am_clim = (smap_l3_coll.select(['soil_moisture_am', 'vegetation_water_content_am'])
                        .reduce(ee.Reducer.mean().combine(ee.Reducer.stdDev(), '', True)))
-    smap_l3_pm_clim = (smap_l3_pm_good.select(['soil_moisture_pm', 'vegetation_water_content_pm'])
+    smap_l3_pm_clim = (smap_l3_coll.select(['soil_moisture_pm', 'vegetation_water_content_pm'])
                        .reduce(ee.Reducer.mean().combine(ee.Reducer.stdDev(), '', True)))
 
     smap_l3_clim = ee.Image.cat([smap_l3_am_clim, smap_l3_pm_clim])
@@ -170,7 +159,7 @@ def stack_bands_climatology(roi, start_yr=1991, end_yr=2020, resolution=4000, su
 
     smap_l4_bands = ['sm_surface', 'sm_rootzone', 'sm_profile', 'surface_temp', 'leaf_area_index']
     smap_l4_coll = (ee.ImageCollection("NASA/SMAP/SPL4SMGP/008")
-                    .filterDate('2015-03-31T00:00:00', '2025-08-15T22:30:00')
+                    .filterDate('2015-01-01', '2025-12-31')
                     .filterBounds(roi)
                     .select(smap_l4_bands))
 
@@ -178,40 +167,22 @@ def stack_bands_climatology(roi, start_yr=1991, end_yr=2020, resolution=4000, su
     input_bands = input_bands.addBands(smap_l4_clim)
 
     coords = ee.Image.pixelLonLat().rename(['lon', 'lat'])
+
+    # annoying treatment of international DEM
     if region == 'conus':
         ned = ee.Image('USGS/3DEP/10m')
         terrain = ee.Terrain.products(ned).select('elevation', 'slope', 'aspect')
     elif region == 'global':
-        dem = ee.Image('NASA/NASADEM_HGT/001').select('elevation')
+        dem = ee.ImageCollection('COPERNICUS/DEM/GLO30').select('DEM').mosaic().rename('elevation')
         terrain = ee.Terrain.products(dem).select('slope', 'aspect').addBands(dem)
     else:
         raise ValueError("region must be one of 'conus' or 'global'")
 
-    elev = terrain.select('elevation')
-    tpi_250 = elev.subtract(elev.focal_mean(250, 'circle', 'meters')).add(0.5).rename('tpi_250')
-    tpi_500 = elev.subtract(elev.focal_mean(500, 'circle', 'meters')).add(0.5).rename('tpi_500')
-    tpi_1250 = elev.subtract(elev.focal_mean(1250, 'circle', 'meters')).add(0.5).rename('tpi_1250')
-    tpi_2500 = elev.subtract(elev.focal_mean(2500, 'circle', 'meters')).add(0.5).rename('tpi_2500')
+    elev = terrain.select('elevation').resample('bilinear').reproject(crs=proj, scale=250)
     tpi_10000 = elev.subtract(elev.focal_mean(10000, 'circle', 'meters')).add(0.5).rename('tpi_10000')
     tpi_22500 = elev.subtract(elev.focal_mean(22500, 'circle', 'meters')).add(0.5).rename('tpi_22500')
 
     gsw = ee.Image('JRC/GSW1_4/GlobalSurfaceWater').select('occurrence').gt(0).unmask(0).rename('gsw')
-
-    polaris = ee.Image.cat([
-        ee.ImageCollection('projects/sat-io/open-datasets/polaris/bd_mean').mean().rename('bd_mean'),
-        ee.ImageCollection('projects/sat-io/open-datasets/polaris/clay_mean').mean().rename('clay_mean'),
-        ee.ImageCollection('projects/sat-io/open-datasets/polaris/ksat_mean').mean().rename('ksat_mean'),
-        ee.ImageCollection('projects/sat-io/open-datasets/polaris/n_mean').mean().rename('n_mean'),
-        ee.ImageCollection('projects/sat-io/open-datasets/polaris/om_mean').mean().rename('om_mean'),
-        ee.ImageCollection('projects/sat-io/open-datasets/polaris/ph_mean').mean().rename('ph_mean'),
-        ee.ImageCollection('projects/sat-io/open-datasets/polaris/sand_mean').mean().rename('sand_mean'),
-        ee.ImageCollection('projects/sat-io/open-datasets/polaris/silt_mean').mean().rename('silt_mean'),
-        ee.ImageCollection('projects/sat-io/open-datasets/polaris/theta_r_mean').mean().rename('theta_r_mean'),
-        ee.ImageCollection('projects/sat-io/open-datasets/polaris/theta_s_mean').mean().rename('theta_s_mean'),
-        ee.ImageCollection('projects/sat-io/open-datasets/polaris/lambda_mean').mean().rename('lambda_mean'),
-        ee.ImageCollection('projects/sat-io/open-datasets/polaris/hb_mean').mean().rename('hb_mean'),
-        ee.ImageCollection('projects/sat-io/open-datasets/polaris/alpha_mean').mean().rename('alpha_mean')
-    ])
 
     hihydro_bands = ee.Image.cat([
         ee.ImageCollection("projects/sat-io/open-datasets/HiHydroSoilv2_0/ksat").mean().rename('hhs_ksat'),
@@ -245,52 +216,31 @@ def stack_bands_climatology(roi, start_yr=1991, end_yr=2020, resolution=4000, su
     ])
 
     hwsd2_bands = ee.Image("projects/sat-io/open-datasets/FAO/HWSD_V2_SMU")
+    hwsd2_bands = hwsd2_bands.select(
+        ['HWSD2_ID', 'WISE30s_ID', 'COVERAGE', 'SHARE', 'WRB4', 'WRB_PHASES', 'WRB2_CODE', 'FAO90', 'KOPPEN',
+         'TEXTURE_USDA', 'REF_BULK_DENSITY', 'BULK_DENSITY', 'DRAINAGE', 'ROOT_DEPTH', 'AWC', 'ROOTS', 'IL'])
 
     c3s_lc_coll = (ee.ImageCollection("projects/sat-io/open-datasets/ESA/C3S-LC-L4-LCCS")
                    .filterDate(f'{start_yr}-01-01', f'{end_yr}-12-31')
                    .select('lccs_class'))
     c3s_lc_mode = c3s_lc_coll.mode().rename('c3s_lccs_class_mode')
 
-    from_glc10_img = (ee.ImageCollection("projects/sat-io/open-datasets/FROM-GLC10")
-                      .select('b1')
-                      .mosaic()
-                      .rename('from_glc10_landcover'))
+    from_glc10_img = (ee.ImageCollection('projects/sat-io/open-datasets/FROM-GLC10')
+                      .mosaic().rename('glc10_lc'))
 
-    soil_bioclim = lambda: ee.ImageCollection('projects/sat-io/open-datasets/soil_bioclim').mosaic()
-    input_bands = _add_optional_bands(input_bands, soil_bioclim, 'soilbioclim', categorical=False)
-
-    # Global soil salinity (continuous; if collection, mean to create a climatology)
-    salinity_mean = lambda: ee.ImageCollection('projects/sat-io/open-datasets/global_salinity').mean()
-    input_bands = _add_optional_bands(input_bands, salinity_mean, 'salinity', categorical=False)
-
-    # Hydrologic context (HAND / flow accumulation etc.). These vary by provider; all continuous.
-    # Try MERIT Hydro (standard) first, then Hydro90 (community) if available.
-    merit_hydro = lambda: ee.Image('MERIT/Hydro/v1_0_1')
-    input_bands = _add_optional_bands(input_bands, merit_hydro, 'merit', categorical=False)
-
-    hydro90 = lambda: ee.ImageCollection('projects/sat-io/open-datasets/hydro90').mosaic()
-    input_bands = _add_optional_bands(input_bands, hydro90, 'hydro90', categorical=False)
-
-    # Global aridity / PET (continuous). Use whatever variant you have access to.
-    # If you link a specific asset, this will slot right in.
-    global_aridity = lambda: ee.Image('projects/sat-io/open-datasets/global_aridity_pet')
-    input_bands = _add_optional_bands(input_bands, global_aridity, 'aridity', categorical=False)
-
-    # Existing static set (adjusted to mark categorical with nearest)
     nlcd = None
     cdl_bands = None
     ssurgo = None
     prism = None
     additional_terrain = None
+    us_lith = None
+    polaris = None
 
     if region == 'conus':
-        # US Lithology (categorical: nearest)
-        us_lith = lambda: ee.Image('CSP/ERGo/1_0/US/lithology')
-        input_bands = _add_optional_bands(input_bands, us_lith, 'uslith', categorical=True)
-
+        us_lith = ee.Image('CSP/ERGo/1_0/US/lithology').rename('us_lith')
 
         nlcd = ee.ImageCollection('USGS/NLCD_RELEASES/2019_REL/NLCD').select('landcover') \
-            .mosaic().rename('nlcd').resample('nearest')
+            .mosaic().rename('nlcd')
 
         def get_all_cdl_bands(y):
             return ee.Image.cat(get_cdl(y))
@@ -298,7 +248,7 @@ def stack_bands_climatology(roi, start_yr=1991, end_yr=2020, resolution=4000, su
         cdl_collection = ee.ImageCollection(years.map(get_all_cdl_bands))
         cdl_bands = cdl_collection.mode().rename(
             ['cdl_cultivated_mode', 'cdl_crop_mode', 'cdl_simple_crop_mode']
-        ).resample('nearest')
+        )
 
         ssurgo = ee.Image.cat([
             ee.Image('projects/earthengine-legacy/assets/projects/openet/soil/ssurgo_AWC_WTA_0to152cm_composite')
@@ -309,30 +259,43 @@ def stack_bands_climatology(roi, start_yr=1991, end_yr=2020, resolution=4000, su
             .rename('ssurgo_ksat'),
             ee.Image('projects/earthengine-legacy/assets/projects/openet/soil/ssurgo_Sand_WTA_0to152cm_composite')
             .rename('ssurgo_sand')
-        ])  # continuous; leave default (bilinear) or explicitly set .resample('bilinear')
+        ])
 
         prism = ee.ImageCollection("OREGONSTATE/PRISM/Norm91m").mean()
 
         additional_terrain = ee.Image.cat([
             ee.Image("users/zhoylman/CONUS_TWI_epsg5072_30m"),
             ee.Image("CSP/ERGo/1_0/US/topoDiversity")
-        ])  # continuous
+        ])
+        polaris = ee.Image.cat([
+            ee.ImageCollection('projects/sat-io/open-datasets/polaris/bd_mean').mean().rename('bd_mean'),
+            ee.ImageCollection('projects/sat-io/open-datasets/polaris/clay_mean').mean().rename('clay_mean'),
+            ee.ImageCollection('projects/sat-io/open-datasets/polaris/ksat_mean').mean().rename('ksat_mean'),
+            ee.ImageCollection('projects/sat-io/open-datasets/polaris/n_mean').mean().rename('n_mean'),
+            ee.ImageCollection('projects/sat-io/open-datasets/polaris/om_mean').mean().rename('om_mean'),
+            ee.ImageCollection('projects/sat-io/open-datasets/polaris/ph_mean').mean().rename('ph_mean'),
+            ee.ImageCollection('projects/sat-io/open-datasets/polaris/sand_mean').mean().rename('sand_mean'),
+            ee.ImageCollection('projects/sat-io/open-datasets/polaris/silt_mean').mean().rename('silt_mean'),
+            ee.ImageCollection('projects/sat-io/open-datasets/polaris/theta_r_mean').mean().rename('theta_r_mean'),
+            ee.ImageCollection('projects/sat-io/open-datasets/polaris/theta_s_mean').mean().rename('theta_s_mean'),
+            ee.ImageCollection('projects/sat-io/open-datasets/polaris/lambda_mean').mean().rename('lambda_mean'),
+            ee.ImageCollection('projects/sat-io/open-datasets/polaris/hb_mean').mean().rename('hb_mean'),
+            ee.ImageCollection('projects/sat-io/open-datasets/polaris/alpha_mean').mean().rename('alpha_mean')
+        ])
 
-    # Assemble static set (categorical sources are already marked nearest above)
     static_bands = [coords,
                     terrain,
-                    tpi_1250, tpi_250, tpi_500, tpi_2500, tpi_10000, tpi_22500,
-                    gsw.resample('nearest'),  # binary/categorical
-                    polaris,  # continuous
-                    hihydro_bands,  # continuous
-                    isric_bands,  # continuous
-                    hwsd2_bands.resample('nearest'),  # SMU ids
-                    c3s_lc_mode.resample('nearest'),  # categorical
-                    from_glc10_img.resample('nearest')  # categorical
-                    ]
+                    tpi_10000,
+                    tpi_22500,
+                    gsw,
+                    hihydro_bands,
+                    isric_bands,
+                    hwsd2_bands,
+                    c3s_lc_mode,
+                    from_glc10_img]
 
     if region == 'conus':
-        static_bands.extend([nlcd, cdl_bands, ssurgo, prism, additional_terrain])
+        static_bands.extend([nlcd, cdl_bands, ssurgo, prism, additional_terrain, us_lith, polaris])
 
     input_bands = input_bands.addBands(static_bands)
 
@@ -354,4 +317,5 @@ def is_authorized():
 
 if __name__ == '__main__':
     pass
+
 # ========================= EOF ====================================================================
