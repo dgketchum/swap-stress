@@ -66,7 +66,6 @@ def stack_bands_climatology(roi, start_yr=1991, end_yr=2020, subselection=None, 
         band_list.append(landsat_stats)
 
     input_bands = ee.Image.cat(band_list)
-    proj = input_bands.select(0).projection()
 
     ae_bands = (ee.ImageCollection('GOOGLE/SATELLITE_EMBEDDING/V1/ANNUAL')
                 .filterDate(f'2017-01-01', f'2024-12-31').filterBounds(roi).mean())
@@ -146,12 +145,16 @@ def stack_bands_climatology(roi, start_yr=1991, end_yr=2020, subselection=None, 
     input_bands = input_bands.addBands(s1_clim)
 
     smap_l3_coll = (ee.ImageCollection("NASA/SMAP/SPL3SMP_E/005")
-                    .filterDate('2015-01-01', '2025-12-31')
+                    .filterDate('2018-01-01', '2023-12-31')
                     .filterBounds(roi))
 
-    smap_l3_am_clim = (smap_l3_coll.select(['soil_moisture_am', 'vegetation_water_content_am'])
+    # TODO: Figure out why these won't go
+    # vegetation_water_content_am
+    # vegetation_water_content_pm
+
+    smap_l3_am_clim = (smap_l3_coll.select(['vegetation_water_content_am'])
                        .reduce(ee.Reducer.mean().combine(ee.Reducer.stdDev(), '', True)))
-    smap_l3_pm_clim = (smap_l3_coll.select(['soil_moisture_pm', 'vegetation_water_content_pm'])
+    smap_l3_pm_clim = (smap_l3_coll.select(['vegetation_water_content_pm'])
                        .reduce(ee.Reducer.mean().combine(ee.Reducer.stdDev(), '', True)))
 
     smap_l3_clim = ee.Image.cat([smap_l3_am_clim, smap_l3_pm_clim])
@@ -159,7 +162,7 @@ def stack_bands_climatology(roi, start_yr=1991, end_yr=2020, subselection=None, 
 
     smap_l4_bands = ['sm_surface', 'sm_rootzone', 'sm_profile', 'surface_temp', 'leaf_area_index']
     smap_l4_coll = (ee.ImageCollection("NASA/SMAP/SPL4SMGP/008")
-                    .filterDate('2015-01-01', '2025-12-31')
+                    .filterDate('2018-01-01', '2023-12-31')
                     .filterBounds(roi)
                     .select(smap_l4_bands))
 
@@ -173,14 +176,13 @@ def stack_bands_climatology(roi, start_yr=1991, end_yr=2020, subselection=None, 
         ned = ee.Image('USGS/3DEP/10m')
         terrain = ee.Terrain.products(ned).select('elevation', 'slope', 'aspect')
     elif region == 'global':
-        dem = ee.ImageCollection('COPERNICUS/DEM/GLO30').select('DEM').mosaic().rename('elevation')
+        dem = ee.Image("projects/sat-io/open-datasets/ASTER/GDEM").select('b1').rename('elevation')
         terrain = ee.Terrain.products(dem).select('slope', 'aspect').addBands(dem)
     else:
         raise ValueError("region must be one of 'conus' or 'global'")
 
-    elev = terrain.select('elevation').resample('bilinear').reproject(crs=proj, scale=250)
-    tpi_10000 = elev.subtract(elev.focal_mean(10000, 'circle', 'meters')).add(0.5).rename('tpi_10000')
-    tpi_22500 = elev.subtract(elev.focal_mean(22500, 'circle', 'meters')).add(0.5).rename('tpi_22500')
+    tpi_10000 = dem.subtract(dem.focal_mean(10000, 'circle', 'meters')).add(0.5).rename('tpi_10000')
+    tpi_22500 = dem.subtract(dem.focal_mean(22500, 'circle', 'meters')).add(0.5).rename('tpi_22500')
 
     gsw = ee.Image('JRC/GSW1_4/GlobalSurfaceWater').select('occurrence').gt(0).unmask(0).rename('gsw')
 
@@ -218,7 +220,7 @@ def stack_bands_climatology(roi, start_yr=1991, end_yr=2020, subselection=None, 
     hwsd2_bands = ee.Image("projects/sat-io/open-datasets/FAO/HWSD_V2_SMU")
     hwsd2_bands = hwsd2_bands.select(
         ['HWSD2_ID', 'WISE30s_ID', 'COVERAGE', 'SHARE', 'WRB4', 'WRB_PHASES', 'WRB2_CODE', 'FAO90', 'KOPPEN',
-         'TEXTURE_USDA', 'REF_BULK_DENSITY', 'BULK_DENSITY', 'DRAINAGE', 'ROOT_DEPTH', 'AWC', 'ROOTS', 'IL'])
+         'TEXTURE_USDA', 'REF_BULK_DENSITY', 'BULK_DENSITY', 'DRAINAGE', 'ROOT_DEPTH', 'AWC'])
 
     c3s_lc_coll = (ee.ImageCollection("projects/sat-io/open-datasets/ESA/C3S-LC-L4-LCCS")
                    .filterDate(f'{start_yr}-01-01', f'{end_yr}-12-31')

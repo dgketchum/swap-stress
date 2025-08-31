@@ -11,12 +11,17 @@ from shapely.geometry import box
 from map.data.call_ee import stack_bands_climatology, is_authorized
 
 KNOWN_PROBLEMS = [
+    'tpi_10000',
+    'tpi_22500',
     'elevation',
     'slope',
     'aspect',
-    'tpi_10000',
-    'tpi_22500',
-]
+    'sm_surface_mean', 'sm_surface_stdDev', 'sm_rootzone_mean', 'sm_rootzone_stdDev', 'sm_profile_mean',
+    'sm_profile_stdDev', 'surface_temp_mean', 'surface_temp_stdDev', 'leaf_area_index_mean', 'leaf_area_index_stdDev',
+    'vegetation_water_content_am_mean',
+    'vegetation_water_content_am_stdDev',
+    'vegetation_water_content_pm_mean',
+    'vegetation_water_content_pm_stdDev']
 
 
 def _export_tile_data(roi, points, desc, bucket, file_prefix, resolution, index_col, region, diagnose=False):
@@ -38,7 +43,7 @@ def _export_tile_data(roi, points, desc, bucket, file_prefix, resolution, index_
                 if b not in KNOWN_PROBLEMS:
                     continue
                 sel = stack.select([b])
-                sample = sel.sampleRegions(collection=filtered, properties=[], scale=30).first()
+                sample = sel.sampleRegions(collection=filtered, properties=[], scale=resolution).first()
                 val = ee.Algorithms.If(sample, ee.Feature(sample).get(b), None)
                 try:
                     info = ee.Dictionary({'v': val}).get('v').getInfo()
@@ -52,8 +57,6 @@ def _export_tile_data(roi, points, desc, bucket, file_prefix, resolution, index_
         except Exception as e:
             print(f'Diagnostic failed for {desc}: {e}')
         return
-
-    stack = stack.select(KNOWN_PROBLEMS)
 
     samples = stack.sampleRegions(
         collection=points,
@@ -88,7 +91,7 @@ def get_bands(shapefile_path, mgrs_shp_path, bucket, file_prefix, resolution, in
     if index_col not in points_df.columns:
         raise ValueError(f"Index column '{index_col}' not found in shapefile.")
 
-    mgrs_tiles = points_df['MGRS_TILE'].unique()
+    mgrs_tiles = points_df['MGRS_TILE'].sample(frac=1).unique()
 
     for tile in mgrs_tiles:
         desc = f'swapstress_{tile}'
@@ -111,6 +114,12 @@ def get_bands(shapefile_path, mgrs_shp_path, bucket, file_prefix, resolution, in
             continue
 
         if split_tiles:
+
+            mgrs_tile_gdf = mgrs_gdf[mgrs_gdf['MGRS_TILE'] == tile]
+            if mgrs_tile_gdf.empty:
+                print(f'Warning: MGRS tile {tile} not found in {mgrs_shp_path}. Skipping.')
+                continue
+
             min_lon, min_lat, max_lon, max_lat = mgrs_tile_gdf.geometry.iloc[0].bounds
             center_lon = (min_lon + max_lon) / 2
             center_lat = (min_lat + max_lat) / 2
