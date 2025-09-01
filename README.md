@@ -30,9 +30,11 @@ The repository is organized into two main components:
 
 The primary workflow involves a transfer learning approach:
 
-1.  **Base Model Training:** A base model (either a neural network or Random Forest) is trained on the extensive Rosetta dataset. See `map/learning/train_nn.py` and `map/learning/train_rf.py`.
-2.  **Fine-Tuning:** The pre-trained base model is then fine-tuned using the smaller laboratory dataset. The core logic for this is in `map/learning/transfer_learning.py`.
-3.  **Inference:** The final model can be used to predict improved soil parameters.
+1.  **Base Model Training:** A base model (neural networks or tree-based baselines) is trained on the extensive Rosetta dataset.
+    - Tabular neural nets and FT-Transformer: `map/learning/train_tabular_nn.py`
+    - Random Forest and XGBoost baselines: `map/learning/train_decision_trees.py`
+2.  **Fine-Tuning:** The pre-trained base model is then fine-tuned using the smaller laboratory dataset. See `map/learning/transfer_learning.py`.
+3.  **Inference:** Use the best checkpoints to predict improved soil parameters for empirical sites.
 
 This approach leverages the broad spatial coverage of the Rosetta model while incorporating the high-fidelity information from laboratory measurements in an attempt to produce more accurate soil hydraulic property estimates.
 
@@ -62,19 +64,23 @@ This approach leverages the broad spatial coverage of the Rosetta model while in
 - Optionally emit categorical mappings JSON for later use by embedding models.
 - Output: Training parquet (e.g., `training_data.parquet`).
 
-### 4) Train models (NNs and RF)
+### 4) Train models (NNs, RF/XGB)
 
-- Neural nets: `map/learning/train_nn.py`
+- Neural nets and FT-Transformer: `map/learning/train_tabular_nn.py`
   - Configure `root` to point to your training data and set output checkpoint/metrics dirs.
-  - Choose `mode` (`single` or `combined`) and target vertical levels.
-  - Models: `MLP` (one-hot), `MLPEmbeddings` (categorical embeddings), `FTTransformer` (rtdl baseline).
-- Random Forest: `map/learning/train_rf.py`
-  - Produces JSON metrics for single or combined targets.
+  - Choose `mode` (`single` or `combined`) and target vertical `levels`.
+  - Models: `MLP` (one-hot), `MLPEmbeddings` (categorical embeddings), `FTTransformer` (requires `rtdl`).
+- Random Forest and XGBoost: `map/learning/train_decision_trees.py`
+  - Supports `single` and `combined` modes; writes JSON metrics to the configured metrics directory.
+  
+Optional sequence model from VWC time series:
+- 1D CNN on VWC sequences → VG params: `map/learning/train_sequence_nn.py`
 
 ### 5) Inference on empirical stations
 
 - `map/learning/inference.py` loads the best checkpoints (by filename `val_r2`), aligns scalers/encodings, and predicts VG parameters for empirical sites.
 - Inputs: empirical features parquet, training parquet (for stats/columns), categorical mappings JSON, checkpoints directory.
+- Behavior: selects best checkpoints by filename `val_r2` and picks the best model type across available checkpoints.
 - Output: Parquet with predicted `US_R3H3_L{level}_VG_{param}` columns.
 
 ### 6) Empirical SWRC preprocessing and fitting (Mesonet example)
