@@ -41,18 +41,37 @@ def process_soil_data(csv_path, shp_path, output_dir):
             s = re.sub(r"_+", "_", s)
             return s
 
-        # Build a per-layer_id summary using the first value for key fields
+        # Build a per-site summary using coordinates to avoid duplicate extracts at the same point
         cols_present = [c for c in required_cols if c in df.columns]
         base = df[cols_present].copy()
-        # aggregation spec for the columns besides layer_id
-        agg_spec = {c: 'first' for c in cols_present if c != 'layer_id'}
-        grouped_clean = base.groupby('layer_id').agg(agg_spec)
-        grouped_clean['obs_ct'] = base.groupby('layer_id').size()
-        grouped_clean = grouped_clean.reset_index()
 
-        # Create uid from raw layer_id, then drop layer_id
-        grouped_clean['uid'] = grouped_clean['layer_id'].apply(_sanitize_uid)
-        clean_df = grouped_clean.drop(columns=['layer_id'])
+        lat_col = 'latitude_decimal_degrees' if 'latitude_decimal_degrees' in base.columns else None
+        lon_col = 'longitude_decimal_degrees' if 'longitude_decimal_degrees' in base.columns else None
+
+        if lat_col and lon_col:
+            group_keys = [lat_col, lon_col]
+        else:
+            # Fallback to per-layer grouping if coordinates are unavailable
+            group_keys = ['layer_id']
+
+        agg_cols = [c for c in cols_present if c not in group_keys]
+        agg_spec = {c: 'first' for c in agg_cols}
+
+        grouped_clean = base.groupby(group_keys, dropna=False).agg(agg_spec).reset_index()
+        obs_counts = base.groupby(group_keys, dropna=False).size().reset_index(name='obs_ct')
+        grouped_clean = grouped_clean.merge(obs_counts, on=group_keys, how='left')
+
+        # Create uid: prefer layer_id if available; otherwise derive from coordinates
+        if 'layer_id' in grouped_clean.columns:
+            grouped_clean['uid'] = grouped_clean['layer_id'].apply(_sanitize_uid)
+        else:
+            # Use rounded coordinates to build a stable UID
+            grouped_clean['uid'] = grouped_clean.apply(
+                lambda r: _sanitize_uid(f"{r['latitude']:.6f}_{r['longitude']:.6f}"), axis=1
+            )
+
+        # Drop layer_id if present to keep a single identifier downstream
+        clean_df = grouped_clean.drop(columns=['layer_id']) if 'layer_id' in grouped_clean.columns else grouped_clean.copy()
 
         # Rename coordinates
         rename_map = {}
@@ -62,7 +81,7 @@ def process_soil_data(csv_path, shp_path, output_dir):
             rename_map['longitude_decimal_degrees'] = 'longitude'
         clean_df.rename(columns=rename_map, inplace=True)
 
-        # Enforce unique uid; raise if duplicates found after sanitization
+        # Enforce unique uid; raise if duplicates found after sanitization (should be unique per coordinate)
         dup_mask = clean_df['uid'].duplicated(keep=False)
         if dup_mask.any():
             dup_vals = sorted(set(clean_df.loc[dup_mask, 'uid']))
