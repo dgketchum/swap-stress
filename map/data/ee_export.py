@@ -175,7 +175,8 @@ if __name__ == '__main__':
     """"""
     run_mt_mesonet_workflow = False
     run_general_workflow = False
-    run_global_workflow = True
+    run_global_workflow = False
+    run_ismn_workflow = True
 
     home = os.path.expanduser('~')
     root_ = os.path.join(home, 'data', 'IrrigationGIS')
@@ -216,10 +217,29 @@ if __name__ == '__main__':
                   check_dir=extracts_dir_)
 
     elif run_global_workflow:
-        extracts_dir_ = os.path.join(root_, 'soils', 'swapstress', 'extracts', 'global_extracts')
+        extracts_dir_ = os.path.join(root_, 'soils', 'swapstress', 'extracts', 'gshp_extracts')
         shapefile_ = os.path.join(root_, 'soils', 'vg_paramaer_databases', 'wrc', 'wrc_aggregated_mgrs.shp')
         index_ = 'uid'
         output_prefix_ = 'swap-stress/global_training_data'
+        mgrs_shapefile_ = os.path.join(root_, 'boundaries', 'mgrs', 'mgrs_world_attr.shp')
+
+        is_authorized()
+        get_bands(shapefile_path=shapefile_,
+                  mgrs_shp_path=mgrs_shapefile_,
+                  bucket=gcs_bucket_,
+                  file_prefix=output_prefix_,
+                  resolution=4000,
+                  index_col=index_,
+                  split_tiles=False,
+                  diagnose=False,
+                  check_dir=extracts_dir_,
+                  region='global')
+
+    elif run_ismn_workflow:
+        extracts_dir_ = os.path.join(root_, 'soils', 'swapstress', 'extracts', 'ismn_extracts')
+        shapefile_ = os.path.join(root_, 'soils', 'vwc_timeseries', 'ismn', 'ismn_stations_mgrs.shp')
+        index_ = 'station_ui'
+        output_prefix_ = 'swap-stress/ismn_training_data'
         mgrs_shapefile_ = os.path.join(root_, 'boundaries', 'mgrs', 'mgrs_world_attr.shp')
 
         is_authorized()
