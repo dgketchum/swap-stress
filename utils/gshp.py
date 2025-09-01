@@ -29,7 +29,8 @@ def process_soil_data(csv_path, shp_path, output_dir):
 
         # Prepare a cleaned metadata CSV with a stable UID and normalized coords
         print("Preparing cleaned metadata CSV (uid, classes, coords, flags)...")
-        required_cols = ['layer_id', 'SWCC_classes', 'latitude_decimal_degrees', 'longitude_decimal_degrees', 'data_flag']
+        required_cols = ['layer_id', 'SWCC_classes', 'latitude_decimal_degrees', 'longitude_decimal_degrees', 'data_flag',
+                         'thetar', 'thetas', 'alpha', 'n']
         missing = [c for c in required_cols if c not in df.columns]
         if missing:
             print(f"Warning: missing expected columns in source CSV: {missing}")
@@ -87,6 +88,9 @@ def process_soil_data(csv_path, shp_path, output_dir):
             dup_vals = sorted(set(clean_df.loc[dup_mask, 'uid']))
             example_vals = ", ".join(dup_vals[:10])
             raise ValueError(f"Duplicate uid values found ({len(dup_vals)} unique duplicates). Examples: {example_vals}")
+
+        rename_map = {'thetar': 'theta_r', 'thetas': 'theta_s'}
+        clean_df = clean_df.rename(columns=rename_map)
 
         clean_name = Path(csv_path).stem + '_clean.csv'
         clean_path = output_dir / clean_name

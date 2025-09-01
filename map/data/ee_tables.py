@@ -6,7 +6,7 @@ import pandas as pd
 
 
 def concatenate_and_join(ee_in_dir, out_file, rosetta_pqt=None, index_col='site_id', categorical_mappings_json=None,
-                         categories=None, dropcols=None):
+                         categories=None, dropcols=None, extra_datasets=None):
     """
     Concatenates CSVs from Earth Engine extraction, joins with Rosetta data,
     and saves to a single Parquet file.
@@ -32,6 +32,7 @@ def concatenate_and_join(ee_in_dir, out_file, rosetta_pqt=None, index_col='site_
 
     ee_df = pd.concat(df_list, ignore_index=True)
 
+
     for c in ['.geo', 'system:index', 'MGRS_TILE']:
         if dropcols is None and c in ee_df.columns:
             dropcols = [c]
@@ -43,6 +44,7 @@ def concatenate_and_join(ee_in_dir, out_file, rosetta_pqt=None, index_col='site_
     if dropcols is not None:
         ee_df = ee_df.drop(columns=dropcols)
 
+    ee_df[index_col] = ee_df[index_col].astype(str)
     ee_df.set_index(index_col, inplace=True)
 
     if rosetta_pqt:
@@ -56,6 +58,33 @@ def concatenate_and_join(ee_in_dir, out_file, rosetta_pqt=None, index_col='site_
         final_df = ee_df.join(rosetta_df, how='left')
     else:
         final_df = ee_df
+
+    if extra_datasets:
+        for ds_name, spec in extra_datasets.items():
+            if isinstance(spec, dict):
+                fp = spec.get('filepath')
+                cols = spec.get('label_columns') or spec.get('columns') or spec.get('labels')
+            else:
+                continue
+            if not fp:
+                continue
+            if fp.endswith('.parquet'):
+                lab = pd.read_parquet(fp)
+            elif fp.endswith('.csv'):
+                lab = pd.read_csv(fp)
+            else:
+                lab = pd.read_parquet(fp)  # likely error if not parquet/csv
+            if index_col in lab.columns:
+                lab[index_col] = lab[index_col].astype(str)
+                lab = lab.set_index(index_col)
+            if isinstance(cols, list) and len(cols) > 0:
+                lab = lab[cols]
+            for c in lab.columns.to_list():
+                if c in final_df:
+                    final_df = final_df.drop(columns=[c])
+            final_df = final_df.join(lab, how='left')
+            final_df = final_df.dropna()
+
     final_df = final_df[sorted(final_df.columns.to_list())]
 
     if categorical_mappings_json:
@@ -90,10 +119,14 @@ if __name__ == '__main__':
 
     if run_gshp_workflow:
         extracts_dir_ = os.path.join(root_, 'soils', 'swapstress', 'extracts', 'gshp_extracts')
+        gshp_directory_ = os.path.join(root_, 'soils', 'vg_paramaer_databases', 'wrc')
+        soil_csv_path_ = os.path.join(gshp_directory_, 'WRC_dataset_surya_et_al_2021_final.csv')
+        gshp_labels_csv_ = os.path.join(gshp_directory_, 'WRC_dataset_surya_et_al_2021_final_clean.csv')
         output_file_ = os.path.join(root_, 'soils', 'swapstress', 'training', 'gshp_training_data.parquet')
         mappings_json_ = os.path.join(root_, 'soils', 'swapstress', 'training', 'gshp_categorical_mappings.json')
 
-        concatenate_and_join(ee_in_dir=extracts_dir_, out_file=output_file_, rosetta_pqt=None, index_col='uid',
+        concatenate_and_join(ee_in_dir=extracts_dir_, out_file=output_file_,
+                             rosetta_pqt=None, index_col='uid',
                              categorical_mappings_json=mappings_json_,
                              categories=['hhs_stc',
                                          'glc10_lc',
@@ -106,7 +139,9 @@ if __name__ == '__main__':
                              dropcols=['HWSD2_ID',
                                        'WISE30s_ID',
                                        'COVERAGE',
-                                       'SHARE'])
+                                       'SHARE'],
+                             extra_datasets={'gshp': {'filepath': gshp_labels_csv_,
+                                                      'labels': ['theta_r', 'theta_s', 'alpha', 'n']}})
 
     if run_mt_mesonet_workflow:
         extracts_dir_ = os.path.join(root_, 'soils', 'swapstress', 'mt_mesonet_extracts')
