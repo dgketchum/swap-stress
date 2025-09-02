@@ -10,8 +10,17 @@ from lmfit import Model
 class SWRC:
     """
     A class to encapsulate Soil Water Retention Curve (SWRC) data,
-    fit the van Genuchten-Mualem model for one or more soil depths,
+    fit the van Genuchten-Mualem model for one or more depths/groups,
     and visualize the results.
+
+    Input data options:
+      - Provide a file path (CSV or Parquet) with either:
+          ('KPA','VWC') columns or ('suction_cm','theta') columns, and a depth column
+      - Provide a pandas DataFrame via `df` having required columns:
+          'suction' (head/psi in cm), 'theta' (VWC), and 'depth' (cm)
+
+    Notes:
+      - psi/head and depth units are centimeters (cm)
 
     Reference:
     Memari, S.S. and Clement, T.P., 2021. PySWR-A Python code for fitting soil water
@@ -19,27 +28,31 @@ class SWRC:
 
     """
 
-    def __init__(self, filepath=None, depth_col=None):
+    def __init__(self, filepath=None, depth_col=None, df=None, mimic_reesh=False):
         """
-        Initializes the SWRC_fitter object.
+        Initialize the SWRC fitter from a file or a DataFrame.
 
         Args:
-            filepath (str, optional): Path to a CSV or Parquet file to load data from.
+            filepath (str, optional): Path to a CSV or Parquet file.
+            depth_col (str, optional): Column to group by; defaults to 'depth' for DataFrame input
+                                       and 'stationDepth [cm]' for file input if present.
+            df (pandas.DataFrame, optional): DataFrame with columns 'suction' [cm], 'theta', 'depth' [cm].
         """
         self.filepath = filepath
         self.data_by_depth = {}
         self.fit_results = {}
         self._vg_model = Model(self._van_genuchten_model)
+        self.mimic_reesh = bool(mimic_reesh)
 
-        if not depth_col:
-            self.depth_col = 'stationDepth [cm]'
-        else:
-            self.depth_col = depth_col
-
-        if filepath:
+        if df is not None:
+            self.depth_col = depth_col or 'depth'
+            self.load_from_dataframe(df)
+        elif filepath:
+            # default for legacy MT Mesonet files
+            self.depth_col = depth_col or 'stationDepth [cm]'
             self.load_from_file(filepath)
         else:
-            raise ValueError("A filepath is required to initialize the SWRC class.")
+            raise ValueError("Provide either a filepath or a DataFrame (df) to initialize SWRC.")
 
     def load_from_file(self, filepath):
         """
@@ -72,6 +85,27 @@ class SWRC:
             self.data_by_depth[0] = df
             print("Data loaded as a single dataset (no depth column found).")
 
+    def load_from_dataframe(self, df):
+        """
+        Load SWRC data from a DataFrame. Requires columns: 'suction' [cm], 'theta', 'depth' [cm].
+        Groups by `self.depth_col` if present; otherwise treats as single dataset.
+        """
+        required = {'suction', 'theta', 'depth'}
+        missing = required - set(df.columns)
+        if missing:
+            raise ValueError(f"DataFrame missing required columns: {sorted(missing)}")
+
+        df = df.copy()
+        df['suction'] = np.abs(df['suction'].values)
+
+        if self.depth_col in df.columns:
+            for key, group in df.groupby(self.depth_col):
+                self.data_by_depth[key] = group
+            print(f"DataFrame loaded and grouped by {self.depth_col} ({len(self.data_by_depth)} groups).")
+        else:
+            self.data_by_depth[0] = df
+            print("DataFrame loaded as a single dataset (no grouping column found).")
+
     @staticmethod
     def _van_genuchten_model(psi, theta_r, theta_s, alpha, n):
         if n <= 1:
@@ -83,6 +117,13 @@ class SWRC:
 
     def _generate_initial_params(self, data_for_depth):
         params = self._vg_model.make_params()
+        if self.mimic_reesh:
+            # ReESH: start values and no bounds
+            params['theta_r'].set(value=float(np.nanmin(data_for_depth['theta'])))
+            params['theta_s'].set(value=float(np.nanmax(data_for_depth['theta'])))
+            params['alpha'].set(value=0.01)
+            params['n'].set(value=1.2)
+            return params
         theta_s_init = np.max(data_for_depth['theta'])
         theta_r_init = np.min(data_for_depth['theta'])
         alpha_init = 0.05
@@ -113,8 +154,11 @@ class SWRC:
             print(f'--- Initial Parameter Values ---')
             [print(f'{k}: {v.value:.3f}') for k, v in initial_params.items()]
             try:
-                result = self._vg_model.fit(data_df['theta'], initial_params, psi=data_df['suction'],
-                                            method=method, nan_policy='raise')
+                chosen_method = 'leastsq' if self.mimic_reesh else method
+                result = self._vg_model.fit(
+                    data_df['theta'], initial_params, psi=data_df['suction'],
+                    method=chosen_method, nan_policy='raise'
+                )
                 self.fit_results[depth] = result
                 if report:
                     print(result.fit_report())
@@ -278,6 +322,7 @@ class SWRC:
     def results_summary(self):
         """
         Returns a dictionary containing the key results of the fit for each depth.
+        Also stores raw data points for plotting (suction [cm], theta) and optional metadata.
         """
         if not self.fit_results:
             return {"status": "Fit not performed."}
@@ -285,6 +330,20 @@ class SWRC:
         summary = {}
         for depth, result in self.fit_results.items():
             n_obs = len(self.data_by_depth[depth])
+            # Prepare raw data snapshot for plotting
+            df_raw = self.data_by_depth[depth]
+            df_raw = df_raw.dropna(subset=['suction', 'theta'])
+            df_raw = df_raw[np.isfinite(df_raw['suction']) & np.isfinite(df_raw['theta'])]
+            data_blob = {
+                'suction': df_raw['suction'].astype(float).tolist(),
+                'theta': df_raw['theta'].astype(float).tolist(),
+            }
+            meta = {}
+            if 'uid' in df_raw.columns:
+                try:
+                    meta['uid'] = str(df_raw['uid'].iloc[0])
+                except Exception:
+                    pass
             if result and result.success:
                 params = {}
                 for name, param in result.params.items():
@@ -296,34 +355,43 @@ class SWRC:
                     'reduced_chi_squared': result.redchi,
                     'aic': result.aic,
                     'bic': result.bic,
-                    'parameters': params
+                    'parameters': params,
+                    'data': data_blob,
+                    'meta': meta,
                 }
             else:
-                summary[depth] = {'status': 'Fit Failed or Not Performed', 'n_obs': n_obs}
+                summary[depth] = {
+                    'status': 'Fit Failed or Not Performed',
+                    'n_obs': n_obs,
+                    'data': data_blob,
+                    'meta': meta,
+                }
         return summary
 
-    def save_results(self, output_dir):
+    def save_results(self, output_dir, output_filename=None):
         """
         Saves the fit results summary to a JSON file.
 
         Args:
             output_dir (str): The directory to save the results file in.
+            output_filename (str, optional): Output filename. If None, derives from input file
+                                             name when available, else uses 'swrc_fit_results.json'.
         """
         if not self.fit_results:
             print("Fit has not been performed yet. Cannot save results.")
-            return
-
-        if not self.filepath:
-            print("Cannot determine output filename because data was not loaded from a file.")
             return
 
         if not os.path.exists(output_dir):
             os.makedirs(output_dir)
             print(f"Created output directory: {output_dir}")
 
-        base_name = os.path.basename(self.filepath)
-        file_name_without_ext = os.path.splitext(base_name)[0]
-        output_filename = f"{file_name_without_ext}_fit_results.json"
+        if output_filename is None:
+            if self.filepath:
+                base_name = os.path.basename(self.filepath)
+                file_name_without_ext = os.path.splitext(base_name)[0]
+                output_filename = f"{file_name_without_ext}_fit_results.json"
+            else:
+                output_filename = "swrc_fit_results.json"
         output_path = os.path.join(output_dir, output_filename)
 
         summary_data = self.results_summary

@@ -132,6 +132,8 @@ def compare_gshp_to_rosetta(
         r['uid'] = r['layer_id'].apply(_sanitize_uid)
 
     r = r.groupby('uid').first()
+    r['uid'] = r.index
+    r.index = pd.Index(range(len(r)))
 
     # Choose Rosetta columns to use
     cand_map = find_rosetta_param_columns(r)
@@ -163,6 +165,7 @@ def compare_gshp_to_rosetta(
         if p in g.columns:
             s_g = g[p].copy()
             if p == 'alpha':
+                s_g /= 100
                 s_g = np.log10(s_g)
                 s_g[s_g < -5] = np.nan
             s_g = s_g.dropna()
@@ -203,18 +206,28 @@ def compare_gshp_to_rosetta(
             y_true = merged[p].copy()
             y_pred = merged[rosetta_cols[p]].copy()
             # Handle sentinels
-            y_pred = y_pred.replace(-9999, np.nan)
             dfp = pd.DataFrame({'true': y_true, 'pred': y_pred}).dropna()
+            dfp[dfp <= -9999] = np.nan
+
             if dfp.empty:
                 continue
 
-            # Transform to log10 if parameter requires
-            if p in LOG10_PARAMS:
-                dfp = dfp[dfp['true'] > 0]
-                dfp = dfp[dfp['pred'] > 0]
-                dfp['true'] = np.log10(dfp['true'])
-                dfp['pred'] = np.log10(dfp['pred'])
+            if 'theta' in p:
+                dfp[dfp > 1] = np.nan
+                dfp[dfp < 0] = np.nan
 
+            if p == 'alpha':
+                dfp['true'] /= 100
+                dfp['true'] = np.log10(dfp['true'])
+                vals = dfp.values
+                vals[vals < -5.] = np.nan
+                dfp.loc[:, dfp.columns] = vals
+
+            if p == 'n':
+                dfp['true'] = np.log10(dfp['true'])
+                dfp[dfp < 0] = np.nan
+
+            dfp = dfp.dropna()
             r2 = r2_score_np(dfp['true'].values, dfp['pred'].values)
             rmse = rmse_np(dfp['true'].values, dfp['pred'].values)
             bias = float((dfp['pred'] - dfp['true']).mean())
@@ -232,7 +245,7 @@ def compare_gshp_to_rosetta(
                 ax.set_ylabel(f"Rosetta {'log10(' + p + ')' if p in LOG10_PARAMS else p}")
                 ax.set_title(f"GSHP vs Rosetta: {p} (R2={r2:.2f}, RMSE={rmse:.3f})")
                 plt.tight_layout()
-                out_fp = os.path.join(out_dir, f'{p}_scatter_gshp_vs_rosetta.png')
+                out_fp = os.path.join(out_dir, 'plots', f'{p}_scatter_gshp_vs_rosetta.png')
                 plt.savefig(out_fp, dpi=300)
                 plt.close(fig)
 
