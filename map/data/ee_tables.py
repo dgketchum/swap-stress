@@ -141,7 +141,7 @@ if __name__ == '__main__':
                                        'COVERAGE',
                                        'SHARE'],
                              extra_datasets={'gshp': {'filepath': gshp_labels_csv_,
-                                                      'labels': ['theta_r', 'theta_s', 'alpha', 'n']}})
+                                                      'labels': ['theta_r', 'theta_s', 'alpha', 'n', 'data_flag']}})
 
     if run_mt_mesonet_workflow:
         extracts_dir_ = os.path.join(root_, 'soils', 'swapstress', 'mt_mesonet_extracts')
