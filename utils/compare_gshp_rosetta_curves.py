@@ -13,10 +13,13 @@ from utils.compare_gshp_rosetta_params import find_rosetta_param_columns, choose
 
 def _sanitize_uid(val):
     s = str(val) if pd.notnull(val) else ''
+    s = s.strip()
     s = re.sub(r"\s+", "", s)
+    s = s.replace('/', '_').replace('\\', '_')
     s = s.replace('.', '_')
-    s = re.sub(r"_+", "_", s)
-    return s
+    s = re.sub(r"[^A-Za-z0-9_-]", "_", s)
+    s = re.sub(r"_+", "_", s).strip('_')
+    return s[:80]
 
 
 def vg_theta(psi_cm, theta_r, theta_s, alpha, n):
@@ -72,11 +75,14 @@ def fit_gshp_curve(csv_path, results_dir, method='slsqp'):
     print(f'Analyzing {filtered_stations} of {total_stations} total stations')
     print(f'{len(d)} vwc/psi data points')
 
-    # Instantiate SWRC using DataFrame, grouping by uid to keep per-layer fits
-    for i, r in d.groupby(['lat', 'lon']):
+    # Instantiate SWRC using DataFrame, grouping by site (lat, lon)
+    for (lat, lon), r in d.groupby(['lat', 'lon']):
         fitter = SWRC(df=r, depth_col='depth')
         fitter.fit(report=False, method=method)
-        fitter.save_results(output_dir=results_dir, output_filename=f'{i[0]}.json')
+        try:
+            fitter.save_results(output_dir=results_dir, output_filename=f'{r.iloc[0]['uid']}.json')
+        except FileNotFoundError:
+            continue
 
 
 def load_swrc_results(json_path):
@@ -136,78 +142,121 @@ def load_rosetta_params(parquet_path, prefix_regex=None):
     return r, chosen
 
 
-def plot_curves(gshp_json, rosetta_parquet, out_dir, rosetta_prefix_regex=None,
+def plot_curves(gshp_results, rosetta_parquet, out_dir, rosetta_prefix_regex=None,
                 sample_uids: Optional[List[str]] = None):
     os.makedirs(out_dir, exist_ok=True)
 
-    swrc_df, raw_points = load_swrc_results(gshp_json)
+    # Preload Rosetta params once
     ros_df, chosen = load_rosetta_params(rosetta_parquet, rosetta_prefix_regex)
-
-    merged = swrc_df.merge(ros_df, on='uid', how='inner')
-    if merged.empty:
-        return
-
-    # Resolve Rosetta param columns
     ros_cols: Dict[str, Optional[str]] = chosen
 
-    # Build psi grid (cm)
     psi = np.logspace(-2, 6, 400)
 
-    # Subset to requested UIDs if provided
-    if sample_uids:
-        merged = merged[merged['uid'].isin(sample_uids)]
+    # Determine JSON files to plot
+    if os.path.isdir(gshp_results):
+        json_files = [os.path.join(gshp_results, f) for f in os.listdir(gshp_results) if f.endswith('.json')]
+    else:
+        json_files = [gshp_results]
 
-    for _, row in merged.iterrows():
-        uid = row['uid']
-        tr = float(row['theta_r']) if pd.notnull(row['theta_r']) else np.nan
-        ts = float(row['theta_s']) if pd.notnull(row['theta_s']) else np.nan
-        a_fit = float(row['alpha']) if pd.notnull(row['alpha']) else np.nan
-        n_fit = float(row['n']) if pd.notnull(row['n']) else np.nan
+    for jfp in json_files:
+        try:
+            with open(jfp, 'r') as f:
+                data = json.load(f)
+        except Exception:
+            continue
 
-        # Rosetta params may be in log10; detect by column name
-        def get_ros(p):
-            col = ros_cols.get(p)
-            if col is None or col not in row.index:
-                return np.nan
-            val = row[col]
-            if isinstance(col, str) and ('log10_' in col or col.endswith('_log10_alpha') or col.endswith('_log10_n')):
-                return float(10 ** val)
-            if p == 'alpha' and 'log10' in col:
-                return float(10 ** val)
-            if p == 'n' and 'log10' in col:
-                return float(10 ** val)
-            return float(val)
+        depth_items = []
+        raw_points_map: Dict[str, Dict[str, List[float]]] = {}
+        uids_for_site: List[str] = []
+        for key, info in data.items():
+            if not isinstance(info, dict) or 'status' not in info:
+                continue
+            uid_key = info.get('meta', {}).get('uid')
+            if uid_key:
+                uids_for_site.append(uid_key)
+            if 'data' in info and uid_key:
+                raw_points_map[uid_key] = {
+                    'suction': info['data'].get('suction', []),
+                    'theta': info['data'].get('theta', []),
+                }
+            if info.get('status') != 'Success':
+                continue
+            params = info.get('parameters', {})
+            try:
+                depth_val = float(key)
+            except Exception:
+                depth_val = key
+            depth_items.append({
+                'depth': depth_val,
+                'theta_r': params.get('theta_r', {}).get('value'),
+                'theta_s': params.get('theta_s', {}).get('value'),
+                'alpha': params.get('alpha', {}).get('value'),
+                'n': params.get('n', {}).get('value'),
+                'uid': uid_key,
+            })
 
-        a_ros = get_ros('alpha')
-        n_ros = get_ros('n')
-        tr_ros = get_ros('theta_r')
-        ts_ros = get_ros('theta_s')
+        if not depth_items:
+            continue
 
-        # Plot
-        plt.style.use('seaborn-v0_8-whitegrid')
-        fig, ax = plt.subplots(figsize=(7, 6))
+        if sample_uids:
+            depth_items = [d for d in depth_items if d['uid'] in sample_uids]
+            if not depth_items:
+                continue
 
-        theta_fit = vg_theta(psi, tr, ts, a_fit, n_fit)
-        theta_ros = vg_theta(psi, tr_ros, ts_ros, a_ros, n_ros)
+        plt.style.use('seaborn-v0_8-darkgrid')
+        fig, ax = plt.subplots(figsize=(8, 7))
+        depths_sorted = sorted(depth_items, key=lambda x: (np.nan if x['depth'] is None else x['depth']))
+        colors = plt.cm.get_cmap('plasma')(np.linspace(0, 0.85, len(depths_sorted)))
 
-        # plot raw GSHP points if available
-        raw = raw_points.get(uid)
-        if raw is not None and raw.get('suction') and raw.get('theta'):
-            ax.scatter(raw['theta'], raw['suction'], s=12, alpha=0.5, label='GSHP points')
+        for color, item in zip(colors, depths_sorted):
+            tr = float(item['theta_r']) if pd.notnull(item['theta_r']) else np.nan
+            ts = float(item['theta_s']) if pd.notnull(item['theta_s']) else np.nan
+            a_fit = float(item['alpha']) if pd.notnull(item['alpha']) else np.nan
+            n_fit = float(item['n']) if pd.notnull(item['n']) else np.nan
+            theta_fit = vg_theta(psi, tr, ts, a_fit, n_fit)
+            label_prefix = f"Depth {item['depth']} cm" if isinstance(item['depth'], (int, float)) else str(item['depth'])
+            rp = raw_points_map.get(item['uid'])
+            if rp is not None and rp.get('suction') and rp.get('theta'):
+                ax.scatter(rp['theta'], rp['suction'], s=12, alpha=0.5, color=color, label=f"{label_prefix} points")
+            ax.plot(theta_fit, psi, '-', color=color, lw=2, label=f"{label_prefix} fit")
 
-        ax.plot(theta_fit, psi, label='GSHP fit', lw=2)
-        ax.plot(theta_ros, psi, label='Rosetta', lw=2)
+        # Rosetta overlay using first matching uid
+        a_ros = n_ros = tr_ros = ts_ros = np.nan
+        for uid in uids_for_site:
+            row = ros_df[ros_df['uid'] == uid]
+            if not row.empty:
+                row = row.iloc[0]
+                def get_ros(p):
+                    col = ros_cols.get(p)
+                    if col is None or col not in row.index:
+                        return np.nan
+                    val = row[col]
+                    if isinstance(col, str) and ('log10_' in col or col.endswith('_log10_alpha') or col.endswith('_log10_n')):
+                        return float(10 ** val)
+                    if p == 'alpha' and 'log10' in col:
+                        return float(10 ** val)
+                    if p == 'n' and 'log10' in col:
+                        return float(10 ** val)
+                    return float(val)
+                a_ros = get_ros('alpha')
+                n_ros = get_ros('n')
+                tr_ros = get_ros('theta_r')
+                ts_ros = get_ros('theta_s')
+                break
+        if not np.isnan(a_ros) and not np.isnan(n_ros) and not np.isnan(tr_ros) and not np.isnan(ts_ros):
+            theta_ros = vg_theta(psi, tr_ros, ts_ros, a_ros, n_ros)
+            ax.plot(theta_ros, psi, 'k--', lw=2, label='Rosetta')
 
         ax.set_yscale('log')
         ax.set_ylim(1e-2, 1e6)
         ax.set_xlim(0, 0.7)
         ax.set_xlabel('Volumetric Water Content (cm3/cm3)')
         ax.set_ylabel('Soil Water Potential (cm)')
-        ax.set_title(f' SWRC: {uid}')
-        ax.legend()
+        ax.set_title(f'SWRC: {os.path.basename(jfp).replace(".json", "")}')
+        ax.legend(fontsize=9)
         plt.tight_layout()
 
-        out_fp = os.path.join(out_dir, f'swrc_compare_{uid}.png')
+        out_fp = os.path.join(out_dir, os.path.basename(jfp).replace('.json', '_compare.png'))
         plt.savefig(out_fp, dpi=300)
         plt.close(fig)
 
@@ -219,12 +268,12 @@ if __name__ == '__main__':
 
     gshp_csv_ = os.path.join(gshp_dir_, 'WRC_dataset_surya_et_al_2021_final.csv')
     rosetta_parquet_ = os.path.join(gshp_dir_, 'extracted_rosetta_points.parquet')
-    fits_json_ = os.path.join(gshp_dir_, 'local_fits')
+    fits_dir_ = os.path.join(gshp_dir_, 'local_fits')
 
-    fit_gshp_curve(gshp_csv_, fits_json_)
+    fit_gshp_curve(gshp_csv_, fits_dir_)
 
     plots_dir_ = os.path.join(gshp_dir_, 'swrc_curve_plots')
     os.makedirs(plots_dir_, exist_ok=True)
 
-    # plot_curves(fits_json_, rosetta_parquet_, plots_dir_, rosetta_prefix_regex=None, sample_uids=None)
+    plot_curves(fits_dir_, rosetta_parquet_, plots_dir_, rosetta_prefix_regex=None, sample_uids=None)
 # ========================= EOF ====================================================================
