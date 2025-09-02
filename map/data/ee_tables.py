@@ -90,10 +90,8 @@ def concatenate_and_join(ee_in_dir, out_file, rosetta_pqt=None, index_col='site_
     if categorical_mappings_json:
         mappings = {}
         for col in categories:
-            if final_df[col].dtype == 'object':
-                final_df[col] = final_df[col].astype('category')
-            mappings[col] = {int(k): int(v) for v, k in
-                             enumerate(final_df[col].unique())}  # likely error if non-numeric categories
+            final_df.loc[:, col] = final_df[col].values.astype(int)
+            mappings[col] = {int(k): int(v) for v, k in enumerate(final_df[col].unique())}
 
         with open(categorical_mappings_json, 'w') as f:
             json.dump(mappings, f, indent=4)
