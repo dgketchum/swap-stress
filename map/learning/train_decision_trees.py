@@ -81,6 +81,10 @@ def run_rf_training(f, mode='single', levels=None):
                 data = df[[target] + feature_cols].copy()
                 initial_len = len(data)
                 data[data[target] <= -9999] = np.nan
+                if target == 'alpha':
+                    data.loc[:, target] = np.log10(np.clip(data[target].astype(float), 1e-9, None))
+                elif target == 'n':
+                    data.loc[:, target] = np.log10(np.clip(data[target].astype(float), 1.0 + 1e-9, None))
                 data.dropna(subset=[target], inplace=True)
                 print(f'Dropped {initial_len - len(data)} NaN records for {target}')
 
@@ -159,6 +163,10 @@ def run_rf_training(f, mode='single', levels=None):
                 initial_len = len(data)
                 for t in targets:
                     data[data[t] <= -9999] = np.nan
+                if 'alpha' in data.columns:
+                    data.loc[:, 'alpha'] = np.log10(np.clip(data['alpha'].astype(float), 1e-9, None))
+                if 'n' in data.columns:
+                    data.loc[:, 'n'] = np.log10(np.clip(data['n'].astype(float), 1.0 + 1e-9, None))
                 data.dropna(subset=targets, inplace=True)
                 print(f'Dropped {initial_len - len(data)} NaN records for GSHP combined')
 

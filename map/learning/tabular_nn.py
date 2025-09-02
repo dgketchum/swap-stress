@@ -7,8 +7,16 @@ from torchmetrics.regression import R2Score
 from map.learning import LEARNING_RATE, WEIGHT_DECAY
 
 
+class SafeBatchNorm1d(nn.BatchNorm1d):
+    def forward(self, input):
+        if self.training and input.size(0) == 1:
+            return input
+        return super().forward(input)
+
+
 class MLPWithEmbeddings(nn.Module):
-    def __init__(self, n_num_features, cat_cardinalities, embedding_dim=10, hidden_dim=128, n_outputs=1):
+    def __init__(self, n_num_features, cat_cardinalities, embedding_dim=10, hidden_dim=128, n_outputs=1,
+                 num_hidden_layers=1):
         super().__init__()
         self.cat_cardinalities = cat_cardinalities
         self.embeddings = nn.ModuleList([
@@ -16,11 +24,20 @@ class MLPWithEmbeddings(nn.Module):
         ])
         n_cat_features = sum(e.embedding_dim for e in self.embeddings)
         total_features = n_num_features + n_cat_features
-        self.layers = nn.Sequential(
-            nn.Linear(total_features, hidden_dim), nn.ReLU(), nn.BatchNorm1d(hidden_dim), nn.Dropout(0.3),
-            nn.Linear(hidden_dim, hidden_dim // 2), nn.ReLU(), nn.BatchNorm1d(hidden_dim // 2), nn.Dropout(0.2),
-            nn.Linear(hidden_dim // 2, n_outputs)
-        )
+        blocks = [
+            nn.Linear(total_features, hidden_dim), nn.ReLU(), SafeBatchNorm1d(hidden_dim), nn.Dropout(0.3)
+        ]
+        in_dim = hidden_dim
+        cur_dim = hidden_dim
+        for _ in range(max(0, num_hidden_layers - 1)):
+            next_dim = max(cur_dim // 2, 8)
+            blocks.extend([
+                nn.Linear(in_dim, next_dim), nn.ReLU(), SafeBatchNorm1d(next_dim), nn.Dropout(0.2)
+            ])
+            in_dim = next_dim
+            cur_dim = next_dim
+        blocks.append(nn.Linear(in_dim, n_outputs))
+        self.layers = nn.Sequential(*blocks)
 
     def forward(self, x_num, x_cat):
 
@@ -37,21 +54,33 @@ class MLPWithEmbeddings(nn.Module):
                     f"Error: Column {i} has max value {max_val}, which is out of bounds "
                     f"for embedding size {num_embeddings}. Valid range is [0, {num_embeddings - 1}]."
                 )
-
-        cat_embeds = [emb(x_cat[:, i]) for i, emb in enumerate(self.embeddings)]
-        x_cat_processed = torch.cat(cat_embeds, dim=1)
-        x = torch.cat([x_num, x_cat_processed], dim=1)
+        # Handle case with zero categorical features gracefully
+        if len(self.embeddings) > 0:
+            cat_embeds = [emb(x_cat[:, i]) for i, emb in enumerate(self.embeddings)]
+            x_cat_processed = torch.cat(cat_embeds, dim=1)
+            x = torch.cat([x_num, x_cat_processed], dim=1)
+        else:
+            x = x_num
         return self.layers(x)
 
 
 class VanillaMLP(nn.Module):
-    def __init__(self, n_features, hidden_dim=128, n_outputs=1):
+    def __init__(self, n_features, hidden_dim=128, n_outputs=1, num_hidden_layers=1):
         super().__init__()
-        self.layers = nn.Sequential(
-            nn.Linear(n_features, hidden_dim), nn.ReLU(), nn.BatchNorm1d(hidden_dim), nn.Dropout(0.3),
-            nn.Linear(hidden_dim, hidden_dim // 2), nn.ReLU(), nn.BatchNorm1d(hidden_dim // 2), nn.Dropout(0.2),
-            nn.Linear(hidden_dim // 2, n_outputs)
-        )
+        blocks = [
+            nn.Linear(n_features, hidden_dim), nn.ReLU(), SafeBatchNorm1d(hidden_dim), nn.Dropout(0.3)
+        ]
+        in_dim = hidden_dim
+        cur_dim = hidden_dim
+        for _ in range(max(0, num_hidden_layers - 1)):
+            next_dim = max(cur_dim // 2, 8)
+            blocks.extend([
+                nn.Linear(in_dim, next_dim), nn.ReLU(), SafeBatchNorm1d(next_dim), nn.Dropout(0.2)
+            ])
+            in_dim = next_dim
+            cur_dim = next_dim
+        blocks.append(nn.Linear(in_dim, n_outputs))
+        self.layers = nn.Sequential(*blocks)
 
     def forward(self, x):
         return self.layers(x)
