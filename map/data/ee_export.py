@@ -175,8 +175,8 @@ if __name__ == '__main__':
     """"""
     run_mt_mesonet_workflow = False
     run_general_workflow = False
-    run_global_workflow = False
-    run_ismn_workflow = True
+    run_global_workflow = True
+    run_ismn_workflow = False
 
     home = os.path.expanduser('~')
     root_ = os.path.join(home, 'data', 'IrrigationGIS')
@@ -217,10 +217,10 @@ if __name__ == '__main__':
                   check_dir=extracts_dir_)
 
     elif run_global_workflow:
-        extracts_dir_ = os.path.join(root_, 'soils', 'swapstress', 'extracts', 'gshp_extracts')
+        extracts_dir_ = os.path.join(root_, 'soils', 'swapstress', 'extracts', 'gshp_extracts_250m')
         shapefile_ = os.path.join(root_, 'soils', 'vg_paramaer_databases', 'wrc', 'wrc_aggregated_mgrs.shp')
         index_ = 'uid'
-        output_prefix_ = 'swap-stress/global_training_data'
+        output_prefix_ = 'swap-stress/gshp_training_data_250m'
         mgrs_shapefile_ = os.path.join(root_, 'boundaries', 'mgrs', 'mgrs_world_attr.shp')
 
         is_authorized()
@@ -228,7 +228,7 @@ if __name__ == '__main__':
                   mgrs_shp_path=mgrs_shapefile_,
                   bucket=gcs_bucket_,
                   file_prefix=output_prefix_,
-                  resolution=4000,
+                  resolution=250,
                   index_col=index_,
                   split_tiles=False,
                   diagnose=False,
