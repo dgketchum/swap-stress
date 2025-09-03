@@ -1,5 +1,4 @@
 import os
-import re
 import pandas as pd
 import geopandas as gpd
 from pathlib import Path
@@ -16,6 +15,7 @@ def process_soil_data(csv_path, shp_path, output_dir):
         shp_path (str or Path): Path to the MGRS grid shapefile.
         output_dir (str or Path): Directory to save the output files.
     """
+
     try:
         csv_path = Path(csv_path).expanduser()
         shp_path = Path(shp_path).expanduser()
@@ -29,50 +29,34 @@ def process_soil_data(csv_path, shp_path, output_dir):
 
         # Prepare a cleaned metadata CSV with a stable UID and normalized coords
         print("Preparing cleaned metadata CSV (uid, classes, coords, flags)...")
-        required_cols = ['layer_id', 'SWCC_classes', 'latitude_decimal_degrees', 'longitude_decimal_degrees', 'data_flag',
+        required_cols = ['profile_id', 'layer_id', 'SWCC_classes', 'latitude_decimal_degrees',
+                         'longitude_decimal_degrees', 'data_flag',
                          'thetar', 'thetas', 'alpha', 'n']
+
         missing = [c for c in required_cols if c not in df.columns]
         if missing:
             print(f"Warning: missing expected columns in source CSV: {missing}")
-
-        def _sanitize_uid(val):
-            s = str(val) if pd.notnull(val) else ''
-            s = re.sub(r"\s+", "", s)
-            s = s.replace('.', '_')
-            s = re.sub(r"_+", "_", s)
-            return s
 
         # Build a per-site summary using coordinates to avoid duplicate extracts at the same point
         cols_present = [c for c in required_cols if c in df.columns]
         base = df[cols_present].copy()
 
-        lat_col = 'latitude_decimal_degrees' if 'latitude_decimal_degrees' in base.columns else None
-        lon_col = 'longitude_decimal_degrees' if 'longitude_decimal_degrees' in base.columns else None
-
-        if lat_col and lon_col:
-            group_keys = [lat_col, lon_col]
-        else:
-            # Fallback to per-layer grouping if coordinates are unavailable
-            group_keys = ['layer_id']
-
-        agg_cols = [c for c in cols_present if c not in group_keys]
+        agg_cols = [c for c in cols_present if c != 'profile_id']
         agg_spec = {c: 'first' for c in agg_cols}
 
-        grouped_clean = base.groupby(group_keys, dropna=False).agg(agg_spec).reset_index()
-        obs_counts = base.groupby(group_keys, dropna=False).size().reset_index(name='obs_ct')
-        grouped_clean = grouped_clean.merge(obs_counts, on=group_keys, how='left')
+        grouped_clean = base.groupby('profile_id', dropna=False).agg(agg_spec).reset_index()
+        obs_counts = base.groupby('profile_id', dropna=False).size().reset_index(name='obs_ct')
+        grouped_clean = grouped_clean.merge(obs_counts, on='profile_id', how='left')
 
-        # Create uid: prefer layer_id if available; otherwise derive from coordinates
-        if 'layer_id' in grouped_clean.columns:
-            grouped_clean['uid'] = grouped_clean['layer_id'].apply(_sanitize_uid)
-        else:
-            # Use rounded coordinates to build a stable UID
-            grouped_clean['uid'] = grouped_clean.apply(
-                lambda r: _sanitize_uid(f"{r['latitude']:.6f}_{r['longitude']:.6f}"), axis=1
-            )
-
-        # Drop layer_id if present to keep a single identifier downstream
-        clean_df = grouped_clean.drop(columns=['layer_id']) if 'layer_id' in grouped_clean.columns else grouped_clean.copy()
+        # Ensure a single identifier column: profile_id
+        clean_df = grouped_clean.copy()
+        if 'profile_id' not in clean_df.columns:
+            if 'layer_id' in clean_df.columns:
+                clean_df['profile_id'] = clean_df['layer_id']  # likely error if layer_id not unique
+            else:
+                pass
+        if 'layer_id' in clean_df.columns:
+            clean_df = clean_df.drop(columns=['layer_id'])
 
         # Rename coordinates
         rename_map = {}
@@ -82,12 +66,13 @@ def process_soil_data(csv_path, shp_path, output_dir):
             rename_map['longitude_decimal_degrees'] = 'longitude'
         clean_df.rename(columns=rename_map, inplace=True)
 
-        # Enforce unique uid; raise if duplicates found after sanitization (should be unique per coordinate)
-        dup_mask = clean_df['uid'].duplicated(keep=False)
-        if dup_mask.any():
-            dup_vals = sorted(set(clean_df.loc[dup_mask, 'uid']))
-            example_vals = ", ".join(dup_vals[:10])
-            raise ValueError(f"Duplicate uid values found ({len(dup_vals)} unique duplicates). Examples: {example_vals}")
+        # Enforce unique profile_id if present
+        if 'profile_id' in clean_df.columns:
+            dup_mask = clean_df['profile_id'].duplicated(keep=False)
+            if dup_mask.any():
+                dup_vals = sorted(set(clean_df.loc[dup_mask, 'profile_id']))
+                example_vals = ", ".join(map(str, dup_vals[:10]))
+                raise ValueError(f"Duplicate profile_id values found ({len(dup_vals)} unique duplicates). Examples: {example_vals}")
 
         rename_map = {'thetar': 'theta_r', 'thetas': 'theta_s'}
         clean_df = clean_df.rename(columns=rename_map)

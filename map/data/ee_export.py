@@ -175,7 +175,7 @@ if __name__ == '__main__':
     """"""
     run_mt_mesonet_workflow = False
     run_general_workflow = False
-    run_global_workflow = True
+    run_gshp_workflow = True
     run_ismn_workflow = False
 
     home = os.path.expanduser('~')
@@ -216,10 +216,10 @@ if __name__ == '__main__':
                   split_tiles=True,
                   check_dir=extracts_dir_)
 
-    elif run_global_workflow:
+    elif run_gshp_workflow:
         extracts_dir_ = os.path.join(root_, 'soils', 'swapstress', 'extracts', 'gshp_extracts_250m')
         shapefile_ = os.path.join(root_, 'soils', 'vg_paramaer_databases', 'wrc', 'wrc_aggregated_mgrs.shp')
-        index_ = 'uid'
+        index_ = 'profile_id'
         output_prefix_ = 'swap-stress/gshp_training_data_250m'
         mgrs_shapefile_ = os.path.join(root_, 'boundaries', 'mgrs', 'mgrs_world_attr.shp')
 

@@ -124,7 +124,7 @@ if __name__ == '__main__':
         mappings_json_ = os.path.join(root_, 'soils', 'swapstress', 'training', 'gshp_categorical_mappings.json')
 
         concatenate_and_join(ee_in_dir=extracts_dir_, out_file=output_file_,
-                             rosetta_pqt=None, index_col='uid',
+                             rosetta_pqt=None, index_col='profile_id',
                              categorical_mappings_json=mappings_json_,
                              categories=['hhs_stc',
                                          'glc10_lc',

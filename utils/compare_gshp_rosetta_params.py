@@ -11,18 +11,10 @@ PARAMS = ['theta_r', 'theta_s', 'alpha', 'n']
 LOG10_PARAMS = {'alpha', 'n'}
 
 
-def _sanitize_uid(val):
-    s = str(val) if pd.notnull(val) else ''
-    s = re.sub(r"\s+", "", s)
-    s = s.replace('.', '_')
-    s = re.sub(r"_+", "_", s)
-    return s
-
-
 def load_gshp_groupped(csv_path):
     """Load GSHP CSV and aggregate one row per layer_id with parameter columns present.
 
-    Returns a DataFrame with columns: uid, layer_id, [theta_r, theta_s, alpha, n], latitude, longitude, data_flag
+    Returns a DataFrame with columns: profile_id, layer_id, [theta_r, theta_s, alpha, n], latitude, longitude, data_flag
     Only rows with good quality estimates are kept when possible.
     """
     try:
@@ -36,14 +28,16 @@ def load_gshp_groupped(csv_path):
         if mask_good.any():
             df = df[mask_good]
 
-    needed = ['layer_id', 'alpha', 'thetar', 'thetas', 'n']
+    needed = ['profile_id', 'layer_id', 'alpha', 'thetar', 'thetas', 'n']
     present = [c for c in needed if c in df.columns]
-    if 'layer_id' not in present:
-        raise ValueError("GSHP CSV missing 'layer_id' column.")
+    if 'profile_id' not in present and 'layer_id' not in present:
+        raise ValueError("GSHP CSV missing 'profile_id' and 'layer_id' columns.")
 
     # Aggregate one row per layer_id (first value per column)
-    agg_spec = {c: 'first' for c in present if c != 'layer_id'}
-    g = df[present].groupby('layer_id').agg(agg_spec).reset_index()
+    # Group by profile_id primarily; fallback to layer_id
+    group_key = 'profile_id' if 'profile_id' in present else 'layer_id'
+    agg_spec = {c: 'first' for c in present if c != group_key}
+    g = df[present].groupby(group_key).agg(agg_spec).reset_index().rename(columns={group_key: 'profile_id'})
 
     # Coordinates if available
     lat_cols = ['latitude', 'latitude_decimal_degrees']
@@ -59,8 +53,8 @@ def load_gshp_groupped(csv_path):
     rename_map = {'thetar': 'theta_r', 'thetas': 'theta_s'}
     g = g.rename(columns=rename_map)
 
-    # Sanitize uid from layer_id
-    g['uid'] = g['layer_id'].apply(_sanitize_uid)
+    # Ensure profile_id exists as string identifier
+    g['profile_id'] = g['profile_id'].astype(str)
     return g
 
 
@@ -127,12 +121,12 @@ def compare_gshp_to_rosetta(
     g = load_gshp_groupped(gshp_csv)
     r = pd.read_parquet(rosetta_parquet)
 
-    # Try to propagate uid/layer_id in Rosetta DF if possible
-    if 'uid' not in r.columns and 'layer_id' in r.columns:
-        r['uid'] = r['layer_id'].apply(_sanitize_uid)
+    # Ensure profile_id available in Rosetta DF
+    if 'profile_id' not in r.columns and 'layer_id' in r.columns:
+        r['profile_id'] = r['layer_id']  # likely error if not present
 
-    r = r.groupby('uid').first()
-    r['uid'] = r.index
+    r = r.groupby('profile_id').first()
+    r['profile_id'] = r.index
     r.index = pd.Index(range(len(r)))
 
     # Choose Rosetta columns to use

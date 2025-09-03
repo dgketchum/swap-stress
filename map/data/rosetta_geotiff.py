@@ -92,7 +92,7 @@ if __name__ == '__main__':
     home = os.path.expanduser('~')
     root_ = os.path.join(home, 'data', 'IrrigationGIS')
 
-    rosetta_dir_ = os.path.join(home, 'IrrigationGIS', 'soils', 'rosetta')
+    rosetta_dir_ = os.path.join(root_, 'soils', 'rosetta')
     # points_shp_ = os.path.join(home,  IrrigationGIS', 'soils', 'gis', 'pretraining-roi-10000_mgrs.shp')
     # points_shp_ = os.path.join(home, 'IrrigationGIS', 'soils', 'soil_potential_obs', 'mt_mesonet', 'station_metadata_mgrs.shp')
     points_shp_ = os.path.join(root_, 'soils', 'vg_paramaer_databases', 'wrc', 'wrc_aggregated_mgrs.shp')
@@ -103,6 +103,6 @@ if __name__ == '__main__':
     extract_rosetta_parameters(points_shp=points_shp_,
                                rosetta_dir=os.path.expanduser(rosetta_dir_),
                                out_parquet=output_csv_,
-                               num_workers=18,
+                               num_workers=12,
                                debug=False)
 # ========================= EOF ====================================================================
