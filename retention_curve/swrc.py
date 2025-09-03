@@ -344,6 +344,11 @@ class SWRC:
                     meta['uid'] = str(df_raw['uid'].iloc[0])
                 except Exception:
                     pass
+            if 'profile_id' in df_raw.columns:
+                try:
+                    meta['profile_id'] = str(df_raw['profile_id'].iloc[0])
+                except Exception:
+                    pass
             if result and result.success:
                 params = {}
                 for name, param in result.params.items():
@@ -368,7 +373,7 @@ class SWRC:
                 }
         return summary
 
-    def save_results(self, output_dir, output_filename=None):
+    def save_results(self, output_dir, output_filename=None, add_data=None):
         """
         Saves the fit results summary to a JSON file.
 
@@ -395,6 +400,9 @@ class SWRC:
         output_path = os.path.join(output_dir, output_filename)
 
         summary_data = self.results_summary
+
+        if add_data:
+            [summary_data[k].update(v) for k, v  in add_data.items()]
 
         with open(output_path, 'w') as f:
             json.dump(summary_data, f, indent=4)
