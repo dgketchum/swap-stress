@@ -7,6 +7,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 from retention_curve.swrc import SWRC
+from retention_curve.gshp_swrc import GshpSWRC
 from retention_curve import ROSETTA_LEVEL_DEPTHS
 from utils.compare_gshp_rosetta_params import find_rosetta_param_columns
 
@@ -42,7 +43,7 @@ def fit_gshp_curve(csv_path, results_dir, method='slsqp'):
     total_stations = len(df.groupby(['lat', 'lon']))
 
     df = df[df['data_flag'] == 'good quality estimate']
-    df = df[df['SWCC_classes'] == 'YWYD']
+    # df = df[df['SWCC_classes'] == 'YWYD']
 
     df['alpha_pub'] /= 100
     df['alpha_pub'][df['alpha_pub'] < -5] = np.nan
@@ -59,6 +60,7 @@ def fit_gshp_curve(csv_path, results_dir, method='slsqp'):
             'n_pub',
             'theta_r_pub',
             'theta_s_pub',
+            'SWCC_classes',
             ]
 
     present = [c for c in keep if c in df.columns]
@@ -80,16 +82,17 @@ def fit_gshp_curve(csv_path, results_dir, method='slsqp'):
     # Instantiate SWRC using DataFrame, grouping by site (lat, lon)
     for idx, r in d.groupby(['profile_id']):
         pid = idx[0]
-        if pid != 'Florida_dataset181':
-            continue
         filename = f'{pid}.json'
-        fitter = SWRC(df=r, depth_col='depth', mimic_gshp=True)
+        if os.path.exists(os.path.join(results_dir, filename)):
+            continue
+        fitter = GshpSWRC(df=r, depth_col='depth')
         fitter.fit(report=False, method=method)
 
         additional_data = r.groupby('depth').first()[['alpha_pub',
                                                       'n_pub',
                                                       'theta_r_pub',
-                                                      'theta_s_pub']]
+                                                      'theta_s_pub',
+                                                      'SWCC_classes']]
 
         additional_data = additional_data.to_dict(orient='index')
         try:
@@ -164,9 +167,6 @@ def plot_curves(gshp_results, rosetta_parquet, out_dir,
         json_files = [gshp_results]
 
     for jfp in json_files:
-
-        if 'Florida_dataset181' not in jfp:
-            continue
 
         try:
             with open(jfp, 'r') as f:
@@ -333,21 +333,21 @@ def plot_curves(gshp_results, rosetta_parquet, out_dir,
         ax.set_xlabel('Volumetric Water Content (cm3/cm3)')
         ax.set_ylabel('Soil Water Potential (cm)')
         ax.set_title(f'SWRC: {os.path.basename(jfp).replace(".json", "")}')
-        # Add parameter table for shallowest depth: Published vs Fit vs Rosetta
+
         shallow_items = [d for d in depths_sorted if isinstance(d['depth'], (int, float, np.floating))]
         if shallow_items:
             shallow = shallow_items[0]
             sh_depth = float(shallow['depth'])
             sh_color = colors[0]
-            # Compose table data
+
             rows = []
             row_labels = []
-            # Published
+
             pub = pub_by_depth.get(sh_depth) or pub_by_depth.get(str(sh_depth))
             if pub and not all(np.isnan(list(pub.values()))):
                 rows.append([f"{pub['theta_r']:.3f}", f"{pub['theta_s']:.3f}", f"{pub['alpha']:.3f}", f"{pub['n']:.3f}"])
                 row_labels.append('Published')
-            # Fit
+
             rows.append([f"{float(shallow['theta_r']):.3f}", f"{float(shallow['theta_s']):.3f}",
                          f"{float(shallow['alpha']):.3f}", f"{float(shallow['n']):.3f}"])
             row_labels.append('Fit')

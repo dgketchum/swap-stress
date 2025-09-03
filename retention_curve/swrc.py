@@ -28,7 +28,7 @@ class SWRC:
 
     """
 
-    def __init__(self, filepath=None, depth_col=None, df=None, mimic_reesh=False, mimic_gshp=False):
+    def __init__(self, filepath=None, depth_col=None, df=None):
         """
         Initialize the SWRC fitter from a file or a DataFrame.
 
@@ -42,8 +42,6 @@ class SWRC:
         self.data_by_depth = {}
         self.fit_results = {}
         self._vg_model = Model(self._van_genuchten_model)
-        self.mimic_reesh = bool(mimic_reesh)
-        self.mimic_gshp = bool(mimic_gshp)
 
         if df is not None:
             self.depth_col = depth_col or 'depth'
@@ -118,13 +116,6 @@ class SWRC:
 
     def _generate_initial_params(self, data_for_depth):
         params = self._vg_model.make_params()
-        if self.mimic_reesh:
-            # ReESH: start values and no bounds
-            params['theta_r'].set(value=float(np.nanmin(data_for_depth['theta'])))
-            params['theta_s'].set(value=float(np.nanmax(data_for_depth['theta'])))
-            params['alpha'].set(value=0.01)
-            params['n'].set(value=1.2)
-            return params
         theta_s_init = np.max(data_for_depth['theta'])
         theta_r_init = np.min(data_for_depth['theta'])
         alpha_init = 0.05
@@ -151,34 +142,13 @@ class SWRC:
         for depth, data_df in self.data_by_depth.items():
             print(f"--- Fitting for Depth: {depth} cm ---")
             print(f"--- {len(data_df)} data points ---")
-            # prepare per-depth data
-            df_fit = data_df.dropna(subset=['suction', 'theta']).copy()
-            if self.mimic_gshp:
-                try:
-                    df_fit.loc[df_fit['suction'] <= 0, 'suction'] = 1.0
-                except Exception:
-                    pass
-                if len(df_fit) < 4:
-                    print("Insufficient observations (<4), skipping.")
-                    self.fit_results[depth] = None
-                    continue
-
-            initial_params = self._generate_initial_params(df_fit)
-            if self.mimic_gshp:
-                try:
-                    initial_params['theta_r'].set(min=0.0, max=1.0)
-                    initial_params['theta_s'].set(min=0.0, max=1.0)
-                    initial_params['alpha'].set(min=1.490116e-07, max=100.0)
-                    initial_params['n'].set(min=1.0, max=7.0)
-                except Exception:
-                    pass
+            initial_params = self._generate_initial_params(data_df)
             print(f'--- Initial Parameter Values ---')
             [print(f'{k}: {v.value:.3f}') for k, v in initial_params.items()]
             try:
-                chosen_method = 'leastsq' if self.mimic_reesh else method
                 result = self._vg_model.fit(
-                    df_fit['theta'], initial_params, psi=df_fit['suction'],
-                    method=chosen_method, nan_policy='raise'
+                    data_df['theta'], initial_params, psi=data_df['suction'],
+                    method=method, nan_policy='raise'
                 )
                 self.fit_results[depth] = result
                 if report:
@@ -502,36 +472,5 @@ def test_fit_methods_across_stations(station_files, results_dir):
     return summary
 
 if __name__ == '__main__':
-
-    home_ = os.path.expanduser('~')
-    root = os.path.join(home_, 'data', 'IrrigationGIS', 'soils', 'soil_potential_obs', 'mt_mesonet')
-
-    data_ = os.path.join(root, 'preprocessed_by_station')
-    results_ = os.path.join(root, 'results_by_station')
-    plots_ = os.path.join(root, 'station_swrc_plots')
-    fitting_comp = os.path.join(root, 'curve_fitting_comparison')
-
-    test_algorithms = False
-    run_fit = True
-
-    station_files = [os.path.join(data_, f) for f in os.listdir(data_)]
-
-    if test_algorithms:
-        test_fit_methods_across_stations(station_files, fitting_comp)
-
-    if run_fit:
-        method_ = 'slsqp'
-        for station_file_ in station_files:
-            plt_file = os.path.join(plots_, os.path.basename(station_file_.replace('.parquet', f'_{method_}.png')))
-
-            if os.path.exists(station_file_):
-                swrc_fitter_ = SWRC(filepath=station_file_, depth_col='Depth [cm]')
-                swrc_fitter_.fit(report=False, method=method_)
-                swrc_fitter_.plot(show=False, save_path=plt_file)
-                swrc_fitter_.save_results(output_dir=results_)
-                print(f'processed {station_file_}')
-
-            else:
-                print(f"Error: Data file not found at {station_file_}")
-
+    pass
 # ========================= EOF ====================================================================
