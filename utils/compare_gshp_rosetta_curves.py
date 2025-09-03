@@ -80,8 +80,10 @@ def fit_gshp_curve(csv_path, results_dir, method='slsqp'):
     # Instantiate SWRC using DataFrame, grouping by site (lat, lon)
     for idx, r in d.groupby(['profile_id']):
         pid = idx[0]
+        if pid != 'Florida_dataset181':
+            continue
         filename = f'{pid}.json'
-        fitter = SWRC(df=r, depth_col='depth')
+        fitter = SWRC(df=r, depth_col='depth', mimic_gshp=True)
         fitter.fit(report=False, method=method)
 
         additional_data = r.groupby('depth').first()[['alpha_pub',
@@ -162,6 +164,9 @@ def plot_curves(gshp_results, rosetta_parquet, out_dir,
         json_files = [gshp_results]
 
     for jfp in json_files:
+
+        if 'Florida_dataset181' not in jfp:
+            continue
 
         try:
             with open(jfp, 'r') as f:
@@ -401,5 +406,5 @@ if __name__ == '__main__':
 
     plots_dir_ = os.path.join(gshp_dir_, 'swrc_curve_plots')
 
-    # plot_curves(fits_dir_, rosetta_parquet_, plots_dir_, sample_uids=None)
+    plot_curves(fits_dir_, rosetta_parquet_, plots_dir_, sample_uids=None)
 # ========================= EOF ====================================================================

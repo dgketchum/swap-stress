@@ -28,7 +28,7 @@ class SWRC:
 
     """
 
-    def __init__(self, filepath=None, depth_col=None, df=None, mimic_reesh=False):
+    def __init__(self, filepath=None, depth_col=None, df=None, mimic_reesh=False, mimic_gshp=False):
         """
         Initialize the SWRC fitter from a file or a DataFrame.
 
@@ -43,6 +43,7 @@ class SWRC:
         self.fit_results = {}
         self._vg_model = Model(self._van_genuchten_model)
         self.mimic_reesh = bool(mimic_reesh)
+        self.mimic_gshp = bool(mimic_gshp)
 
         if df is not None:
             self.depth_col = depth_col or 'depth'
@@ -150,13 +151,33 @@ class SWRC:
         for depth, data_df in self.data_by_depth.items():
             print(f"--- Fitting for Depth: {depth} cm ---")
             print(f"--- {len(data_df)} data points ---")
-            initial_params = self._generate_initial_params(data_df)
+            # prepare per-depth data
+            df_fit = data_df.dropna(subset=['suction', 'theta']).copy()
+            if self.mimic_gshp:
+                try:
+                    df_fit.loc[df_fit['suction'] <= 0, 'suction'] = 1.0
+                except Exception:
+                    pass
+                if len(df_fit) < 4:
+                    print("Insufficient observations (<4), skipping.")
+                    self.fit_results[depth] = None
+                    continue
+
+            initial_params = self._generate_initial_params(df_fit)
+            if self.mimic_gshp:
+                try:
+                    initial_params['theta_r'].set(min=0.0, max=1.0)
+                    initial_params['theta_s'].set(min=0.0, max=1.0)
+                    initial_params['alpha'].set(min=1.490116e-07, max=100.0)
+                    initial_params['n'].set(min=1.0, max=7.0)
+                except Exception:
+                    pass
             print(f'--- Initial Parameter Values ---')
             [print(f'{k}: {v.value:.3f}') for k, v in initial_params.items()]
             try:
                 chosen_method = 'leastsq' if self.mimic_reesh else method
                 result = self._vg_model.fit(
-                    data_df['theta'], initial_params, psi=data_df['suction'],
+                    df_fit['theta'], initial_params, psi=df_fit['suction'],
                     method=chosen_method, nan_policy='raise'
                 )
                 self.fit_results[depth] = result
