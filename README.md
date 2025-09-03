@@ -16,7 +16,10 @@ The repository is organized into two main components:
 
 - `retention_curve/`: Contains modules related to soil water retention curves and processing of laboratory/station data.
   - `mt_mesonet.py`: Script for fetching and processing soil core data from the Montana Mesonet.
-  - `swrc.py`: Core logic for handling SWRC data and calculations.
+  - `swrc.py`: Core logic for handling SWRC data and calculations (generic base class `SWRC`).
+  - `gshp_swrc.py`: GSHP-specific subclass `GshpSWRC` that mirrors the GSHP fitting policy (class-aware bounds for missing ends, alpha/n bounds, preprocessing).
+  - `reesh_swrc.py`: ReESH-specific subclass `ReeshSWRC` that uses least-squares and relaxed initial parameters.
+  - `mt_mesonet_swrc.py`: MT Mesonet-specific subclass `MTMesonetSWRC` with helpers to batch-fit per-station files and save plots/results.
   - `plot_swrc_summaries.py`: Utilities for visualizing SWRC data.
 
 ## Core Workflows
@@ -83,10 +86,30 @@ Optional sequence model from VWC time series:
 - Behavior: selects best checkpoints by filename `val_r2` and picks the best model type across available checkpoints.
 - Output: Parquet with predicted `US_R3H3_L{level}_VG_{param}` columns.
 
-### 6) Empirical SWRC preprocessing and fitting (Mesonet example)
+### 6) Empirical SWRC preprocessing and fitting
 
-- Preprocess and split station data: `retention_curve/mt_mesonet.py` (merges SWP + metadata; writes per-station Parquet, CSV + GeoJSON summaries).
-- Fit van Genuchten parameters per-depth per-station: `retention_curve/swrc.py` (generates JSON fit results and optional plots).
+- Preprocess and split station data (Mesonet): `retention_curve/mt_mesonet.py` (merges SWP + metadata; writes per-station Parquet, CSV + GeoJSON summaries).
+- Fit per-depth per-station:
+  - Generic: `SWRC` in `retention_curve/swrc.py`.
+  - GSHP-style: `GshpSWRC` in `retention_curve/gshp_swrc.py` (handles YWYD/YWND/NWYD/NWND with GSHP bounds/policies).
+  - ReESH-style: `ReeshSWRC` in `retention_curve/reesh_swrc.py` (least-squares variant).
+  - MT Mesonet batch: `MTMesonetSWRC.fit_station_files(...)` in `retention_curve/mt_mesonet_swrc.py`.
+
+Example usage
+
+```python
+from retention_curve.gshp_swrc import GshpSWRC
+fitter = GshpSWRC(df=gshp_df, depth_col='depth')
+fitter.fit(method='slsqp')
+fitter.save_results(output_dir=out_dir, output_filename='gshp_profile.json')
+
+from retention_curve.reesh_swrc import ReeshSWRC
+reesh = ReeshSWRC(df=some_df, depth_col='depth')
+reesh.fit()  # defaults to leastsq
+
+from retention_curve.mt_mesonet_swrc import MTMesonetSWRC
+MTMesonetSWRC.fit_station_files(station_files, results_dir, plot_dir, method='slsqp')
+```
 
 ### 7) Compare empirical vs Rosetta vs ML predictions
 
