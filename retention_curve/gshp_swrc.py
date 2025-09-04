@@ -23,10 +23,10 @@ class GshpSWRC(SWRC):
           thetas ~ db_od + clay% + sand% + tropical_flag
         Returns a JSON-serializable dict with beta, xtx_inv, sigma.
         """
-        needed = ['thetas', 'db_od', 'sand_tot_psa_percent', 'clay_tot_psa_percent', 'climate_classes', 'SWCC_classes']
+        needed = ['thetas', 'db_od', 'sand_tot_psa', 'silt_tot_psa', 'clay_tot_psa', 'climate_classes', 'SWCC_classes']
         if not all(c in all_df.columns for c in needed):
             return None
-        train = all_df.dropna(subset=['thetas', 'db_od', 'sand_tot_psa_percent', 'clay_tot_psa_percent'])
+        train = all_df.dropna(subset=['thetas', 'db_od', 'sand_tot_psa', 'clay_tot_psa'])
         train = train[train['SWCC_classes'] == 'YWYD']
         if len(train) < 20:
             return None
@@ -34,15 +34,17 @@ class GshpSWRC(SWRC):
         X = np.column_stack([
             np.ones(len(train)),
             train['db_od'].astype(float).values,
-            train['clay_tot_psa_percent'].astype(float).values,
-            train['sand_tot_psa_percent'].astype(float).values,
+            train['clay_tot_psa'].astype(float).values,
+            train['sand_tot_psa'].astype(float).values,
             reg.values,
         ])
+
         y = train['thetas'].astype(float).values
         beta, _, _, _ = np.linalg.lstsq(X, y, rcond=None)
         resid = y - X @ beta
         sigma = float(np.sqrt(np.maximum(np.mean(resid ** 2), 1e-12)))
         xtx_inv = np.linalg.pinv(X.T @ X)
+
         return {
             'beta': beta.tolist(),
             'xtx_inv': xtx_inv.tolist(),
@@ -96,19 +98,15 @@ class GshpSWRC(SWRC):
             except Exception:
                 pass
 
-            # Class-aware bounds
-            try:
-                cls = str(data_df.get('SWCC_classes', pd.Series(['YWYD']))).split('\n')[0]
-            except Exception:
-                cls = 'YWYD'
+            cls = data_df.iloc[0]['SWCC_classes']
 
             # theta_r PTF bounds (YWND, NWND)
             if cls in ('YWND', 'NWND'):
                 try:
                     row0 = data_df.iloc[0]
-                    sand = float(row0.get('sand_tot_psa_percent')) if pd.notnull(row0.get('sand_tot_psa_percent')) else np.nan
-                    silt = float(row0.get('silt_tot_psa_percent')) if pd.notnull(row0.get('silt_tot_psa_percent')) else np.nan
-                    clay = float(row0.get('clay_tot_psa_percent')) if pd.notnull(row0.get('clay_tot_psa_percent')) else np.nan
+                    sand = float(row0.get('sand_tot_psa')) if pd.notnull(row0.get('sand_tot_psa')) else np.nan
+                    silt = float(row0.get('silt_tot_psa')) if pd.notnull(row0.get('silt_tot_psa')) else np.nan
+                    clay = float(row0.get('clay_tot_psa')) if pd.notnull(row0.get('clay_tot_psa')) else np.nan
                     db_od = float(row0.get('db_od')) if pd.notnull(row0.get('db_od')) else np.nan
                     if np.isfinite([sand, silt, clay, db_od]).all():
                         sand_g = sand / 100.0
@@ -133,8 +131,8 @@ class GshpSWRC(SWRC):
                     x = np.array([
                         1.0,
                         float(row0.get('db_od', np.nan)),
-                        float(row0.get('clay_tot_psa_percent', np.nan)),
-                        float(row0.get('sand_tot_psa_percent', np.nan)),
+                        float(row0.get('clay_tot_psa', np.nan)),
+                        float(row0.get('sand_tot_psa', np.nan)),
                         reg,
                     ], dtype=float)
                     if np.isfinite(x).all():

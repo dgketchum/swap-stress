@@ -119,14 +119,38 @@ def _load_gshp_params(csv_path):
         'n': g['n'].dropna().values if 'n' in g.columns else np.array([]),
     }
 
+
+def _load_rosetta_training_params(parquet_path):
+    """
+    Load original Rosetta training data parameters.
+    """
+    if not parquet_path or not os.path.exists(parquet_path):
+        return {}
+    df = pd.read_parquet(parquet_path)
+    param_map = {
+        'theta_r': 'THETAR',
+        'theta_s': 'THETAS',
+        'alpha': 'ALPHA',
+        'n': 'N',
+    }
+    df.columns = [c.upper() for c in df.columns]
+    available = {p_std: p_orig for p_std, p_orig in param_map.items() if p_orig in df.columns}
+    if not available:
+        return {}
+    params = {p_std: df[p_orig].dropna().values for p_std, p_orig in available.items()}
+    if 'n' in params:
+        params['n'] = np.exp(params['n'])
+    return params
+
+
 def compare_parameter_distributions_combined(empirical_results_dir, rosetta_parquet, training_parquet,
-                                             output_dir, bins=30, gshp_csv=None):
+                                             output_dir, bins=30, gshp_csv=None, rosetta_training_parquet=None):
     """
     Combines all depths/levels into a single population per parameter and
-    produces a single 2x2 figure with panels for [theta_r, theta_s, alpha, n].
+    produces a single figure with boxplots for [theta_r, theta_s, alpha, n].
 
     - For alpha and n, compares distributions in log10 space across sources.
-    - Sources: Station empirical fits, Rosetta extracts, POLARIS (overall).
+    - Sources: Station empirical fits, Rosetta extracts, POLARIS (overall), GSHP, and Rosetta Training.
     """
     os.makedirs(output_dir, exist_ok=True)
 
@@ -134,16 +158,17 @@ def compare_parameter_distributions_combined(empirical_results_dir, rosetta_parq
     ros_df = _load_rosetta_params(rosetta_parquet)
     polaris_vals = _load_polaris_params(training_parquet)
     gshp_vals = _load_gshp_params(gshp_csv) if gshp_csv else {}
+    rosetta_training_vals = _load_rosetta_training_params(rosetta_training_parquet) if rosetta_training_parquet else {}
 
     params = ['theta_r', 'theta_s', 'alpha', 'n']
     need_log = {'alpha', 'n'}
-    palette = {'Station': '#1f77b4', 'Rosetta': '#ff7f0e', 'POLARIS': '#2ca02c', 'GSHP': '#9467bd'}
+    palette = {'Station': '#1f77b4', 'Rosetta': '#ff7f0e', 'POLARIS': '#2ca02c', 'GSHP': '#9467bd',
+               'Rosetta (Train)': '#d62728'}
 
     plt.style.use('seaborn-v0_8-whitegrid')
-    fig, axes = plt.subplots(2, 2, figsize=(12, 10))
-    axes = axes.ravel()
 
-    for ax, param in zip(axes, params):
+    all_sources_dfs = []
+    for param in params:
         # Station: gather all station_Lx_param columns
         st_cols = [c for c in station_df.columns if re.match(fr'^station_L\d+_{param}$', c)]
         st_series = pd.concat([station_df[c] for c in st_cols], ignore_index=True) if st_cols else pd.Series(dtype=float)
@@ -154,7 +179,6 @@ def compare_parameter_distributions_combined(empirical_results_dir, rosetta_parq
         ros_vals = []
         if ros_lin_cols:
             lin = pd.concat([ros_df[c] for c in ros_lin_cols], ignore_index=True)
-            # Remove Rosetta sentinel values
             lin = lin[lin > -9999]
             if param in need_log:
                 lin = lin[lin > 0]
@@ -162,7 +186,6 @@ def compare_parameter_distributions_combined(empirical_results_dir, rosetta_parq
             ros_vals.append(lin)
         if ros_log_cols and param in need_log:
             log_ser = pd.concat([ros_df[c] for c in ros_log_cols], ignore_index=True)
-            # Remove Rosetta sentinel values (already in log10 space)
             log_ser = log_ser[log_ser > -9999]
             ros_vals.append(log_ser)
         ros_series = pd.concat(ros_vals, ignore_index=True) if ros_vals else pd.Series(dtype=float)
@@ -170,6 +193,7 @@ def compare_parameter_distributions_combined(empirical_results_dir, rosetta_parq
         # POLARIS (overall)
         pol_series = pd.Series(polaris_vals.get(param, []))
         if param in need_log and len(pol_series) > 0:
+            pol_series = pol_series[pol_series > 0]
             if param == 'alpha':
                 pass
             else:
@@ -177,55 +201,68 @@ def compare_parameter_distributions_combined(empirical_results_dir, rosetta_parq
 
         # Transform station if needed
         if param in need_log and len(st_series) > 0:
-            st_series = np.log10(st_series)
+            st_series = np.log10(st_series[st_series > 0])
 
-        # Build long-form
-        sources = []
-        if len(st_series) > 0:
-            sources.append(pd.DataFrame({'Source': 'Station', 'Value': st_series.dropna().values}))
-        if len(ros_series) > 0:
-            sources.append(pd.DataFrame({'Source': 'Rosetta', 'Value': ros_series.dropna().values}))
-        if len(pol_series) > 0:
-            sources.append(pd.DataFrame({'Source': 'POLARIS', 'Value': pol_series.dropna().values}))
         # GSHP (overall)
         g_series = pd.Series(gshp_vals.get(param, [])) if gshp_vals else pd.Series(dtype=float)
         if param in need_log and len(g_series) > 0:
+            g_series = g_series[g_series > 0]
             if param == 'alpha':
                 pass
             else:
                 g_series = np.log10(g_series)
-        if len(g_series) > 0:
-            sources.append(pd.DataFrame({'Source': 'GSHP', 'Value': g_series.dropna().values}))
-        if not sources:
-            ax.text(0.5, 0.5, 'No data', ha='center', va='center', transform=ax.transAxes)
-            ax.set_title(PARAM_SYMBOLS.get(param, param))
-            continue
 
-        print(f'Param {param}')
-        [print(s.iloc[0]['Source'], s['Value'].mean()) for s in sources]
-        long_df = pd.concat(sources, ignore_index=True)
-        sns.histplot(data=long_df, x='Value', hue='Source', bins=bins, element='step', stat='density',
-                     common_bins=True, alpha=0.45, palette=palette, legend=False, ax=ax)
+        # Rosetta Training (new)
+        rt_series = pd.Series(rosetta_training_vals.get(param, [])) if rosetta_training_vals else pd.Series(
+            dtype=float)
+        if param in need_log and len(rt_series) > 0:
+            rt_series = np.log10(rt_series[rt_series > 0])
 
-        # Labels
-        xlab = f"log10({PARAM_SYMBOLS.get(param, param)})" if param in need_log else PARAM_SYMBOLS.get(param, param)
-        ax.set_xlabel(xlab)
-        ax.set_ylabel('Density')
-        ax.set_title(PARAM_SYMBOLS.get(param, param), fontsize=13)
+        param_symbol = PARAM_SYMBOLS.get(param, param)
+        param_label = f"log10({param_symbol})" if param in need_log else param_symbol
+
+        sources_data = {
+            'Station': st_series,
+            'Rosetta': ros_series,
+            'POLARIS': pol_series,
+            'GSHP': g_series,
+            'Rosetta (Train)': rt_series
+        }
+
+        for source_name, data_series in sources_data.items():
+            if len(data_series) > 0:
+                df = pd.DataFrame({'Value': data_series.dropna().values})
+                df['Source'] = source_name
+                df['Parameter'] = param_label
+                all_sources_dfs.append(df)
+
+    if not all_sources_dfs:
+        fig, ax = plt.subplots(1, 1, figsize=(12, 8))
+        ax.text(0.5, 0.5, 'No data', ha='center', va='center', transform=ax.transAxes)
+        ax.set_title('Parameter Distributions by Source')
+    else:
+        fig, ax = plt.subplots(1, 1, figsize=(12, 8))
+        long_df = pd.concat(all_sources_dfs, ignore_index=True)
+        sns.boxplot(data=long_df, x='Parameter', y='Value', hue='Source', palette=palette, ax=ax)
+        ax.set_xlabel('Parameter')
+        ax.set_ylabel('Value')
+        ax.set_title('Combined Distribution Comparison', fontsize=16, fontweight='bold')
         ax.grid(True, which='major', alpha=0.3)
 
-    # Figure-level legend
-    from matplotlib.patches import Patch
-    handles = [Patch(facecolor=palette['Station'], edgecolor=palette['Station'], alpha=0.45, label='Station (MT)'),
-               Patch(facecolor=palette['Rosetta'], edgecolor=palette['Rosetta'], alpha=0.45, label='Rosetta (10k CONUS)')]
-    # Include POLARIS/GSHP if any param had values
-    if any(len(v) > 0 for v in (_load_polaris_params(training_parquet).values())):
-        handles.append(Patch(facecolor=palette['POLARIS'], edgecolor=palette['POLARIS'], alpha=0.45, label='POLARIS (10k CONUS)'))
-    if gshp_vals and any(len(v) > 0 for v in gshp_vals.values()):
-        handles.append(Patch(facecolor=palette['GSHP'], edgecolor=palette['GSHP'], alpha=0.45, label='GSHP (Global)'))
-    fig.legend(handles=handles, loc='upper right')
-    fig.suptitle('Combined Distribution Comparison (Rosetta L2; Others All Depths)', fontsize=16, fontweight='bold')
-    plt.tight_layout(rect=[0, 0.03, 0.98, 0.92])
+        from matplotlib.patches import Patch
+        legend_labels = {
+            'Station': 'Station (MT)',
+            'Rosetta': 'Rosetta (10k CONUS)',
+            'POLARIS': 'POLARIS (10k CONUS)',
+            'GSHP': 'GSHP (Global)',
+            'Rosetta (Train)': 'Rosetta (Train)'
+        }
+        handles = [Patch(facecolor=color, label=legend_labels.get(source, source))
+                   for source, color in palette.items() if
+                   source in long_df['Source'].unique()]
+        ax.legend(handles=handles, loc='upper right')
+
+    plt.tight_layout()
     out_path = os.path.join(output_dir, 'vg_param_distributions_all_sources_combined.png')
     plt.savefig(out_path, dpi=300)
     plt.close(fig)
@@ -235,16 +272,18 @@ def compare_parameter_distributions_combined(empirical_results_dir, rosetta_parq
 if __name__ == '__main__':
     # Example wiring (edit paths as needed)
     home = os.path.expanduser('~')
+    rosetta_soil_proj = os.path.join(home, 'PycharmProjects', 'rosetta-soil')
     root = os.path.join(home, 'data', 'IrrigationGIS', 'soils')
 
     empirical_dir = os.path.join(root, 'soil_potential_obs', 'mt_mesonet', 'results_by_station')
     rosetta_pqt = os.path.join(root, 'rosetta', 'extracted_rosetta_points.parquet')
     training_pqt = os.path.join(root, 'swapstress', 'training', 'training_data.parquet')
     out_dir = os.path.join(root, 'swapstress', 'comparison_plots')
+    rosetta_training_pqt = os.path.join(rosetta_soil_proj, 'rosetta', 'db', 'Data.parquet')
 
     # Combined all-depths, single figure with 4 panels
     gshp_csv = os.path.join(root, 'vg_paramaer_databases', 'wrc', 'WRC_dataset_surya_et_al_2021_final.csv')
     compare_parameter_distributions_combined(empirical_dir, rosetta_pqt, training_pqt, out_dir, bins=30,
-                                             gshp_csv=gshp_csv)
+                                             gshp_csv=gshp_csv, rosetta_training_parquet=rosetta_training_pqt)
 
 # ========================= EOF ====================================================================

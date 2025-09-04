@@ -36,32 +36,34 @@ def fit_gshp_curve(csv_path, results_dir, method='slsqp'):
     except Exception:
         df = pd.read_csv(csv_path)
 
+    total_stations = len(df.groupby(['latitude_decimal_degrees', 'longitude_decimal_degrees']))
+
+    df = df[df['data_flag'] == 'good quality estimate']
+
+    missing_wet_ptf = GshpSWRC.estimate_theta_s_ptf(df)
+
     df = df.rename(columns={'latitude_decimal_degrees': 'lat', 'longitude_decimal_degrees': 'lon',
                             'alpha': 'alpha_pub', 'n': 'n_pub', 'thetar': 'theta_r_pub',
                             'thetas': 'theta_s_pub'})
 
-    total_stations = len(df.groupby(['lat', 'lon']))
-
-    df = df[df['data_flag'] == 'good quality estimate']
-    # df = df[df['SWCC_classes'] == 'YWYD']
-
     df['alpha_pub'] /= 100
     df['alpha_pub'][df['alpha_pub'] < -5] = np.nan
 
-    keep = ['profile_id',
-            'layer_id',
-            'lab_head_m',
-            'lab_wrc',
-            'hzn_bot',
-            'hzn_top',
-            'lat',
-            'lon',
-            'alpha_pub',
-            'n_pub',
-            'theta_r_pub',
-            'theta_s_pub',
-            'SWCC_classes',
-            ]
+    keep = [
+        'profile_id',
+        'layer_id',
+        'lab_head_m',
+        'lab_wrc',
+        'hzn_bot',
+        'hzn_top',
+        'lat',
+        'lon',
+        'alpha_pub',
+        'n_pub',
+        'theta_r_pub',
+        'theta_s_pub',
+        'SWCC_classes',
+    ]
 
     present = [c for c in keep if c in df.columns]
 
@@ -86,6 +88,10 @@ def fit_gshp_curve(csv_path, results_dir, method='slsqp'):
         if os.path.exists(os.path.join(results_dir, filename)):
             continue
         fitter = GshpSWRC(df=r, depth_col='depth')
+
+        if r.iloc[0]['SWCC_classes'] == 'NWYD':
+            fitter.set_theta_s_ptf(missing_wet_ptf)
+
         fitter.fit(report=False, method=method)
 
         additional_data = r.groupby('depth').first()[['alpha_pub',
@@ -204,8 +210,10 @@ def plot_curves(gshp_results, rosetta_parquet, out_dir,
             try:
                 dv = str(depth_val)
                 pub_by_depth[dv] = {
-                    'theta_r': float(data[dv].get('theta_r_pub')) if data[dv].get('theta_r_pub') is not None else np.nan,
-                    'theta_s': float(data[dv].get('theta_s_pub')) if data[dv].get('theta_s_pub') is not None else np.nan,
+                    'theta_r': float(data[dv].get('theta_r_pub')) if data[dv].get(
+                        'theta_r_pub') is not None else np.nan,
+                    'theta_s': float(data[dv].get('theta_s_pub')) if data[dv].get(
+                        'theta_s_pub') is not None else np.nan,
                     'alpha': float(data[dv].get('alpha_pub')) if data[dv].get('alpha_pub') is not None else np.nan,
                     'n': float(data[dv].get('n_pub')) if data[dv].get('n_pub') is not None else np.nan,
                 }
@@ -345,7 +353,8 @@ def plot_curves(gshp_results, rosetta_parquet, out_dir,
 
             pub = pub_by_depth.get(sh_depth) or pub_by_depth.get(str(sh_depth))
             if pub and not all(np.isnan(list(pub.values()))):
-                rows.append([f"{pub['theta_r']:.3f}", f"{pub['theta_s']:.3f}", f"{pub['alpha']:.3f}", f"{pub['n']:.3f}"])
+                rows.append(
+                    [f"{pub['theta_r']:.3f}", f"{pub['theta_s']:.3f}", f"{pub['alpha']:.3f}", f"{pub['n']:.3f}"])
                 row_labels.append('Published')
 
             rows.append([f"{float(shallow['theta_r']):.3f}", f"{float(shallow['theta_s']):.3f}",
@@ -354,7 +363,8 @@ def plot_curves(gshp_results, rosetta_parquet, out_dir,
             # Rosetta
             ros = rosetta_by_depth.get(sh_depth)
             if ros:
-                rows.append([f"{ros['theta_r']:.3f}", f"{ros['theta_s']:.3f}", f"{ros['alpha']:.3f}", f"{ros['n']:.3f}"])
+                rows.append(
+                    [f"{ros['theta_r']:.3f}", f"{ros['theta_s']:.3f}", f"{ros['alpha']:.3f}", f"{ros['n']:.3f}"])
                 lvl = ros.get('level')
                 lbl = f"Rosetta L{lvl}"
                 row_labels.append(lbl)
@@ -402,7 +412,7 @@ if __name__ == '__main__':
     rosetta_parquet_ = os.path.join(gshp_dir_, 'extracted_rosetta_points.parquet')
     fits_dir_ = os.path.join(gshp_dir_, 'local_fits')
 
-    fit_gshp_curve(gshp_csv_, fits_dir_)
+    # fit_gshp_curve(gshp_csv_, fits_dir_)
 
     plots_dir_ = os.path.join(gshp_dir_, 'swrc_curve_plots')
 

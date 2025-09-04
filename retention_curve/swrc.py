@@ -50,8 +50,6 @@ class SWRC:
             # default for legacy MT Mesonet files
             self.depth_col = depth_col or 'stationDepth [cm]'
             self.load_from_file(filepath)
-        else:
-            raise ValueError("Provide either a filepath or a DataFrame (df) to initialize SWRC.")
 
     def load_from_file(self, filepath):
         """
@@ -393,7 +391,7 @@ class SWRC:
         summary_data = self.results_summary
 
         if add_data:
-            [summary_data[k].update(v) for k, v  in add_data.items()]
+            [summary_data[k].update(v) for k, v in add_data.items()]
 
         with open(output_path, 'w') as f:
             json.dump(summary_data, f, indent=4)
@@ -470,6 +468,7 @@ def test_fit_methods_across_stations(station_files, results_dir):
     summary.to_csv(os.path.join(results_dir, 'overall_method_summary.csv'), index=False)
 
     return summary
+
 
 if __name__ == '__main__':
     pass
