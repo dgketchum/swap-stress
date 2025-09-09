@@ -11,6 +11,7 @@ import torch
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 from torch.utils.data import DataLoader, random_split
+from sklearn.metrics import r2_score, root_mean_squared_error
 
 from map.learning import DEVICE, DROP_FEATURES, VG_PARAMS
 from map.learning.dataset import TabularDataset, TabularDatasetVanilla
@@ -114,16 +115,15 @@ class FineTuner:
                 print(f"Freezing first {num_blocks_to_freeze} blocks of MLP-style model.")
                 children = list(inner_model.layers.children())
 
-                block_count = 0
+                # Freeze entire MLP blocks: [Linear, ReLU, BatchNorm, Dropout] x N, not the output head
+                frozen_linear = 0
                 for layer in children:
                     if isinstance(layer, torch.nn.Linear):
-                        block_count += 1
-
-                    if block_count <= num_blocks_to_freeze:
+                        frozen_linear += 1
+                    if frozen_linear <= num_blocks_to_freeze:
                         for param in layer.parameters():
                             param.requires_grad = False
-                    else:
-                        break
+                    # once we pass N hidden Linear layers, leave the rest trainable (including head)
 
             elif isinstance(inner_model, rtdl.FTTransformer):
                 print(f"Freezing parts of the FTTransformer.")
@@ -167,7 +167,8 @@ class FineTuner:
         return trainer.checkpoint_callback.best_model_path
 
 
-def run_finetuning_workflow(rosetta_training_data, empirical_finetune_data, mappings_json, checkpoint_dir, levels):
+def run_finetuning_workflow(rosetta_training_data, empirical_finetune_data, mappings_json,
+                            checkpoint_dir, metrics_dir, levels):
     training_df_ = pd.read_parquet(rosetta_training_data)
     empirical_df_ = pd.read_parquet(empirical_finetune_data)
     finetuning_split_path = os.path.join(os.path.dirname(empirical_finetune_data), 'finetuning_split_info.json')
@@ -211,10 +212,14 @@ def run_finetuning_workflow(rosetta_training_data, empirical_finetune_data, mapp
                     n_features_ = len(
                         pd.get_dummies(training_df_[feature_cols_], columns=cat_cols_, dummy_na=False,
                                        dtype=int).columns)
-                    base_model_ = VanillaMLP(n_features=n_features_, n_outputs=n_outputs_)
+                    base_model_ = VanillaMLP(n_features=n_features_, n_outputs=n_outputs_, num_hidden_layers=2)
                 elif model_type_ == 'MLPEmbeddings':
-                    base_model_ = MLPWithEmbeddings(n_num_features=len(num_cols_), cat_cardinalities=cat_cardinalities_,
-                                                    n_outputs=n_outputs_)
+                    base_model_ = MLPWithEmbeddings(
+                        n_num_features=len(num_cols_),
+                        cat_cardinalities=cat_cardinalities_,
+                        n_outputs=n_outputs_,
+                        num_hidden_layers=2,
+                    )
                 else:
                     base_model_ = rtdl.FTTransformer.make_baseline(
                         n_num_features=len(num_cols_), cat_cardinalities=cat_cardinalities_, d_token=256,
@@ -224,7 +229,7 @@ def run_finetuning_workflow(rosetta_training_data, empirical_finetune_data, mapp
                 pl_module_ = TabularLightningModule.load_from_checkpoint(best_ckpt_, model=base_model_,
                                                                          n_outputs=n_outputs_)
 
-                finetune_config_ = {'lr': 5e-6, 'epochs': 30, 'freeze_layers': 2, 'batch_size': 8}
+                finetune_config_ = {'lr': 5e-6, 'epochs': 30, 'freeze_layers': 1, 'batch_size': 8}
                 train_ds_, val_ds_ = random_split(finetune_dataset, [0.8, 0.2],
                                                   generator=torch.Generator().manual_seed(42))
 
@@ -244,7 +249,83 @@ def run_finetuning_workflow(rosetta_training_data, empirical_finetune_data, mapp
                 finetuned_ckpt_dir_ = os.path.join(checkpoint_dir, 'fine_tuned')
                 os.makedirs(finetuned_ckpt_dir_, exist_ok=True)
                 finetuned_model_name = f'{target_name_}_{model_type_}'
-                tuner_.run(checkpoint_dir=finetuned_ckpt_dir_, model_name=finetuned_model_name)
+                best_ckpt_path_ = tuner_.run(checkpoint_dir=finetuned_ckpt_dir_, model_name=finetuned_model_name)
+                try:
+                    r2m = re.search(r"val_r2=([-]?\d+\.\d+)", os.path.basename(best_ckpt_path_))
+                    best_val_r2_ = float(r2m.group(1)) if r2m else None
+                    results_path_ = os.path.join(
+                        finetuned_ckpt_dir_, f'{finetuned_model_name}_results.json'
+                    )
+                    with open(results_path_, 'w') as rf_:
+                        json.dump({
+                            'target': target_name_,
+                            'model_type': model_type_,
+                            'best_checkpoint': best_ckpt_path_,
+                            'best_val_r2': best_val_r2_,
+                            'split_info': finetuning_split_path,
+                        }, rf_, indent=2)
+                except Exception:
+                    pass  # leave silently if results cannot be written
+
+                # Also emit metrics JSON in the same structure as train_tabular_nn.py
+                try:
+                    # Rebuild model skeleton matching training
+                    if model_type_ == 'MLP':
+                        n_features_ = len(
+                            pd.get_dummies(training_df_[feature_cols_], columns=cat_cols_, dummy_na=False,
+                                           dtype=int).columns)
+                        eval_model_ = VanillaMLP(n_features=n_features_, n_outputs=n_outputs_, num_hidden_layers=2)
+                        eval_ds_ = TabularDatasetVanilla(
+                            pd.get_dummies(finetune_df[feature_cols_], columns=cat_cols_, dummy_na=False, dtype=int)
+                            .values.astype(np.float32),
+                            finetune_df[targets_].values.astype(np.float32)
+                        )
+                    elif model_type_ == 'MLPEmbeddings':
+                        eval_model_ = MLPWithEmbeddings(
+                            n_num_features=len(num_cols_),
+                            cat_cardinalities=cat_cardinalities_,
+                            n_outputs=n_outputs_,
+                            num_hidden_layers=2,
+                        )
+                        # Use the same dataset we trained on (already scaled/mapped)
+                        eval_ds_ = finetune_dataset
+                    else:
+                        eval_model_ = rtdl.FTTransformer.make_baseline(
+                            n_num_features=len(num_cols_), cat_cardinalities=cat_cardinalities_, d_token=256,
+                            ffn_d_hidden=32, residual_dropout=0.0,
+                            n_blocks=3, attention_dropout=0.2, ffn_dropout=0.2, d_out=n_outputs_)
+                        eval_ds_ = finetune_dataset
+
+                    eval_module_ = TabularLightningModule.load_from_checkpoint(
+                        best_ckpt_path_, model=eval_model_, n_outputs=n_outputs_)
+                    val_loader_ = DataLoader(val_ds_, batch_size=16)
+                    eval_trainer_ = pl.Trainer(accelerator=DEVICE, devices=1)
+                    eval_trainer_.test(eval_module_, val_loader_)
+
+                    y_pred_ = np.concatenate(eval_module_.test_preds)
+                    y_true_ = np.concatenate(eval_module_.test_targets)
+
+                    target_stats_ = {t: {'mean': finetune_df[t].mean(), 'std': finetune_df[t].std()} for t in targets_}
+                    metrics_ = {}
+                    for i, t in enumerate(targets_):
+                        p_name = VG_PARAMS[i]
+                        r2v = r2_score(y_true_[:, i], y_pred_[:, i])
+                        rmsev = root_mean_squared_error(y_true_[:, i], y_pred_[:, i])
+                        metrics_[p_name] = {
+                            'r2': r2v,
+                            'rmse': rmsev.item(),
+                            'mean_val': target_stats_[t]['mean'].item(),
+                            'std_val': target_stats_[t]['std'].item(),
+                        }
+
+                    all_metrics_ = {target_name_: metrics_}
+                    os.makedirs(metrics_dir, exist_ok=True)
+                    ts_ = re.sub(r'[^0-9]', '', os.path.basename(best_ckpt_path_))[:14] or '00000000000000'
+                    out_json_ = os.path.join(metrics_dir, f'{model_type_}_combined_finetuned_{ts_}.json')
+                    with open(out_json_, 'w') as jf_:
+                        json.dump(all_metrics_, jf_, indent=4)
+                except Exception:
+                    pass
             else:
                 print(f"No checkpoint found for {target_name_} with model type {model_type_}")
 
@@ -260,11 +341,17 @@ if __name__ == '__main__':
     mappings_json_ = os.path.join(training_data_root_, 'categorical_mappings.json')
     checkpoint_dir_ = os.path.join(training_data_root_, 'checkpoints', 'combined_params')
 
+    metrics_ = os.path.join(training_data_root_, 'metrics')
+
+    metrics_subdir = 'finetuned_rosetta_l2'
+    metrics_dst = os.path.join(metrics_, metrics_subdir)
+
     run_finetuning_workflow(
         rosetta_training_data=rosetta_training_data_,
         empirical_finetune_data=empirical_finetune_data_,
         mappings_json=mappings_json_,
         checkpoint_dir=checkpoint_dir_,
-        levels=(2, 3, 5, 6))
+        metrics_dir=metrics_dst,
+        levels=(2,))
 
 # ========================= EOF ====================================================================

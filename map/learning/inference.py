@@ -52,7 +52,7 @@ def find_best_model_checkpoint(checkpoint_dir, target, model_type, use_finetuned
 
 def run_inference_on_empirical_data(station_data_pqt, training_data_pqt, rosetta_mappings_json,
                                     rosetta_checkpoint_dir, output_pqt, unscale_predictions=False,
-                                    use_finetuned=False):
+                                    use_finetuned=False, use_validation_split=True, validation_split_json=None):
     """
     Uses models trained on Rosetta to predict VG parameters for empirical sites.
     """
@@ -72,6 +72,17 @@ def run_inference_on_empirical_data(station_data_pqt, training_data_pqt, rosetta
         training_df[training_df[col] <= -9999] = np.nan
 
     scaler = StandardScaler().fit(training_df[num_cols])
+
+    if use_validation_split:
+        split_path = validation_split_json or os.path.join(os.path.dirname(station_data_pqt), 'finetuning_split_info.json')
+        if os.path.exists(split_path):
+            with open(split_path, 'r') as f:
+                split = json.load(f)
+            try:
+                val_indices = [int(k) for k in split.get('validation', {}).keys()]
+                station_data = station_data.loc[val_indices]
+            except Exception:
+                pass  # likely index mismatch; use full dataset
 
     inference_features = station_data[feature_cols].copy()
     for col in feature_cols:
@@ -135,7 +146,7 @@ def run_inference_on_empirical_data(station_data_pqt, training_data_pqt, rosetta
                 inference_onehot = inference_onehot[train_onehot_df.columns]
                 x_inference = inference_onehot.values
                 inf_dataset = TabularDatasetVanilla(x_inference, np.zeros((x_inference.shape[0], n_outputs)))
-                model = VanillaMLP(n_features=x_inference.shape[1], n_outputs=n_outputs)
+                model = VanillaMLP(n_features=x_inference.shape[1], n_outputs=n_outputs, num_hidden_layers=2)
 
             else:
                 inf_feats_emb = inference_features.copy()
@@ -147,8 +158,12 @@ def run_inference_on_empirical_data(station_data_pqt, training_data_pqt, rosetta
                 inf_dataset = TabularDataset(x_inf_num, x_inf_cat, np.zeros((x_inf_num.shape[0], n_outputs)))
 
                 if best_model_type == 'MLPEmbeddings':
-                    model = MLPWithEmbeddings(n_num_features=len(num_cols), cat_cardinalities=cat_cardinalities,
-                                              n_outputs=n_outputs)
+                    model = MLPWithEmbeddings(
+                        n_num_features=len(num_cols),
+                        cat_cardinalities=cat_cardinalities,
+                        n_outputs=n_outputs,
+                        num_hidden_layers=2,
+                    )
                 else:
                     model = rtdl.FTTransformer.make_baseline(n_num_features=len(num_cols),
                                                              cat_cardinalities=cat_cardinalities,

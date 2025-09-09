@@ -1,5 +1,6 @@
 import json
 import os.path
+from glob import glob
 from datetime import datetime
 
 import torch
@@ -92,8 +93,8 @@ def prepare_data(df, target_cols, feature_cols, cat_cols, mappings=None, use_one
         return train_dataset, test_dataset, len(num_cols), cat_cardinalities, target_stats
 
 
-def run_training(f, model_type, mappings_json, checkpoint_dir, metrics_dir, mode='single', levels=None,
-                 unscale_predictions=False):
+def run_training(f, model_type, mappings_json, checkpoint_dir, metrics_dir, mode='single', levels=None):
+
     if levels is None:
         levels = [2]
 
@@ -116,216 +117,27 @@ def run_training(f, model_type, mappings_json, checkpoint_dir, metrics_dir, mode
     all_metrics = {}
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
 
-    if mode == 'single':
-        has_rosetta = any(c.startswith('US_R3H3_L') and '_VG_' in c for c in df.columns)
-        has_gshp = all(p in df.columns for p in GSHP_PARAMS)
+    has_rosetta = any(c.startswith('US_R3H3_L') and '_VG_' in c for c in df.columns)
+    has_gshp = all(p in df.columns for p in GSHP_PARAMS)
 
-        if has_rosetta:
-            all_metrics = {p: {vl: None for vl in range(1, 8)} for p in VG_PARAMS}
-            for param in VG_PARAMS:
-                for vert_level in levels:
-                    target = f'US_R3H3_L{vert_level}_VG_{param}'
-                    if target not in df.columns:
-                        continue
-
-                    print(f"\n--- Training {model_type} for {target} ---")
-
-                    if model_type == 'MLP':
-                        train_ds, test_ds, n_features, _, target_stats = prepare_data(
-                            df, target, feature_cols, cat_cols, use_one_hot=True,
-                            unscale_predictions=unscale_predictions)
-                        model = VanillaMLP(n_features=n_features, n_outputs=1)
-                    else:
-                        train_ds, test_ds, n_num, cat_cards, target_stats = prepare_data(
-                            df, target, feature_cols, cat_cols, mappings=mappings, use_one_hot=False,
-                            unscale_predictions=unscale_predictions)
-                        if model_type == 'MLPEmbeddings':
-                            model = MLPWithEmbeddings(n_num_features=n_num, cat_cardinalities=cat_cards, n_outputs=1)
-                        elif model_type == 'FTTransformer':
-                            model = rtdl.FTTransformer.make_baseline(
-                                n_num_features=n_num, cat_cardinalities=cat_cards, d_token=256,
-                                ffn_d_hidden=32, residual_dropout=0.0,
-                                n_blocks=3, attention_dropout=0.2, ffn_dropout=0.2, d_out=1,
-                            )
-
-                    train_size = int(0.8 * len(train_ds))
-                    val_size = len(train_ds) - train_size
-                    train_ds, val_ds = random_split(train_ds, [train_size, val_size])
-
-                    train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True, num_workers=4,
-                                              drop_last=True)
-                    val_loader = DataLoader(val_ds, batch_size=BATCH_SIZE, num_workers=4)
-                    test_loader = DataLoader(test_ds, batch_size=BATCH_SIZE, num_workers=4)
-
-                    pl_module = TabularLightningModule(model, n_outputs=1)
-
-                    checkpoint_callback = ModelCheckpoint(
-                        dirpath=f'{checkpoint_dir}/{target}',
-                        filename=f'{model_type}-{timestamp}-{{epoch:02d}}-{{val_r2:.2f}}',
-                        save_top_k=1, verbose=True, monitor='val_r2', mode='max'
-                    )
-
-                    trainer = pl.Trainer(max_epochs=EPOCHS, accelerator=DEVICE, devices=1,
-                                         callbacks=[checkpoint_callback])
-                    trainer.fit(pl_module, train_loader, val_loader)
-                    trainer.test(pl_module, test_loader)
-
-                    y_pred = np.concatenate(pl_module.test_preds).flatten()
-                    y_test = np.concatenate(pl_module.test_targets).flatten()
-
-                    metrics = {
-                        'r2': r2_score(y_test, y_pred),
-                        'rmse': root_mean_squared_error(y_test, y_pred).item(),
-                        'mean_val': list(target_stats.values())[0]['mean'].item(),
-                        'std_val': list(target_stats.values())[0]['std'].item(),
-                    }
-                    all_metrics[param][vert_level] = metrics
-                    print(f"Metrics for {target}: R2={{metrics['r2']:.4f}}, RMSE={{metrics['rmse']:.4f}}")
-
-        elif has_gshp:
-            all_metrics = {p: {0: None} for p in GSHP_PARAMS}
-            df_ = df.copy()
-            if 'data_flag' in df_.columns:
-                df_ = df_[df_['data_flag'] == 'good quality estimate']
-            for param in GSHP_PARAMS:
-                if param not in df_.columns:
-                    continue
-
-                print(f"\n--- Training {model_type} for {param} (GSHP) ---")
-                if model_type == 'MLP':
-                    train_ds, test_ds, n_features, _, target_stats = prepare_data(
-                        df_, param, feature_cols, cat_cols, use_one_hot=True, unscale_predictions=unscale_predictions)
-                    model = VanillaMLP(n_features=n_features, n_outputs=1)
-                else:
-                    train_ds, test_ds, n_num, cat_cards, target_stats = prepare_data(
-                        df_, param, feature_cols, cat_cols, mappings=mappings, use_one_hot=False,
-                        unscale_predictions=unscale_predictions)
-                    if model_type == 'MLPEmbeddings':
-                        model = MLPWithEmbeddings(n_num_features=n_num, cat_cardinalities=cat_cards, n_outputs=1)
-                    elif model_type == 'FTTransformer':
-                        model = rtdl.FTTransformer.make_baseline(
-                            n_num_features=n_num, cat_cardinalities=cat_cards, d_token=256,
-                            ffn_d_hidden=32, residual_dropout=0.0,
-                            n_blocks=3, attention_dropout=0.2, ffn_dropout=0.2, d_out=1,
-                        )
-
-                train_size = int(0.8 * len(train_ds))
-                val_size = len(train_ds) - train_size
-                train_ds, val_ds = random_split(train_ds, [train_size, val_size])
-
-                train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True, num_workers=4, drop_last=True)
-                val_loader = DataLoader(val_ds, batch_size=BATCH_SIZE, num_workers=4)
-                test_loader = DataLoader(test_ds, batch_size=BATCH_SIZE, num_workers=4)
-
-                pl_module = TabularLightningModule(model, n_outputs=1)
-
-                checkpoint_callback = ModelCheckpoint(
-                    dirpath=f'{checkpoint_dir}/{param}',
-                    filename=f'{model_type}-{timestamp}-{{epoch:02d}}-{{val_r2:.2f}}',
-                    save_top_k=1, verbose=True, monitor='val_r2', mode='max'
-                )
-
-                trainer = pl.Trainer(max_epochs=EPOCHS, accelerator=DEVICE, devices=1, callbacks=[checkpoint_callback])
-                trainer.fit(pl_module, train_loader, val_loader)
-                trainer.test(pl_module, test_loader)
-
-                y_pred = np.concatenate(pl_module.test_preds).flatten()
-                y_test = np.concatenate(pl_module.test_targets).flatten()
-
-                metrics = {
-                    'r2': r2_score(y_test, y_pred),
-                    'rmse': root_mean_squared_error(y_test, y_pred).item(),
-                    'mean_val': list(target_stats.values())[0]['mean'].item(),
-                    'std_val': list(target_stats.values())[0]['std'].item(),
-                }
-                all_metrics[param][0] = metrics
-                print(f"Metrics for {param} (GSHP): R2={{metrics['r2']:.4f}}, RMSE={{metrics['rmse']:.4f}}")
-
-    elif mode == 'combined':
-        has_rosetta = any(c.startswith('US_R3H3_L') and '_VG_' in c for c in df.columns)
-        has_gshp = all(p in df.columns for p in GSHP_PARAMS)
-
-        if has_rosetta:
-            for vert_level in levels:
-                targets = [f'US_R3H3_L{vert_level}_VG_{p}' for p in VG_PARAMS]
-                n_outputs = len(targets)
-                target_name_for_path = f'L{vert_level}_VG_combined'
-
-                print(f"\n--- Training combined {model_type} for all VG params ---")
-
-                if model_type == 'MLP':
-                    train_ds, test_ds, n_features, _, target_stats = prepare_data(
-                        df, targets, feature_cols, cat_cols, use_one_hot=True)
-                    model = VanillaMLP(n_features=n_features, n_outputs=n_outputs, num_hidden_layers=2)
-                else:
-                    train_ds, test_ds, n_num, cat_cards, target_stats = prepare_data(
-                        df, targets, feature_cols, cat_cols, mappings=mappings, use_one_hot=False)
-                    if model_type == 'MLPEmbeddings':
-                        model = MLPWithEmbeddings(n_num_features=n_num, cat_cardinalities=cat_cards,
-                                                  n_outputs=n_outputs, num_hidden_layers=3)
-                    elif model_type == 'FTTransformer':
-                        model = rtdl.FTTransformer.make_baseline(
-                            n_num_features=n_num, cat_cardinalities=cat_cards, d_token=256,
-                            ffn_d_hidden=32, residual_dropout=0.0,
-                            n_blocks=3, attention_dropout=0.2, ffn_dropout=0.2, d_out=n_outputs,
-                        )
-
-                train_size = int(0.8 * len(train_ds))
-                val_size = len(train_ds) - train_size
-                train_ds, val_ds = random_split(train_ds, [train_size, val_size])
-
-                train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True, num_workers=4, drop_last=True)
-                val_loader = DataLoader(val_ds, batch_size=BATCH_SIZE, num_workers=4)
-                test_loader = DataLoader(test_ds, batch_size=BATCH_SIZE, num_workers=4)
-
-                pl_module = TabularLightningModule(model, n_outputs=n_outputs)
-
-                checkpoint_callback = ModelCheckpoint(
-                    dirpath=f'{checkpoint_dir}/{target_name_for_path}',
-                    filename=f'{model_type}-{timestamp}-{{epoch:02d}}-{{val_r2:.2f}}',
-                    save_top_k=1, verbose=True, monitor='val_r2', mode='max'
-                )
-
-                trainer = pl.Trainer(max_epochs=EPOCHS, accelerator=DEVICE, devices=1, callbacks=[checkpoint_callback])
-                trainer.fit(pl_module, train_loader, val_loader)
-                trainer.test(pl_module, test_loader)
-
-                y_pred = np.concatenate(pl_module.test_preds)
-                y_test = np.concatenate(pl_module.test_targets)
-
-                metrics = {}
-                for i, target in enumerate(targets):
-                    param_name = VG_PARAMS[i]
-                    r2 = r2_score(y_test[:, i], y_pred[:, i])
-                    rmse = root_mean_squared_error(y_test[:, i], y_pred[:, i])
-                    metrics[param_name] = {
-                        'r2': r2,
-                        'rmse': rmse.item(),
-                        'mean_val': target_stats[target]['mean'].item(),
-                        'std_val': target_stats[target]['std'].item(),
-                    }
-                all_metrics[target_name_for_path] = metrics
-                print(f"Metrics for combined model: {metrics}")
-
-        elif has_gshp:
-            targets = [p for p in GSHP_PARAMS if p in df.columns]
+    if has_rosetta:
+        for vert_level in levels:
+            targets = [f'US_R3H3_L{vert_level}_VG_{p}' for p in VG_PARAMS]
             n_outputs = len(targets)
-            target_name_for_path = 'GSHP_VG_combined'
+            target_name_for_path = f'L{vert_level}_VG_combined'
 
-            print(f"\n--- Training combined {model_type} for GSHP ---")
-            df_ = df.copy()
-            if 'data_flag' in df_.columns:
-                df_ = df_[df_['data_flag'] == 'good quality estimate']
+            print(f"\n--- Training combined {model_type} for all VG params ---")
 
             if model_type == 'MLP':
                 train_ds, test_ds, n_features, _, target_stats = prepare_data(
-                    df_, targets, feature_cols, cat_cols, use_one_hot=True)
-                model = VanillaMLP(n_features=n_features, n_outputs=n_outputs)
+                    df, targets, feature_cols, cat_cols, use_one_hot=True)
+                model = VanillaMLP(n_features=n_features, n_outputs=n_outputs, num_hidden_layers=2)
             else:
                 train_ds, test_ds, n_num, cat_cards, target_stats = prepare_data(
-                    df_, targets, feature_cols, cat_cols, mappings=mappings, use_one_hot=False)
+                    df, targets, feature_cols, cat_cols, mappings=mappings, use_one_hot=False)
                 if model_type == 'MLPEmbeddings':
-                    model = MLPWithEmbeddings(n_num_features=n_num, cat_cardinalities=cat_cards, n_outputs=n_outputs)
+                    model = MLPWithEmbeddings(n_num_features=n_num, cat_cardinalities=cat_cards,
+                                              n_outputs=n_outputs, num_hidden_layers=3)
                 elif model_type == 'FTTransformer':
                     model = rtdl.FTTransformer.make_baseline(
                         n_num_features=n_num, cat_cardinalities=cat_cards, d_token=256,
@@ -358,7 +170,7 @@ def run_training(f, model_type, mappings_json, checkpoint_dir, metrics_dir, mode
 
             metrics = {}
             for i, target in enumerate(targets):
-                param_name = targets[i]
+                param_name = VG_PARAMS[i]
                 r2 = r2_score(y_test[:, i], y_pred[:, i])
                 rmse = root_mean_squared_error(y_test[:, i], y_pred[:, i])
                 metrics[param_name] = {
@@ -370,11 +182,73 @@ def run_training(f, model_type, mappings_json, checkpoint_dir, metrics_dir, mode
             all_metrics[target_name_for_path] = metrics
             print(f"Metrics for combined model: {metrics}")
 
-        metrics_json = os.path.join(metrics_dir, f'{model_type}_{mode}_{timestamp}.json')
-        with open(metrics_json, 'w') as f:
-            json.dump(all_metrics, f, indent=4)
-        print(f'Wrote {model_type} ({mode}) metrics to {metrics_json}')
+    elif has_gshp:
+        targets = [p for p in GSHP_PARAMS if p in df.columns]
+        n_outputs = len(targets)
+        target_name_for_path = 'GSHP_VG_combined'
 
+        print(f"\n--- Training combined {model_type} for GSHP ---")
+        df_ = df.copy()
+        if 'data_flag' in df_.columns:
+            df_ = df_[df_['data_flag'] == 'good quality estimate']
+
+        if model_type == 'MLP':
+            train_ds, test_ds, n_features, _, target_stats = prepare_data(
+                df_, targets, feature_cols, cat_cols, use_one_hot=True)
+            model = VanillaMLP(n_features=n_features, n_outputs=n_outputs)
+        else:
+            train_ds, test_ds, n_num, cat_cards, target_stats = prepare_data(
+                df_, targets, feature_cols, cat_cols, mappings=mappings, use_one_hot=False)
+            if model_type == 'MLPEmbeddings':
+                model = MLPWithEmbeddings(n_num_features=n_num, cat_cardinalities=cat_cards, n_outputs=n_outputs)
+            elif model_type == 'FTTransformer':
+                model = rtdl.FTTransformer.make_baseline(
+                    n_num_features=n_num, cat_cardinalities=cat_cards, d_token=256,
+                    ffn_d_hidden=32, residual_dropout=0.0,
+                    n_blocks=3, attention_dropout=0.2, ffn_dropout=0.2, d_out=n_outputs,
+                )
+
+        train_size = int(0.8 * len(train_ds))
+        val_size = len(train_ds) - train_size
+        train_ds, val_ds = random_split(train_ds, [train_size, val_size])
+
+        train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True, num_workers=4, drop_last=True)
+        val_loader = DataLoader(val_ds, batch_size=BATCH_SIZE, num_workers=4)
+        test_loader = DataLoader(test_ds, batch_size=BATCH_SIZE, num_workers=4)
+
+        pl_module = TabularLightningModule(model, n_outputs=n_outputs)
+
+        checkpoint_callback = ModelCheckpoint(
+            dirpath=f'{checkpoint_dir}/{target_name_for_path}',
+            filename=f'{model_type}-{timestamp}-{{epoch:02d}}-{{val_r2:.2f}}',
+            save_top_k=1, verbose=True, monitor='val_r2', mode='max'
+        )
+
+        trainer = pl.Trainer(max_epochs=EPOCHS, accelerator=DEVICE, devices=1, callbacks=[checkpoint_callback])
+        trainer.fit(pl_module, train_loader, val_loader)
+        trainer.test(pl_module, test_loader)
+
+        y_pred = np.concatenate(pl_module.test_preds)
+        y_test = np.concatenate(pl_module.test_targets)
+
+        metrics = {}
+        for i, target in enumerate(targets):
+            param_name = targets[i]
+            r2 = r2_score(y_test[:, i], y_pred[:, i])
+            rmse = root_mean_squared_error(y_test[:, i], y_pred[:, i])
+            metrics[param_name] = {
+                'r2': r2,
+                'rmse': rmse.item(),
+                'mean_val': target_stats[target]['mean'].item(),
+                'std_val': target_stats[target]['std'].item(),
+            }
+        all_metrics[target_name_for_path] = metrics
+        print(f"Metrics for combined model: {metrics}")
+
+    metrics_json = os.path.join(metrics_dir, f'{model_type}_{mode}_{timestamp}.json')
+    with open(metrics_json, 'w') as f:
+        json.dump(all_metrics, f, indent=4)
+    print(f'Wrote {model_type} ({mode}) metrics to {metrics_json}')
 
 if __name__ == '__main__':
 
@@ -382,19 +256,22 @@ if __name__ == '__main__':
     root = os.path.join(home, 'data', 'IrrigationGIS', 'soils', 'swapstress', 'training')
 
     # Point to GSHP by default; adjust as needed
-    f = os.path.join(root, 'gshp_training_data.parquet')
-    mappings_json = os.path.join(root, 'gshp_categorical_mappings.json')
+    f = os.path.join(root, 'training_data.parquet')
+    mappings_json = os.path.join(root, 'categorical_mappings.json')
     checkpoint_dir_ = os.path.join(root, 'checkpoints')
     metrics_ = os.path.join(root, 'metrics')
 
-    for model_name in ['MLP']:  # 'MLPEmbeddings', 'FTTransformer'
+    metrics_subdir = 'learn_rosetta_l2'
+    metrics_dst = os.path.join(metrics_, metrics_subdir)
+
+
+    for model_name in ['MLPEmbeddings', 'FTTransformer', 'MLP']:  # 'MLPEmbeddings', 'FTTransformer', 'MLP'
         # print("\n\n" + "=" * 50)
         # print(f"RUNNING {model_name.upper()} in single-target mode")
         # run_training(f, model_name, mappings_json, checkpoint_dir_, metrics_, mode='single')
 
         print("\n\n" + "=" * 50)
         print(f"RUNNING {model_name.upper()} in combined-target mode")
-        run_training(f, model_name, mappings_json, checkpoint_dir_, metrics_, mode='combined',
-                     levels=None, unscale_predictions=False)
+        run_training(f, model_name, mappings_json, checkpoint_dir_, metrics_dst, levels=(2, ))
 
 # ========================= EOF ====================================================================
