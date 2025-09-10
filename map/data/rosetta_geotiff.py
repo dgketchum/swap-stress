@@ -89,20 +89,47 @@ def extract_rosetta_parameters(points_shp, rosetta_dir, out_parquet, num_workers
 
 
 if __name__ == '__main__':
+    run_mt_mesonet_workflow = False
+    run_rosetta_workflow = False
+    run_gshp_workflow = False
+    run_reesh_workflow = True
+
     home = os.path.expanduser('~')
     root_ = os.path.join(home, 'data', 'IrrigationGIS')
+    rosetta_dir_ = os.path.join(root_, 'soils', 'rosetta', 'geotiff')
 
-    rosetta_dir_ = os.path.join(root_, 'soils', 'rosetta')
-    # points_shp_ = os.path.join(home,  IrrigationGIS', 'soils', 'gis', 'pretraining-roi-10000_mgrs.shp')
-    # points_shp_ = os.path.join(home, 'IrrigationGIS', 'soils', 'soil_potential_obs', 'mt_mesonet', 'station_metadata_mgrs.shp')
-    points_shp_ = os.path.join(root_, 'soils', 'vg_paramaer_databases', 'wrc', 'wrc_aggregated_mgrs.shp')
+    if run_mt_mesonet_workflow:
+        points_shp_ = os.path.join(root_, 'soils', 'soil_potential_obs', 'mt_mesonet', 'station_metadata_mgrs.shp')
+        out_parquet_ = os.path.join(root_, 'soils', 'rosetta', 'mt_mesonet', 'extracted_rosetta_points.parquet')
+        extract_rosetta_parameters(points_shp=points_shp_,
+                                   rosetta_dir=os.path.expanduser(rosetta_dir_),
+                                   out_parquet=out_parquet_,
+                                   num_workers=12,
+                                   debug=False)
 
-    # output_csv_ = os.path.join(home, 'IrrigationGIS', 'soils', 'rosetta', 'mt_mesonet', 'extracted_rosetta_points.parquet')
-    output_csv_ = os.path.join(root_, 'soils', 'vg_paramaer_databases', 'wrc', 'extracted_rosetta_points.parquet')
+    elif run_rosetta_workflow:
+        points_shp_ = os.path.join(root_, 'soils', 'gis', 'pretraining-roi-10000_mgrs.shp')
+        out_parquet_ = os.path.join(root_, 'soils', 'rosetta', 'conus', 'extracted_rosetta_points.parquet')
+        extract_rosetta_parameters(points_shp=points_shp_,
+                                   rosetta_dir=os.path.expanduser(rosetta_dir_),
+                                   out_parquet=out_parquet_,
+                                   num_workers=12,
+                                   debug=False)
 
-    extract_rosetta_parameters(points_shp=points_shp_,
-                               rosetta_dir=os.path.expanduser(rosetta_dir_),
-                               out_parquet=output_csv_,
-                               num_workers=12,
-                               debug=False)
+    elif run_gshp_workflow:
+        points_shp_ = os.path.join(root_, 'soils', 'soil_potential_obs', 'gshp', 'wrc_aggregated_mgrs.shp')
+        out_parquet_ = os.path.join(root_, 'soils', 'soil_potential_obs', 'gshp', 'extracted_rosetta_points.parquet')
+        extract_rosetta_parameters(points_shp=points_shp_,
+                                   rosetta_dir=os.path.expanduser(rosetta_dir_),
+                                   out_parquet=out_parquet_,
+                                   num_workers=12,
+                                   debug=False)
+    elif run_reesh_workflow:
+        points_shp_ = os.path.join(root_, 'soils', 'soil_potential_obs', 'reesh', 'shapefile', 'reesh_sites_mgrs.shp')
+        out_parquet_ = os.path.join(root_, 'soils', 'soil_potential_obs', 'reesh', 'extracted_rosetta_points.parquet')
+        extract_rosetta_parameters(points_shp=points_shp_,
+                                   rosetta_dir=os.path.expanduser(rosetta_dir_),
+                                   out_parquet=out_parquet_,
+                                   num_workers=12,
+                                   debug=False)
 # ========================= EOF ====================================================================
