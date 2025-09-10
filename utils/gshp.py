@@ -5,6 +5,11 @@ from pathlib import Path
 import os
 
 
+def sanitize_profile_id(val):
+    s = str(val)
+    return s.replace('/', '_').replace('\\', '_')
+
+
 def process_soil_data(csv_path, shp_path, output_dir):
     """
     Processes soil data by grouping, aggregating, creating a geodataframe,
@@ -26,6 +31,10 @@ def process_soil_data(csv_path, shp_path, output_dir):
 
         print(f"Loading soil data from: {csv_path}")
         df = pd.read_csv(csv_path, encoding='latin1')
+
+        # Sanitize profile_id to avoid path delimiters in identifiers
+        if 'profile_id' in df.columns:
+            df['profile_id'] = df['profile_id'].astype(str).apply(sanitize_profile_id)
 
         # Prepare a cleaned metadata CSV with a stable UID and normalized coords
         print("Preparing cleaned metadata CSV (uid, classes, coords, flags)...")
@@ -131,7 +140,7 @@ if __name__ == '__main__':
     home_dir = os.path.expanduser('~')
     root_ = os.path.join(home_dir, 'data', 'IrrigationGIS')
 
-    gshp_directory_ = os.path.join(root_, 'soils', 'vg_paramaer_databases', 'wrc')
+    gshp_directory_ = os.path.join(root_, 'soils', 'soil_potential_obs', 'gshp')
     soil_csv_path_ = os.path.join(gshp_directory_, 'WRC_dataset_surya_et_al_2021_final.csv')
 
     mgrs_shp_path_ = os.path.join(root_, 'boundaries', 'mgrs', 'mgrs_world_attr.shp')
