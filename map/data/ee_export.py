@@ -10,19 +10,6 @@ from shapely.geometry import box
 
 from map.data.call_ee import stack_bands_climatology, is_authorized
 
-KNOWN_PROBLEMS = [
-    'tpi_10000',
-    'tpi_22500',
-    'elevation',
-    'slope',
-    'aspect',
-    'sm_surface_mean', 'sm_surface_stdDev', 'sm_rootzone_mean', 'sm_rootzone_stdDev', 'sm_profile_mean',
-    'sm_profile_stdDev', 'surface_temp_mean', 'surface_temp_stdDev', 'leaf_area_index_mean', 'leaf_area_index_stdDev',
-    'vegetation_water_content_am_mean',
-    'vegetation_water_content_am_stdDev',
-    'vegetation_water_content_pm_mean',
-    'vegetation_water_content_pm_stdDev']
-
 
 def _export_tile_data(roi, points, desc, bucket, file_prefix, resolution, index_col, region, diagnose=False):
     """Helper function to run and export data for a given ROI and point set."""
@@ -40,8 +27,6 @@ def _export_tile_data(roi, points, desc, bucket, file_prefix, resolution, index_
             bad_ = []
             bands = stack.bandNames().getInfo()
             for b in bands:
-                if b not in KNOWN_PROBLEMS:
-                    continue
                 sel = stack.select([b])
                 sample = sel.sampleRegions(collection=filtered, properties=[], scale=resolution).first()
                 val = ee.Algorithms.If(sample, ee.Feature(sample).get(b), None)
@@ -174,19 +159,22 @@ def get_bands(shapefile_path, mgrs_shp_path, bucket, file_prefix, resolution, in
 if __name__ == '__main__':
     """"""
     run_mt_mesonet_workflow = False
-    run_general_workflow = False
+    run_rosetta_workflow = False
     run_gshp_workflow = True
+    run_flux_workflow = False
     run_ismn_workflow = False
+
+    resolution_ = 250
 
     home = os.path.expanduser('~')
     root_ = os.path.join(home, 'data', 'IrrigationGIS')
     gcs_bucket_ = 'wudr'
 
     if run_mt_mesonet_workflow:
-        extracts_dir_ = os.path.join(root_, 'soils', 'swapstress', 'extracts', 'mt_mesonet_extracts')
+        extracts_dir_ = os.path.join(root_, 'soils', 'swapstress', 'extracts', f'mt_mesonet_extracts_{resolution_}m')
         shapefile_ = os.path.join(root_, 'soils', 'soil_potential_obs', 'mt_mesonet', 'station_metadata_mgrs.shp')
         index_ = 'station'
-        output_prefix_ = 'swap-stress/mesonet_training_data'
+        output_prefix_ = f'swap-stress/mesonet_training_data_{resolution_}m'
         mgrs_shapefile_ = os.path.join(root_, 'boundaries', 'mgrs', 'mgrs_wgs.shp')
 
         is_authorized()
@@ -194,12 +182,13 @@ if __name__ == '__main__':
                   mgrs_shp_path=mgrs_shapefile_,
                   bucket=gcs_bucket_,
                   file_prefix=output_prefix_,
-                  resolution=4000,
+                  resolution=resolution_,
                   index_col=index_,
                   split_tiles=False,
-                  check_dir=extracts_dir_)
+                  check_dir=extracts_dir_,
+                  region='global')
 
-    elif run_general_workflow:
+    elif run_rosetta_workflow:
         extracts_dir_ = os.path.join(root_, 'soils', 'swapstress', 'extracts', 'conus_extracts')
         shapefile_ = os.path.join(root_, 'soils', 'gis', 'pretraining-roi-10000_mgrs.shp')
         index_ = 'site_id'
@@ -211,16 +200,16 @@ if __name__ == '__main__':
                   mgrs_shp_path=mgrs_shapefile_,
                   bucket=gcs_bucket_,
                   file_prefix=output_prefix_,
-                  resolution=4000,
+                  resolution=resolution_,
                   index_col=index_,
                   split_tiles=True,
                   check_dir=extracts_dir_)
 
     elif run_gshp_workflow:
-        extracts_dir_ = os.path.join(root_, 'soils', 'swapstress', 'extracts', 'gshp_extracts_250m')
-        shapefile_ = os.path.join(root_, 'soils', 'vg_paramaer_databases', 'wrc', 'wrc_aggregated_mgrs.shp')
+        extracts_dir_ = os.path.join(root_, 'soils', 'swapstress', 'extracts', f'gshp_extracts_{resolution_}m')
+        shapefile_ = os.path.join(root_, 'soils', 'soil_potential_obs', 'gshp', 'wrc_aggregated_mgrs.shp')
         index_ = 'profile_id'
-        output_prefix_ = 'swap-stress/gshp_training_data_250m'
+        output_prefix_ = f'swap-stress/gshp_training_data_{resolution_}m'
         mgrs_shapefile_ = os.path.join(root_, 'boundaries', 'mgrs', 'mgrs_world_attr.shp')
 
         is_authorized()
@@ -228,7 +217,26 @@ if __name__ == '__main__':
                   mgrs_shp_path=mgrs_shapefile_,
                   bucket=gcs_bucket_,
                   file_prefix=output_prefix_,
-                  resolution=250,
+                  resolution=resolution_,
+                  index_col=index_,
+                  split_tiles=False,
+                  diagnose=False,
+                  check_dir=extracts_dir_,
+                  region='global')
+
+    elif run_flux_workflow:
+        extracts_dir_ = os.path.join(root_, 'soils', 'swapstress', 'extracts', f'amf_extracts_{resolution_}m')
+        shapefile_ = os.path.join(root_, 'climate', 'ameriflux', 'all_flux_sites', 'all_flux_sites_mgrs.shp')
+        index_ = 'site_id'
+        output_prefix_ = f'swap-stress/amf_training_data_{resolution_}m'
+        mgrs_shapefile_ = os.path.join(root_, 'boundaries', 'mgrs', 'mgrs_world_attr.shp')
+
+        is_authorized()
+        get_bands(shapefile_path=shapefile_,
+                  mgrs_shp_path=mgrs_shapefile_,
+                  bucket=gcs_bucket_,
+                  file_prefix=output_prefix_,
+                  resolution=resolution_,
                   index_col=index_,
                   split_tiles=False,
                   diagnose=False,
@@ -236,10 +244,10 @@ if __name__ == '__main__':
                   region='global')
 
     elif run_ismn_workflow:
-        extracts_dir_ = os.path.join(root_, 'soils', 'swapstress', 'extracts', 'ismn_extracts')
+        extracts_dir_ = os.path.join(root_, 'sfofifls', 'swapstress', 'extracts', f'ismn_extracts_{resolution_}m')
         shapefile_ = os.path.join(root_, 'soils', 'vwc_timeseries', 'ismn', 'ismn_stations_mgrs.shp')
         index_ = 'station_ui'
-        output_prefix_ = 'swap-stress/ismn_training_data'
+        output_prefix_ = f'swap-stress/ismn_training_data_{resolution_}m'
         mgrs_shapefile_ = os.path.join(root_, 'boundaries', 'mgrs', 'mgrs_world_attr.shp')
 
         is_authorized()
@@ -247,7 +255,7 @@ if __name__ == '__main__':
                   mgrs_shp_path=mgrs_shapefile_,
                   bucket=gcs_bucket_,
                   file_prefix=output_prefix_,
-                  resolution=4000,
+                  resolution=resolution_,
                   index_col=index_,
                   split_tiles=False,
                   diagnose=False,
