@@ -9,7 +9,7 @@ import torch
 from torch.utils.data import DataLoader
 
 from map.learning import DEVICE, DROP_FEATURES, VG_PARAMS
-from map.learning.inference import find_best_model_checkpoint
+from map.learning.inference_nn import find_best_model_checkpoint
 from map.learning.tabular_nn import TabularLightningModule, VanillaMLP, MLPWithEmbeddings
 from map.learning.train_tabular_nn import prepare_data
 

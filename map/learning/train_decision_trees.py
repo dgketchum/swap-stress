@@ -3,6 +3,7 @@ import json
 from pprint import pprint
 from datetime import datetime
 
+import joblib
 import numpy as np
 import pandas as pd
 import xgboost as xgb
@@ -16,7 +17,7 @@ VG_PARAMS = ['theta_r', 'theta_s', 'log10_alpha', 'log10_n', 'log10_Ks']
 GSHP_PARAMS = ['theta_r', 'theta_s', 'alpha', 'n']
 
 
-def run_rf_training(f, levels=None):
+def run_rf_training(f, levels=None, model_dir=None):
     if levels is None:
         levels = list(range(1, 8))
 
@@ -82,23 +83,40 @@ def run_rf_training(f, levels=None):
 
             data = df[targets + feature_cols].copy()
             initial_len = len(data)
+
+            target_info = {t: data[t].mean() for t in targets}
+            print(f'Raw Target Means')
+            [print(f'{k}: {v:.3f}') for k, v in target_info.items()]
+
             for t in targets:
                 data[data[t] <= -9999] = np.nan
-            if 'alpha' in data.columns:
-                data.loc[:, 'alpha'] = np.log10(np.clip(data['alpha'].astype(float), 1e-9, None))
-            if 'n' in data.columns:
-                data.loc[:, 'n'] = np.log10(np.clip(data['n'].astype(float), 1.0 + 1e-9, None))
+
             data.dropna(subset=targets, inplace=True)
             print(f'Dropped {initial_len - len(data)} NaN records for GSHP combined')
 
             features = data[feature_cols]
             y = data[targets]
 
+            target_info = {t: data[t].mean() for t in targets}
+            print(f'Transformed Target Means')
+            [print(f'{k}: {v:.3f}') for k, v in target_info.items()]
+
             x_train, x_test, y_train, y_test = train_test_split(features, y, test_size=0.2, random_state=42)
             print(f'{len(x_train)} training, {len(x_test)} test samples')
 
             model = RandomForestRegressor(n_estimators=250, random_state=42, n_jobs=-1)
             model.fit(x_train, y_train)
+
+            if model_dir:
+                if not os.path.exists(model_dir):
+                    os.makedirs(model_dir)
+                model_path = os.path.join(model_dir, 'rf_gshp_model.joblib')
+                joblib.dump(model, model_path)
+                print(f'Saved model to {model_path}')
+                features_path = os.path.join(model_dir, 'rf_gshp_features.json')
+                with open(features_path, 'w') as f:
+                    json.dump(feature_cols, f, indent=4)
+                print(f'Saved features to {features_path}')
 
             y_pred = model.predict(x_test)
 
@@ -116,6 +134,7 @@ def run_rf_training(f, levels=None):
             pprint(f"Metrics for combined RF model GSHP: {metrics}")
 
     return all_metrics
+
 
 
 def run_xgb_training(f, levels=None):
@@ -227,20 +246,22 @@ def run_xgb_training(f, levels=None):
 if __name__ == '__main__':
 
     home_ = os.path.expanduser('~')
-    root_ = os.path.join(home_, 'data', 'IrrigationGIS', 'soils', 'swapstress', 'training')
+    root_ = os.path.join(home_, 'data', 'IrrigationGIS', 'soils', 'swapstress')
 
-    f_ = os.path.join(root_, 'training_data.parquet')
-    metrics_dir_ = os.path.join(root_, 'metrics')
+    f_ = os.path.join(root_, 'training', 'gshp_training_data_250m.parquet')
+    metrics_dir_ = os.path.join(root_, 'training', 'metrics')
+    models_dir_ = os.path.join(root_, 'training', 'models')
 
-    if not os.path.exists(metrics_dir_):
-        os.makedirs(metrics_dir_)
+    for d in [metrics_dir_, models_dir_]:
+        if not os.path.exists(d):
+            os.makedirs(d)
 
     # Random Forest
     print("=" * 50)
     print(f"RUNNING RANDOM FOREST")
-    all_metrics_ = run_rf_training(f_, levels=(2, ))
+    all_metrics_ = run_rf_training(f_, model_dir=models_dir_)
 
-    metrics_subdir = 'learn_rosetta_l2'
+    metrics_subdir = 'learn_gshp'
     metrics_dst = os.path.join(metrics_dir_, metrics_subdir)
 
     timestamp_ = datetime.now().strftime('%Y%m%d_%H%M%S')
