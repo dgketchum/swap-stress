@@ -5,6 +5,8 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from lmfit import Model
+# import pymc3 as pm
+# import aesara.tensor as at
 
 
 class SWRC:
@@ -77,7 +79,7 @@ class SWRC:
         if self.depth_col in df.columns:
             for depth, group in df.groupby(self.depth_col):
                 self.data_by_depth[depth] = group
-            print(f"Data loaded and grouped by {len(self.data_by_depth)} depths.")
+            # print(f"Data loaded and grouped by {len(self.data_by_depth)} depths.")
         else:
             self.data_by_depth[0] = df
             print("Data loaded as a single dataset (no depth column found).")
@@ -98,7 +100,7 @@ class SWRC:
         if self.depth_col in df.columns:
             for key, group in df.groupby(self.depth_col):
                 self.data_by_depth[key] = group
-            print(f"DataFrame loaded and grouped by {self.depth_col} ({len(self.data_by_depth)} groups).")
+            # print(f"DataFrame loaded and grouped by {self.depth_col} ({len(self.data_by_depth)} groups).")
         else:
             self.data_by_depth[0] = df
             print("DataFrame loaded as a single dataset (no grouping column found).")
@@ -136,6 +138,10 @@ class SWRC:
             :param report:
             :param method:
         """
+        # special Bayesian pathway
+        if str(method).lower() in {'bayes', 'fit_bayes', 'bayesian'}:
+            return self.fit_bayesian()
+
         self.fit_results = {}
         for depth, data_df in self.data_by_depth.items():
             print(f"--- Fitting for Depth: {depth} cm ---")
@@ -146,7 +152,7 @@ class SWRC:
             try:
                 result = self._vg_model.fit(
                     data_df['theta'], initial_params, psi=data_df['suction'],
-                    method=method, nan_policy='raise'
+                    method=method, nan_policy='raise'  # likely error: lmfit uses 'nelder' not 'nelder-meade'
                 )
                 self.fit_results[depth] = result
                 if report:
@@ -156,6 +162,38 @@ class SWRC:
                 self.fit_results[depth] = None
         print("\nAll fits complete.")
         return self.fit_results
+
+    # def fit_bayesian(self, draws=2000, tune=1000, target_accept=0.9, chains=2, cores=1, random_seed=None):
+    #     self.bayes_results = {}
+    #     for depth, data_df in self.data_by_depth.items():
+    #         d = data_df.dropna(subset=['suction', 'theta'])
+    #         if len(d) < 4:
+    #             self.bayes_results[depth] = None
+    #             continue
+    #         psi = d['suction'].astype(float).values
+    #         theta = d['theta'].astype(float).values
+    #         with pm.Model() as model:
+    #             theta_r = pm.Beta('theta_r', alpha=1.5, beta=8.0)
+    #             delta = pm.Beta('delta', alpha=2.0, beta=2.0)
+    #             theta_s = pm.Deterministic('theta_s', theta_r + delta * (1.0 - theta_r))
+    #             log_alpha = pm.Normal('log_alpha', mu=np.log(0.05), sigma=1.0)
+    #             alpha = pm.Deterministic('alpha', at.exp(log_alpha))
+    #             n_minus1 = pm.HalfNormal('n_minus1', sigma=0.75)
+    #             n = pm.Deterministic('n', 1.0 + n_minus1)
+    #             m = 1.0 - 1.0 / n
+    #             psi_safe = at.maximum(psi, 1e-9)
+    #             term = 1.0 + (alpha * psi_safe) ** n
+    #             mu_theta = theta_r + (theta_s - theta_r) / (term ** m)
+    #             sigma = pm.HalfNormal('sigma', sigma=0.05)
+    #             pm.Normal('obs', mu=mu_theta, sigma=sigma, observed=theta)
+    #             trace = pm.sample(
+    #                 draws=draws, tune=tune, chains=chains, cores=cores,
+    #                 target_accept=target_accept, random_seed=random_seed,
+    #                 progressbar=False, return_inferencedata=True
+    #             )
+    #         self.bayes_results[depth] = trace
+    #
+    #     return self.bayes_results
 
     def test_fit_methods(self, methods_to_test, depth=None):
         """
