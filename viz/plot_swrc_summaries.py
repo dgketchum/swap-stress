@@ -12,15 +12,15 @@ from retention_curve import PARAM_SYMBOLS
 
 def _load_results_to_df(results_dir):
     """Loads all result JSONs from a directory into a single pandas DataFrame."""
-    json_files = glob(os.path.join(results_dir, '**', '*_fit_results.json'), recursive=True)
+    json_files = glob(os.path.join(results_dir, '**', '*.json'), recursive=True)
     if not json_files:
-        print(f"No '_fit_results.json' files found in {results_dir}")
+        print(f"No '.json' files found in {results_dir}")
         return None
 
     print(f"Found {len(json_files)} result files to process...")
     all_results = []
     for f in json_files:
-        station_name = os.path.basename(f).replace('_fit_results.json', '')
+        station_name = os.path.basename(f).replace('.json', '')
         with open(f, 'r') as jf:
             data = json.load(jf)
 
@@ -28,7 +28,7 @@ def _load_results_to_df(results_dir):
             if results.get('status') != 'Success':
                 continue
 
-            row = {'station': station_name, 'depth': int(depth), 'n_obs': results.get('n_obs', 0)}
+            row = {'station': station_name, 'depth': int(float(depth)), 'n_obs': results.get('n_obs', 0)}
 
             for param, values in results['parameters'].items():
                 row[param] = values['value']
@@ -40,57 +40,6 @@ def _load_results_to_df(results_dir):
 
     return pd.DataFrame(all_results)
 
-
-def plot_parameter_summaries(results_dir, output_dir):
-    """
-    Aggregates SWRC fit results from multiple JSON files and creates
-    summary box plots for each parameter by depth.
-    """
-    df = _load_results_to_df(results_dir)
-    if df is None:
-        return
-
-    if not os.path.exists(output_dir):
-        os.makedirs(output_dir)
-        print(f"Created output directory: {output_dir}")
-
-    parameters_to_plot = ['theta_r', 'theta_s', 'alpha', 'n']
-    print("Generating summary box plots...")
-
-    for param in parameters_to_plot:
-        plt.style.use('seaborn-v0_8-whitegrid')
-        fig, ax = plt.subplots(figsize=(10, 7))
-        sns.boxplot(x='depth', y=param, data=df, ax=ax)
-
-        # Add annotations
-        unique_depths = sorted(df['depth'].unique())
-        for i, depth in enumerate(unique_depths):
-            depth_data = df[df['depth'] == depth]
-            n_sites = len(depth_data)
-            n_obs = depth_data['n_obs'].sum()
-
-            q3 = depth_data[param].quantile(0.75)
-            q1 = depth_data[param].quantile(0.25)
-            iqr = q3 - q1
-            upper_whisker = min(depth_data[param].max(), q3 + 1.5 * iqr)
-            y_pos = upper_whisker * 1.05
-
-            text = f"Sites: {n_sites}\nObs: {n_obs}"
-
-            ax.text(i + 0.2, y_pos, text, ha='left', va='bottom', fontsize='small', color='#333333')
-
-        symbol = PARAM_SYMBOLS.get(param, param)
-        ax.set_title(f'Fitted {symbol} Distribution by Depth', fontsize=16, fontweight='bold')
-        ax.set_xlabel('Depth (cm)', fontsize=12)
-        ax.set_ylabel(f'{symbol} Value', fontsize=12)
-        plt.tight_layout()
-
-        plot_filename = os.path.join(output_dir, f'{param}_summary_boxplot.png')
-        plt.savefig(plot_filename, dpi=300)
-        print(f"  - Saved {plot_filename}")
-        plt.close(fig)
-
-    print("Summary plots complete.")
 
 
 def plot_parameter_histograms(results_dir, output_dir):
@@ -166,14 +115,14 @@ def plot_parameter_influence(results_dir, output_dir):
 
     psi_range = np.logspace(0, 7, 100)  # Soil Water Potential range for plotting curves
 
-    for p_influence in parameters:
-        plt.style.use('seaborn-v0_8-whitegrid')
-        fig, ax = plt.subplots(figsize=(8, 7))
+    plt.style.use('seaborn-v0_8-whitegrid')
+    fig, axes = plt.subplots(2, 2, figsize=(12, 10), sharey=True)
 
-        # Base parameters (mean of all others)
+    for idx, p_influence in enumerate(parameters):
+        ax = axes.flat[idx]
+
         base_params = {p: param_stats[p]['mean'] for p in parameters}
 
-        # Plot curves for 10th, 50th, 90th percentiles
         percentiles = ['p10', 'p50', 'p90']
         labels = ['10th Percentile', 'Median', '90th Percentile']
         colors = ['blue', 'green', 'red']
@@ -182,43 +131,52 @@ def plot_parameter_influence(results_dir, output_dir):
             current_params = base_params.copy()
             current_params[p_influence] = param_stats[p_influence][percentile_key]
 
-            # Calculate VWC for the current set of parameters
-            vwc_curve = _van_genuchten_model_local(psi_range,
-                                                   theta_r=current_params['theta_r'],
-                                                   theta_s=current_params['theta_s'],
-                                                   alpha=current_params['alpha'],
-                                                   n=current_params['n'])
+            vwc_curve = _van_genuchten_model_local(
+                psi_range,
+                theta_r=current_params['theta_r'],
+                theta_s=current_params['theta_s'],
+                alpha=current_params['alpha'],
+                n=current_params['n']
+            )
 
             symbol = PARAM_SYMBOLS.get(p_influence, p_influence)
-
-            ax.plot(vwc_curve, psi_range, color=colors[i], label=f'{symbol} - {labels[i]} ({param_stats[p_influence][percentile_key]:.3f})')
-
+            ax.plot(
+                vwc_curve,
+                psi_range,
+                color=colors[i],
+                label=f'{symbol} - {labels[i]} ({param_stats[p_influence][percentile_key]:.3f})'
+            )
         ax.set_yscale('log')
-        ax.set_ylabel('Soil Water Potential (cm) - Log Scale', fontsize=12)
-        ax.set_xlabel('Volumetric Water Content ($cm^3/cm^3$)', fontsize=12)
         ax.set_xlim(right=0.65)
         ax.set_ylim(top=10 ** 7)
-
         symbol_influence = PARAM_SYMBOLS.get(p_influence, p_influence)
-        ax.set_title(f'Influence of {symbol_influence} on SWRC Shape', fontsize=16, fontweight='bold')
-        ax.legend(fontsize=11)
+        ax.set_title(f'{symbol_influence}', fontsize=14, fontweight='bold')
         ax.grid(True, which="both", ls="--", c='0.7')
-        plt.tight_layout()
 
-        plot_filename = os.path.join(output_dir, f'{p_influence}_influence_plot.png')
-        plt.savefig(plot_filename, dpi=300)
-        print(f"  - Saved {plot_filename}")
-        plt.close(fig)
+        if idx % 2 == 0:
+            ax.set_ylabel('Soil Water Potential (cm) - Log Scale', fontsize=12)
 
-    print("Parameter influence plots complete.")
+        if idx >= 2:
+            ax.set_xlabel('Volumetric Water Content ($cm^3/cm^3$)', fontsize=12)
+
+        ax.legend(fontsize=10, framealpha=0.6, facecolor='white')
+
+    fig.suptitle(f'van Genuchten Parameter Ranges in GSHP (n={len(df)})', fontsize=16, fontweight='bold')
+    plt.tight_layout()
+    plot_filename = os.path.join(output_dir, 'parameter_influence_panels.png')
+    plt.savefig(plot_filename, dpi=300)
+    print(f"  - Saved {plot_filename}")
+    plt.close(fig)
+
+    print("van Genuchten Parameter influence panel plot complete.")
 
 
 if __name__ == '__main__':
     home_ = os.path.expanduser('~')
-    root_ = os.path.join(home_, 'data', 'IrrigationGIS', 'soils', 'soil_potential_obs', 'mt_mesonet')
+    root_ = os.path.join(home_, 'data', 'IrrigationGIS', 'soils')
 
-    results_dir_ = os.path.join(root_, 'results_by_station')
-    plot_output_dir_ = os.path.join(root_, 'summary_plots')
+    fits = os.path.join(root_,'soil_potential_obs', 'curve_fits', 'gshp', 'nelder')
+    plot_output_dir_ = os.path.join(root_, 'swapstress', 'figures', 'comparison_plots')
 
     # plot_parameter_summaries(results_dir=results_dir_,
     #                          output_dir=plot_output_dir_)
@@ -226,7 +184,7 @@ if __name__ == '__main__':
     # plot_parameter_histograms(results_dir=results_dir_,
     #                           output_dir=plot_output_dir_)
 
-    plot_parameter_influence(results_dir=results_dir_,
+    plot_parameter_influence(results_dir=fits,
                              output_dir=plot_output_dir_)
 
 # ========================= EOF ====================================================================
