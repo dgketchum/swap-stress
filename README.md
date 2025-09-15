@@ -152,23 +152,6 @@ Optional sequence model from VWC time series:
 - Standardize to SWRC tables: `retention_curve/standardize_swp.py` helpers produce CSVs with `suction`, `theta`, `depth`.
 - Fit per-depth per-station and write JSON summaries: `retention_curve/fit_swrc.py` (choose `method`: `nelder`, `least_squares`, `slsqp`, `lbfgsb`).
 
-Example usage
-
-```python
-from retention_curve.swrc import SWRC
-from retention_curve.gshp_swrc import GshpSWRC
-
-# Generic fit on standardized data (columns: suction, theta, depth)
-swrc = SWRC(df=std_df, depth_col='depth')
-swrc.fit(method='lbfgsb')  # or 'nelder', 'least_squares', etc.
-swrc.save_results(output_dir=out_dir, output_filename='swrc_profile.json')
-
-# GSHP policy with imputation for missing ends
-gshp = GshpSWRC(df=gshp_df, depth_col='depth')
-gshp.fit(method='slsqp')
-gshp.save_results(output_dir=out_dir, output_filename='gshp_profile.json')
-```
-
 ### 7) Compare empirical vs Rosetta vs ML predictions
 
 - `retention_curve/swrc_comparison.py` merges empirical fit JSONs with Rosetta parameters and ML predictions, computes R²/RMSE, and saves scatter plots.
