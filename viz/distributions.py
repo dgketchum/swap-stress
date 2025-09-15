@@ -315,6 +315,14 @@ def compare_parameter_distributions_combined(empirical_results_dir, rosetta_parq
                 tick.set_rotation(30)
                 tick.set_ha('right')
 
+            if p == 'theta_r':
+                counts = sdf.groupby('Source')['Value'].apply(lambda x: x.notna().sum()).to_dict()
+                new_labels = []
+                for src in order:
+                    n = counts.get(src, 0)
+                    new_labels.append(f"{src}\n(n={n})")
+                ax.set_xticklabels(new_labels)
+
     plt.tight_layout()
     out_path = os.path.join(output_dir, 'vg_param_distributions_all_sources_combined.png')
     plt.savefig(out_path, dpi=300)
@@ -331,12 +339,12 @@ if __name__ == '__main__':
     empirical_dir = os.path.join(root, 'soil_potential_obs', 'mt_mesonet', 'results_by_station')
     rosetta_pqt = os.path.join(root, 'rosetta', 'extracted_rosetta_points.parquet')
     training_pqt = os.path.join(root, 'swapstress', 'training', 'training_data.parquet')
-    out_dir = os.path.join(root, 'swapstress', 'comparison_plots')
+    out_dir = os.path.join(root, 'swapstress', 'figures', 'comparison_plots')
     rosetta_training_pqt = os.path.join(rosetta_soil_proj, 'rosetta', 'db', 'Data.parquet')
 
     # Combined all-depths, single figure with 4 panels
     gshp_csv = os.path.join(root, 'soil_potential_obs', 'gshp', 'WRC_dataset_surya_et_al_2021_final.csv')
-    compare_parameter_distributions_combined(empirical_dir, rosetta_pqt, training_pqt, out_dir, bins=30,
+    compare_parameter_distributions_combined(empirical_dir, rosetta_pqt, training_pqt, out_dir,
                                              gshp_csv=gshp_csv, rosetta_training_parquet=rosetta_training_pqt)
 
 # ========================= EOF ====================================================================
