@@ -1,10 +1,8 @@
 import os
 
-import numpy as np
 import pandas as pd
 
 from retention_curve.swrc import SWRC
-from retention_curve.gshp_swrc import GshpSWRC
 
 
 def _csv_files(d):
