@@ -158,10 +158,10 @@ def get_bands(shapefile_path, mgrs_shp_path, bucket, file_prefix, resolution, in
 
 if __name__ == '__main__':
     """"""
-    run_mt_mesonet_workflow = False
+    run_mt_mesonet_workflow = True
     run_rosetta_workflow = False
-    run_gshp_workflow = True
-    run_flux_workflow = False
+    run_gshp_workflow = False
+    run_reesh_workflow = False
     run_ismn_workflow = False
 
     resolution_ = 250
@@ -171,8 +171,9 @@ if __name__ == '__main__':
     gcs_bucket_ = 'wudr'
 
     if run_mt_mesonet_workflow:
+        # TODO: re-run MT Mesonet extract with the clean file (has many extra columns right now)
         extracts_dir_ = os.path.join(root_, 'soils', 'swapstress', 'extracts', f'mt_mesonet_extracts_{resolution_}m')
-        shapefile_ = os.path.join(root_, 'soils', 'soil_potential_obs', 'mt_mesonet', 'station_metadata_mgrs.shp')
+        shapefile_ = os.path.join(root_, 'soils', 'soil_potential_obs', 'mt_mesonet', 'station_metadata_clean_mgrs.shp')
         index_ = 'station'
         output_prefix_ = f'swap-stress/mesonet_training_data_{resolution_}m'
         mgrs_shapefile_ = os.path.join(root_, 'boundaries', 'mgrs', 'mgrs_wgs.shp')
@@ -224,11 +225,11 @@ if __name__ == '__main__':
                   check_dir=extracts_dir_,
                   region='global')
 
-    elif run_flux_workflow:
-        extracts_dir_ = os.path.join(root_, 'soils', 'swapstress', 'extracts', f'amf_extracts_{resolution_}m')
-        shapefile_ = os.path.join(root_, 'climate', 'ameriflux', 'all_flux_sites', 'all_flux_sites_mgrs.shp')
+    elif run_reesh_workflow:
+        extracts_dir_ = os.path.join(root_, 'soils', 'swapstress', 'extracts', f'reesh_extracts_{resolution_}m')
+        shapefile_ = os.path.join(root_, 'soils', 'soil_potential_obs', 'reesh', 'shapefile', 'reesh_sites_mgrs.shp')
         index_ = 'site_id'
-        output_prefix_ = f'swap-stress/amf_training_data_{resolution_}m'
+        output_prefix_ = f'swap-stress/reesh_training_data_{resolution_}m'
         mgrs_shapefile_ = os.path.join(root_, 'boundaries', 'mgrs', 'mgrs_world_attr.shp')
 
         is_authorized()

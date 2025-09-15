@@ -60,7 +60,7 @@ if __name__ == '__main__':
 
     inference_targets = {
         'mt_mesonet': os.path.join(data_dir_, 'mt_training_data_250m.parquet'),
-        'flux': os.path.join(data_dir_, 'amf_training_data_250m.parquet')
+        'reesh': os.path.join(data_dir_, 'reesh_training_data_250m.parquet')
     }
 
     for name, data_path_ in inference_targets.items():
