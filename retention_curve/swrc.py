@@ -43,14 +43,15 @@ class SWRC:
         self.filepath = filepath
         self.data_by_depth = {}
         self.fit_results = {}
+        self.metadata = {}
         self._vg_model = Model(self._van_genuchten_model)
 
         if df is not None:
-            self.depth_col = depth_col or 'depth'
+            self.depth_col = depth_col or 'depth_cm'
             self.load_from_dataframe(df)
         elif filepath:
-            # default for legacy MT Mesonet files
-            self.depth_col = depth_col or 'stationDepth [cm]'
+            # prefer standardized depth header
+            self.depth_col = depth_col or 'depth_cm'
             self.load_from_file(filepath)
 
     def load_from_file(self, filepath):
@@ -86,15 +87,26 @@ class SWRC:
 
     def load_from_dataframe(self, df):
         """
-        Load SWRC data from a DataFrame. Requires columns: 'suction' [cm], 'theta', 'depth' [cm].
+        Load SWRC data from a DataFrame. Accepts columns: ('suction'|'suction_cm'), 'theta', ('depth'|'depth_cm').
         Groups by `self.depth_col` if present; otherwise treats as single dataset.
         """
-        required = {'suction', 'theta', 'depth'}
-        missing = required - set(df.columns)
-        if missing:
-            raise ValueError(f"DataFrame missing required columns: {sorted(missing)}")
+        cols = set(df.columns)
+        has_suction = ('suction' in cols) or ('suction_cm' in cols)
+        has_depth = ('depth' in cols) or ('depth_cm' in cols)
+        if not has_suction or 'theta' not in cols or not has_depth:
+            raise ValueError(f"DataFrame missing required columns: need ('suction'|'suction_cm'), 'theta', ('depth'|'depth_cm')")
 
         df = df.copy()
+        if 'suction' not in df.columns and 'suction_cm' in df.columns:
+            df = df.rename(columns={'suction_cm': 'suction'})
+        if 'depth' not in df.columns and 'depth_cm' in df.columns:
+            df = df.rename(columns={'depth_cm': 'depth'})
+
+        meta_cols = [c for c in df.columns if c not in {'suction', 'theta', 'depth'}]
+        meta_series = df[meta_cols + ['depth']].groupby('depth').first()
+        meta_series = meta_series.to_dict(orient='index')
+        self.metadata = meta_series
+
         df['suction'] = np.abs(df['suction'].values)
 
         if self.depth_col in df.columns:
@@ -365,17 +377,6 @@ class SWRC:
                 'suction': df_raw['suction'].astype(float).tolist(),
                 'theta': df_raw['theta'].astype(float).tolist(),
             }
-            meta = {}
-            if 'uid' in df_raw.columns:
-                try:
-                    meta['uid'] = str(df_raw['uid'].iloc[0])
-                except Exception:
-                    pass
-            if 'profile_id' in df_raw.columns:
-                try:
-                    meta['profile_id'] = str(df_raw['profile_id'].iloc[0])
-                except Exception:
-                    pass
             if result and result.success:
                 params = {}
                 for name, param in result.params.items():
@@ -389,15 +390,16 @@ class SWRC:
                     'bic': result.bic,
                     'parameters': params,
                     'data': data_blob,
-                    'meta': meta,
                 }
             else:
                 summary[depth] = {
                     'status': 'Fit Failed or Not Performed',
                     'n_obs': n_obs,
                     'data': data_blob,
-                    'meta': meta,
                 }
+        if self.metadata:
+            summary['metadata'] = self.metadata.copy()
+
         return summary
 
     def save_results(self, output_dir, output_filename=None, add_data=None):

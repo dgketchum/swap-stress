@@ -33,8 +33,9 @@ def standardize_reesh(df, depth_col=None):
         d['name'] = d['Sample_ID']
     elif 'Site' in d.columns:
         d['name'] = d['Site']
-    keep_extra = [c for c in ('name', 'Sample_ID', 'Site', 'uid', 'profile_id') if c in d.columns]
-    return d[['suction', 'theta', 'depth'] + keep_extra]
+    keep_extra = [c for c in ('Sample_ID', 'Site', 'Plot') if c in d.columns]
+    d = d.rename(columns={'suction': 'suction_cm', 'depth': 'depth_cm'})
+    return d[['suction_cm', 'theta', 'depth_cm'] + keep_extra]
 
 
 def standardize_mt_mesonet(df, depth_col=None):
@@ -50,7 +51,8 @@ def standardize_mt_mesonet(df, depth_col=None):
     d = _standardize_depth(d, depth_col)
     if 'name' not in d.columns and 'station' in d.columns:
         d['name'] = d['station']
-    return d[['suction', 'theta', 'depth'] + [c for c in ('name', 'uid', 'profile_id') if c in d.columns]]
+    d = d.rename(columns={'suction': 'suction_cm', 'depth': 'depth_cm'})
+    return d[['suction_cm', 'theta', 'depth_cm', 'name']]
 
 
 def standardize_gshp(df, depth_col=None):
@@ -65,7 +67,8 @@ def standardize_gshp(df, depth_col=None):
         d['depth'] = (d['hzn_bot'].astype(float) + d['hzn_top'].astype(float)) / 2.0
     else:
         d = _standardize_depth(d, depth_col)
-    keep = ['suction', 'theta', 'depth']
+    d = d.rename(columns={'suction': 'suction_cm', 'depth': 'depth_cm'})
+    keep = ['suction_cm', 'theta', 'depth_cm']
     # GSHP needs these extra data to be fit according to their approach
     keep += [c for c in ('profile_id', 'SWCC_classes',
                          'sand_tot_psa',
@@ -88,22 +91,22 @@ def write_standardized_gshp(soil_csv_path, out_dir):
     print(f'writing gshp obs to {out_dir}')
     for pid, r in tqdm(std.groupby('profile_id'), total=len(std.groupby('profile_id'))):
         out_path = os.path.join(out_dir, f'{pid}.csv')
-        r[['suction', 'theta', 'depth', 'SWCC_classes',
+        r[['suction_cm', 'theta', 'depth_cm', 'SWCC_classes',
            'sand_tot_psa',
            'silt_tot_psa',
            'clay_tot_psa',
            'db_od',
            'climate_classes']].to_csv(out_path, index=False)
         stations += 1
-        s_min = min(s_min, float(np.nanmin(r['suction'].values)))
-        s_max = max(s_max, float(np.nanmax(r['suction'].values)))
+        s_min = min(s_min, float(np.nanmin(r['suction_cm'].values)))
+        s_max = max(s_max, float(np.nanmax(r['suction_cm'].values)))
         t_min = min(t_min, float(np.nanmin(r['theta'].values)))
         t_max = max(t_max, float(np.nanmax(r['theta'].values)))
 
     print(f"GSHP standardized: stations={stations}, suction_cm=[{s_min:.3g}, {s_max:.3g}], theta=[{t_min:.3f}, {t_max:.3f}]")
 
 
-def write_standardized_rosetta(curves_wide_csv, out_dir):
+def write_standardized_rosetta(curves_wide_csv, out_dir, profile_key):
     os.makedirs(out_dir, exist_ok=True)
     dfw = pd.read_csv(curves_wide_csv)
     if 'Index' not in dfw.columns:
@@ -121,21 +124,22 @@ def write_standardized_rosetta(curves_wide_csv, out_dir):
             h = r[hc]
             t = r[tc]
             if pd.notna(h) and pd.notna(t):
-                recs.append({'suction': abs(float(h)), 'theta': float(t), 'depth': 0})
+                recs.append({'suction_cm': abs(float(h)), 'theta': float(t), 'depth_cm': 0, 'Index': int(idx)})
         d = pd.DataFrame(recs)
+        d['profile_id'] = d[profile_key]
         out_path = os.path.join(out_dir, f'{int(idx)}.csv')
         d.to_csv(out_path, index=False)
         if not d.empty:
             stations += 1
-            s_min = min(s_min, float(np.nanmin(d['suction'].values)))
-            s_max = max(s_max, float(np.nanmax(d['suction'].values)))
+            s_min = min(s_min, float(np.nanmin(d['suction_cm'].values)))
+            s_max = max(s_max, float(np.nanmax(d['suction_cm'].values)))
             t_min = min(t_min, float(np.nanmin(d['theta'].values)))
             t_max = max(t_max, float(np.nanmax(d['theta'].values)))
     if stations:
         print(f"Rosetta standardized: stations={stations}, suction_cm=[{s_min:.3g}, {s_max:.3g}], theta=[{t_min:.3f}, {t_max:.3f}]")
 
 
-def write_standardized_mt_mesonet(swp_csv_path, metadata_csv_path, out_dir):
+def write_standardized_mt_mesonet(swp_csv_path, metadata_csv_path, out_dir, profile_key):
     os.makedirs(out_dir, exist_ok=True)
     for p in [swp_csv_path, metadata_csv_path]:
         if not os.path.exists(p):
@@ -151,20 +155,22 @@ def write_standardized_mt_mesonet(swp_csv_path, metadata_csv_path, out_dir):
     s_min, s_max = np.inf, -np.inf
     t_min, t_max = np.inf, -np.inf
     stations = 0
-    for station, r in tqdm(merged.groupby('station'), total=merged['station'].nunique()):
+    for profile_id, r in tqdm(merged.groupby(profile_key), total=merged['station'].nunique()):
         d = standardize_mt_mesonet(r, depth_col='Depth [cm]')
-        out_path = os.path.join(out_dir, f'{station}.csv')
+        d['profile_id'] = profile_id
+        d['station'] = profile_id
+        out_path = os.path.join(out_dir, f'{profile_id}.csv')
         d.to_csv(out_path, index=False)
         stations += 1
-        s_min = min(s_min, float(np.nanmin(d['suction'].values)))
-        s_max = max(s_max, float(np.nanmax(d['suction'].values)))
+        s_min = min(s_min, float(np.nanmin(d['suction_cm'].values)))
+        s_max = max(s_max, float(np.nanmax(d['suction_cm'].values)))
         t_min = min(t_min, float(np.nanmin(d['theta'].values)))
         t_max = max(t_max, float(np.nanmax(d['theta'].values)))
     if stations:
         print(f"MT Mesonet standardized: stations={stations}, suction_cm=[{s_min:.3g}, {s_max:.3g}], theta=[{t_min:.3f}, {t_max:.3f}]")
 
 
-def write_standardized_reesh(in_dir, out_dir):
+def write_standardized_reesh(in_dir, out_dir, profile_key):
     os.makedirs(out_dir, exist_ok=True)
     s_min, s_max = np.inf, -np.inf
     t_min, t_max = np.inf, -np.inf
@@ -176,7 +182,7 @@ def write_standardized_reesh(in_dir, out_dir):
         p = os.path.join(in_dir, f)
         df = pd.read_csv(p)
 
-        site_id = df.iloc[0]['Site']
+        station = df.iloc[0]['Site']
 
         if 'Sample_ID' not in df.columns:
             continue
@@ -184,13 +190,15 @@ def write_standardized_reesh(in_dir, out_dir):
         if df['Site'].nunique() > 1:
             raise ValueError
 
-        for plot_id, r in tqdm(df.groupby('Plot'), total=df['Plot'].nunique()):
+        for profile_id, r in tqdm(df.groupby(profile_key), total=df['Plot'].nunique()):
             d = standardize_reesh(r, depth_col='Depth_cm')
-            out_path = os.path.join(out_dir, f'{site_id}_{plot_id}.csv')
+            d['profile_id'] = profile_id
+            d['station'] = station
+            out_path = os.path.join(out_dir, f'{station}_{profile_id}.csv')
             d.to_csv(out_path, index=False)
             stations += 1
-            s_min = min(s_min, float(np.nanmin(d['suction'].values)))
-            s_max = max(s_max, float(np.nanmax(d['suction'].values)))
+            s_min = min(s_min, float(np.nanmin(d['suction_cm'].values)))
+            s_max = max(s_max, float(np.nanmax(d['suction_cm'].values)))
             t_min = min(t_min, float(np.nanmin(d['theta'].values)))
             t_max = max(t_max, float(np.nanmax(d['theta'].values)))
 
@@ -202,7 +210,7 @@ if __name__ == '__main__':
     home_ = os.path.expanduser('~')
 
     run_rosetta = False
-    run_mt_mesonet = False
+    run_mt_mesonet = True
     run_reesh = False
 
     if run_rosetta:
@@ -210,18 +218,18 @@ if __name__ == '__main__':
         props_csv_ = os.path.join(root_, 'rosetta_properties.csv')
         curves_wide_csv_ = os.path.join(root_, 'rosetta_curves_wide.csv')
         out_dir_ = os.path.join(home_, 'data', 'IrrigationGIS', 'soils', 'soil_potential_obs', 'preprocessed', 'rosetta')
-        write_standardized_rosetta(curves_wide_csv_, out_dir_)
+        write_standardized_rosetta(curves_wide_csv_, out_dir_, profile_key='Index')
 
     if run_mt_mesonet:
         root_ = os.path.join(home_, 'data', 'IrrigationGIS', 'soils', 'soil_potential_obs', 'mt_mesonet')
         swp_csv_ = os.path.join(root_, 'swp.csv')
         metadata_csv_ = os.path.join(root_, 'station_metadata.csv')
         out_dir_ = os.path.join(home_, 'data', 'IrrigationGIS', 'soils', 'soil_potential_obs', 'preprocessed', 'mt_mesonet')
-        write_standardized_mt_mesonet(swp_csv_, metadata_csv_, out_dir_)
+        write_standardized_mt_mesonet(swp_csv_, metadata_csv_, out_dir_, profile_key='station')
 
     if run_reesh:
         in_dir_ = os.path.join(home_, 'data', 'IrrigationGIS', 'soils', 'soil_potential_obs', 'reesh')
         out_dir_ = os.path.join(home_, 'data', 'IrrigationGIS', 'soils', 'soil_potential_obs', 'preprocessed', 'reesh')
-        write_standardized_reesh(in_dir_, out_dir_)
+        write_standardized_reesh(in_dir_, out_dir_, profile_key='Plot')
 
 # ========================= EOF ====================================================================
