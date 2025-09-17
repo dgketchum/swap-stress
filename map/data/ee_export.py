@@ -175,7 +175,7 @@ if __name__ == '__main__':
         extracts_dir_ = os.path.join(root_, 'soils', 'swapstress', 'extracts', f'mt_mesonet_extracts_{resolution_}m')
         shapefile_ = os.path.join(root_, 'soils', 'soil_potential_obs', 'mt_mesonet', 'station_metadata_clean_mgrs.shp')
         index_ = 'station'
-        output_prefix_ = f'swap-stress/mesonet_training_data_{resolution_}m'
+        output_prefix_ = f'swapstress/mesonet_training_data_{resolution_}m'
         mgrs_shapefile_ = os.path.join(root_, 'boundaries', 'mgrs', 'mgrs_wgs.shp')
 
         is_authorized()
@@ -193,7 +193,7 @@ if __name__ == '__main__':
         extracts_dir_ = os.path.join(root_, 'soils', 'swapstress', 'extracts', 'conus_extracts')
         shapefile_ = os.path.join(root_, 'soils', 'gis', 'pretraining-roi-10000_mgrs.shp')
         index_ = 'site_id'
-        output_prefix_ = 'swap-stress/training_data'
+        output_prefix_ = 'swapstress/training_data'
         mgrs_shapefile_ = os.path.join(root_, 'boundaries', 'mgrs', 'mgrs_wgs.shp')
 
         is_authorized()
@@ -210,7 +210,7 @@ if __name__ == '__main__':
         extracts_dir_ = os.path.join(root_, 'soils', 'swapstress', 'extracts', f'gshp_extracts_{resolution_}m')
         shapefile_ = os.path.join(root_, 'soils', 'soil_potential_obs', 'gshp', 'wrc_aggregated_mgrs.shp')
         index_ = 'profile_id'
-        output_prefix_ = f'swap-stress/gshp_training_data_{resolution_}m'
+        output_prefix_ = f'swapstress/gshp_training_data_{resolution_}m'
         mgrs_shapefile_ = os.path.join(root_, 'boundaries', 'mgrs', 'mgrs_world_attr.shp')
 
         is_authorized()
@@ -229,7 +229,7 @@ if __name__ == '__main__':
         extracts_dir_ = os.path.join(root_, 'soils', 'swapstress', 'extracts', f'reesh_extracts_{resolution_}m')
         shapefile_ = os.path.join(root_, 'soils', 'soil_potential_obs', 'reesh', 'shapefile', 'reesh_sites_mgrs.shp')
         index_ = 'site_id'
-        output_prefix_ = f'swap-stress/reesh_training_data_{resolution_}m'
+        output_prefix_ = f'swapstress/reesh_training_data_{resolution_}m'
         mgrs_shapefile_ = os.path.join(root_, 'boundaries', 'mgrs', 'mgrs_world_attr.shp')
 
         is_authorized()
@@ -248,7 +248,7 @@ if __name__ == '__main__':
         extracts_dir_ = os.path.join(root_, 'sfofifls', 'swapstress', 'extracts', f'ismn_extracts_{resolution_}m')
         shapefile_ = os.path.join(root_, 'soils', 'vwc_timeseries', 'ismn', 'ismn_stations_mgrs.shp')
         index_ = 'station_ui'
-        output_prefix_ = f'swap-stress/ismn_training_data_{resolution_}m'
+        output_prefix_ = f'swapstress/ismn_training_data_{resolution_}m'
         mgrs_shapefile_ = os.path.join(root_, 'boundaries', 'mgrs', 'mgrs_world_attr.shp')
 
         is_authorized()
