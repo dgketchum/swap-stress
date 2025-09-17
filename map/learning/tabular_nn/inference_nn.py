@@ -12,7 +12,7 @@ from sklearn.preprocessing import StandardScaler
 from torch.utils.data import DataLoader
 
 from map.learning import DEVICE, DROP_FEATURES, VG_PARAMS
-from map.learning.dataset import TabularDataset, TabularDatasetVanilla
+from map.learning.tabular_nn.dataset import TabularDataset, TabularDatasetVanilla
 from map.learning.tabular_nn import MLPWithEmbeddings, TabularLightningModule, VanillaMLP
 
 torch.set_float32_matmul_precision('medium')

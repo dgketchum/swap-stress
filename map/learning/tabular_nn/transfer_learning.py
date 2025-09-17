@@ -8,13 +8,12 @@ import pandas as pd
 import pytorch_lightning as pl
 import rtdl
 import torch
-from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 from torch.utils.data import DataLoader, random_split
 from sklearn.metrics import r2_score, root_mean_squared_error
 
 from map.learning import DEVICE, DROP_FEATURES, VG_PARAMS
-from map.learning.dataset import TabularDataset, TabularDatasetVanilla
+from map.learning.tabular_nn.dataset import TabularDataset, TabularDatasetVanilla
 from map.learning.tabular_nn import TabularLightningModule, VanillaMLP, MLPWithEmbeddings
 
 torch.set_float32_matmul_precision('medium')

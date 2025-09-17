@@ -1,6 +1,5 @@
 import json
 import os.path
-from glob import glob
 from datetime import datetime
 
 import torch
@@ -14,7 +13,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 from torch.utils.data import DataLoader, random_split
 
-from map.learning.dataset import TabularDataset, TabularDatasetVanilla
+from map.learning.tabular_nn.dataset import TabularDataset, TabularDatasetVanilla
 
 from map.learning.tabular_nn import VanillaMLP, MLPWithEmbeddings, TabularLightningModule
 from map.learning import VG_PARAMS, DEVICE, DROP_FEATURES
