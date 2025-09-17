@@ -1,3 +1,4 @@
+import os
 import numpy as np
 import pandas as pd
 import torch
@@ -7,7 +8,7 @@ from torch.utils.data import Dataset
 
 class CombinedVwcDataset(Dataset):
     def __init__(self, windows, zscore=True, mask_mode='mixed', mask_ratio=0.3, patch_len=30, n_patches=3,
-                 end_chunk_len=180, seed=None):
+                 end_chunk_len=180, seed=None, static_map=None):
         self.windows = list(windows)
         self.zscore = zscore
         self.mask_mode = mask_mode
@@ -16,6 +17,8 @@ class CombinedVwcDataset(Dataset):
         self.n_patches = int(n_patches)
         self.end_chunk_len = int(end_chunk_len)
         self.rng = np.random.RandomState(seed)
+        self._id_map = {}
+        self.static_map = static_map or {}
 
     def __len__(self):
         return len(self.windows)
@@ -72,11 +75,28 @@ class CombinedVwcDataset(Dataset):
 
         mask = self._make_mask(len(x))
 
-        return (
-            torch.tensor(x, dtype=torch.float32),
-            torch.tensor(gm_vals, dtype=torch.float32),
-            torch.tensor(mask, dtype=torch.bool)
-        )
+        sid_str = os.path.splitext(os.path.basename(f))[0]
+        if sid_str not in self._id_map:
+            self._id_map[sid_str] = len(self._id_map)
+        sid = self._id_map[sid_str]
+
+        static_vec = self.static_map.get(sid_str)
+        if static_vec is not None:
+            static_t = torch.tensor(static_vec, dtype=torch.float32)
+            return (
+                torch.tensor(x, dtype=torch.float32),
+                torch.tensor(gm_vals, dtype=torch.float32),
+                torch.tensor(mask, dtype=torch.bool),
+                torch.tensor(sid, dtype=torch.long),
+                static_t,
+            )
+        else:
+            return (
+                torch.tensor(x, dtype=torch.float32),
+                torch.tensor(gm_vals, dtype=torch.float32),
+                torch.tensor(mask, dtype=torch.bool),
+                torch.tensor(sid, dtype=torch.long)
+            )
 
 
 class PositionalEncoding(nn.Module):

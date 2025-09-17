@@ -11,7 +11,9 @@ from sklearn.metrics import r2_score, mean_absolute_error, root_mean_squared_err
 from sklearn.model_selection import train_test_split
 
 DROP_FEATURES = ['MGRS_TILE', 'station', 'rosetta_level', 'profile_id',
-                 'nwsli_id', 'network', 'mesowest_i']
+                 'nwsli_id', 'network', 'mesowest_i', 'data_flag', 'obs_ct', 'SWCC_class',
+                 ]
+
 VG_PARAMS = ['theta_r', 'theta_s', 'log10_alpha', 'log10_n', 'log10_Ks']
 GSHP_PARAMS = ['theta_r', 'theta_s', 'alpha', 'n']
 
@@ -139,7 +141,8 @@ def train_rf_gshp(f, model_dir=None, features_csv=None):
             'std_val': y[target].std().item(),
         }
     all_metrics[level_id] = metrics
-    pprint(f"Metrics for combined RF model GSHP: {metrics}")
+    pprint(f"Metrics for combined RF model GSHP: ")
+    [print(f"{k}: {v['r2']}") for k, v in metrics.items()]
 
     return all_metrics
 
@@ -212,7 +215,8 @@ if __name__ == '__main__':
     home_ = os.path.expanduser('~')
     root_ = os.path.join(home_, 'data', 'IrrigationGIS', 'soils', 'swapstress')
 
-    features_csv_ = os.path.join(root_, 'training', 'current_features.csv')
+    # features_csv_ = os.path.join(root_, 'training', 'current_features.csv')
+    features_csv_ = None
 
     metrics_dir_ = os.path.join(root_, 'training', 'metrics')
     models_dir_ = os.path.join(root_, 'training', 'models')
@@ -221,8 +225,7 @@ if __name__ == '__main__':
             os.makedirs(d)
 
     if run_gshp_workflow:
-
-        gshp_file_ = os.path.join(root_, 'training', 'gshp_training_data_250m.parquet')
+        gshp_file_ = os.path.join(root_, 'training', 'gshp_training_data_emb_250m.parquet')
         gshp_metrics_ = train_rf_gshp(gshp_file_, model_dir=models_dir_, features_csv=features_csv_)
         gshp_dst_ = os.path.join(metrics_dir_, 'learn_gshp')
         if not os.path.exists(gshp_dst_):

@@ -105,13 +105,10 @@ def run_inference(ckpt_path, data_dir, gridmet_dir, out_dir, batch_size=256, num
     with torch.no_grad():
         idx_ptr = 0
         for batch in tqdm(loader):
-            if isinstance(batch, (list, tuple)):
-                x = batch[0]
-                feats = batch[1] if len(batch) >= 2 else None
-            else:
-                x, feats = batch, None
+            x = batch[0]
+            feats = batch[1]
             x = x.to(DEVICE)
-            feats = feats.to(DEVICE) if isinstance(feats, torch.Tensor) else None
+            feats = feats.to(DEVICE)
             e = model.embed(x, feats)
             embs.append(e.detach().cpu().numpy())
             idx_ptr += len(x)
@@ -120,6 +117,7 @@ def run_inference(ckpt_path, data_dir, gridmet_dir, out_dir, batch_size=256, num
     agg = _aggregate_embeddings(ids, emb_array)
 
     cols = [f'e{i:02d}' for i in range(64)]
+    print(f'writing {len(agg)} embeddings to {out_dir}')
     for key, vec in agg.items():
         df = pd.DataFrame([vec], columns=cols, index=[key])
         out_fp = os.path.join(out_dir, f'{key}.parquet')
@@ -128,10 +126,10 @@ def run_inference(ckpt_path, data_dir, gridmet_dir, out_dir, batch_size=256, num
 
 
 if __name__ == '__main__':
-    run_mt_mesonet_workflow = False
+    run_mt_mesonet_workflow = True
     run_rosetta_workflow = False
     run_gshp_workflow = False
-    run_reesh_workflow = True
+    run_reesh_workflow = False
 
     vwc_root_ = '/data/ssd2/swapstress/vwc'
 
@@ -149,8 +147,16 @@ if __name__ == '__main__':
     if project_ is not None:
         data_root_ = os.path.join(vwc_root_, 'hhp', project_)
         gridmet_dir_ = os.path.join(vwc_root_, 'gridmet', project_)
+
         ckpt_root_ = os.path.join(vwc_root_, 'hhp', 'rosetta', 'checkpoints')
-        ckpt_path_ = find_best_model_checkpoint(ckpt_root_)
+        ckpt_path_ = os.path.join(ckpt_root_, 'both_20250917_162619/mae-both-20250917-epoch=00-val_loss=0.6009.ckpt')
+        # ckpt_path_ = os.path.join(ckpt_root_, 'both_20250916_173137',
+        #                          'mae-both-20250916-epoch=57-val_loss=0.0011.ckpt')
+
+        if ckpt_path_ is None:
+            ckpt_path_ = find_best_model_checkpoint(ckpt_root_)
+
         out_dir_ = os.path.join(vwc_root_, 'embeddings', project_)
         run_inference(ckpt_path_, data_root_, gridmet_dir_, out_dir_)
+
 # ========================= EOF ====================================================================
