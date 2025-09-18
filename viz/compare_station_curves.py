@@ -131,10 +131,17 @@ def merge_data(fitted_results_dir, rosetta_param_file, inferred_param_file):
 
     # 4. Load inferred parameters and merge
     inferred_df = pd.read_parquet(inferred_param_file)
-    inferred_df.rename_axis('station', inplace=True)
+    pred_cols = [c for c in inferred_df.columns if c in ['theta_r', 'theta_s', 'alpha', 'n']]
+    if 'station' in inferred_df.columns:
+        pred_by_station = inferred_df.groupby('station')[pred_cols].mean()
+    elif getattr(inferred_df.index, 'name', None) == 'station':
+        pred_by_station = inferred_df[pred_cols]
+    else:
+        pred_by_station = None  # likely error: predictions missing station identifiers
 
-    inferred_map = {idx: row.to_dict() for idx, row in inferred_df.iterrows()}
-    merged_df['inferred_params'] = merged_df['station'].map(inferred_map)
+    if pred_by_station is not None:
+        inferred_map = {idx: row.to_dict() for idx, row in pred_by_station.iterrows()}
+        merged_df['inferred_params'] = merged_df['station'].map(inferred_map)
 
     # Clean up and set index
     merged_df.drop(columns=['level'], inplace=True)
@@ -190,7 +197,7 @@ if __name__ == '__main__':
     # Corrected path for fitted results from fit_swrc.py
     fitted_dir_ = os.path.join(root_, 'soil_potential_obs', 'curve_fits', 'mt_mesonet', 'nelder')
     rosetta_pq_ = os.path.join(root_, 'rosetta', 'mt_mesonet', 'extracted_rosetta_points.parquet')
-    inferred_pq_ = os.path.join(swap_root_, 'training', 'predictions', 'mt_mesonet_predictions.parquet')
+    inferred_pq_ = os.path.join(swap_root_, 'training', 'predictions', 'stations_predictions.parquet')
     output_dir_ = os.path.join(swap_root_, 'figures', 'station_curve_comparisons')
 
     if not os.path.exists(output_dir_):

@@ -96,7 +96,8 @@ def extract_station_fit_params(results_dir, networks):
     return df
 
 
-def build_station_training_table(ee_stations_pqt, results_dir, out_file, include_subdirs=None):
+def build_station_training_table(ee_stations_pqt, results_dir, out_file, include_subdirs=None,
+                                 embeddings=None, features_csv=None):
     params_df = extract_station_fit_params(results_dir, include_subdirs)
     if params_df.empty:
         return params_df
@@ -124,12 +125,42 @@ def build_station_training_table(ee_stations_pqt, results_dir, out_file, include
     missing = merged['station'][merged[ee_df.columns.difference(['station'])].isna().all(axis=1)].unique()
     if len(missing):
         print(f"Stations missing from ee_df: {missing.tolist()}")
+
+    if embeddings:
+        rows = {}
+        for k, d in embeddings.items():
+            emb_files = glob(os.path.join(d, '*.parquet'))
+            for fp in emb_files:
+                sid = os.path.splitext(os.path.basename(fp))[0].lower().replace('_', '-')
+                try:
+                    df = pd.read_parquet(fp)
+                    if len(df) >= 1:
+                        rows[str(sid)] = df.iloc[0]
+                except Exception:
+                    continue
+        if rows:
+            emb_df = pd.DataFrame.from_dict(rows, orient='index')
+            emb_df['station'] = emb_df.index
+            merged = merged.merge(emb_df, on='station', how='left')
+
     if out_file:
         out_dir = os.path.dirname(out_file)
         if out_dir and not os.path.exists(out_dir):
             os.makedirs(out_dir)
         merged.to_parquet(out_file)
         print(f"Saving station training table to {out_file} {len(merged)} samples")
+
+    # Optionally write current features (EE features + embeddings if present)
+    if features_csv:
+        feat_dir = os.path.dirname(features_csv)
+        if feat_dir and not os.path.exists(feat_dir):
+            os.makedirs(feat_dir)
+        ee_feature_cols = [c for c in ee_df.columns if c != 'station']
+        # Heuristic: embedding columns start with 'e' followed by 2 digits (e00..e63)
+        emb_cols = [c for c in merged.columns if c.startswith('e') and len(c) in (3, 4)]
+        features = pd.DataFrame(data=ee_feature_cols + emb_cols, columns=['features'])
+        features.to_csv(features_csv, index=False)
+        print(f"Saved current features list to {features_csv}")
 
 
 if __name__ == '__main__':
@@ -145,5 +176,14 @@ if __name__ == '__main__':
         reesh_replicates = os.path.join(root_, 'soil_potential_obs', 'reesh', 'replicate_key.csv')
 
         include_ = ('mt_mesonet', 'reesh')
-        build_station_training_table(ee_stations_pqt_, results_dir_, out_file_, include_subdirs=include_)
+        features_csv_ = os.path.join(root_, 'swapstress', 'training', 'current_features.csv')
+
+        vwc_root_ = '/data/ssd2/swapstress/vwc'
+        embeddings_map_ = {
+            'reesh': os.path.join(vwc_root_, 'embeddings', 'reesh'),
+            'mt_mesonet': os.path.join(vwc_root_, 'embeddings', 'mt_mesonet'),
+        }
+
+        build_station_training_table(ee_stations_pqt_, results_dir_, out_file_, include_subdirs=include_,
+                                     embeddings=embeddings_map_, features_csv=features_csv_)
 # ========================= EOF ====================================================================

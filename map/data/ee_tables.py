@@ -140,11 +140,11 @@ if __name__ == '__main__':
                    'FAO90', 'KOPPEN', 'TEXTURE_USDA']
 
     dropcols_ = ['.geo', 'system:index', 'MGRS_TILE', 'name', 'has_swp', 'source', 'network',
-                 'HWSD2_ID', 'WISE30s_ID', 'COVERAGE', 'SHARE']
+                 'HWSD2_ID', 'WISE30s_ID', 'COVERAGE', 'SHARE', 'SWCC_class', 'obs_ct']
 
-    run_mt_mesonet_workflow = True
+    run_mt_mesonet_workflow = False
     run_reesh_workflow = False
-    run_gshp_workflow = False
+    run_gshp_workflow = True
 
     if run_gshp_workflow:
         network_ = 'gshp'

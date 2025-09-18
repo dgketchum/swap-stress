@@ -1,7 +1,9 @@
 import os
 import json
+from tqdm import tqdm
 from glob import glob
 from datetime import datetime
+from concurrent.futures import ProcessPoolExecutor, as_completed
 
 import numpy as np
 import pandas as pd
@@ -14,9 +16,58 @@ from map.learning.mae.dataset import CombinedVwcDataset
 from map.learning.mae.mae import VwcMAE
 
 
+def _score_window(v):
+    dv = np.diff(v)
+    ddv = np.diff(dv) if len(dv) > 1 else np.array([0.0])
+    return 0.7 * np.sum(np.abs(dv)) + 0.3 * np.sum(np.abs(ddv))
+
+
+def _dyn_worker(params):
+    fp, gridmet_dir, window_len, stride_days, topk_overall = params
+    out = []
+    gmp = os.path.join(gridmet_dir, os.path.basename(fp)) if gridmet_dir else None
+    if gmp and not os.path.exists(gmp):
+        return out
+    vdf = pd.read_parquet(fp)[['shallow', 'middle']]
+    gdf = pd.read_parquet(gmp) if gmp else pd.DataFrame(index=vdf.index)
+    idx = vdf.index.intersection(gdf.index) if not gdf.empty else vdf.index
+    idx = pd.DatetimeIndex(idx)
+    vdf = vdf.loc[idx]
+    if len(idx) < window_len:
+        return out
+    sig = vdf[['shallow', 'middle']].mean(axis=1).values.astype('float32')
+    starts = list(range(0, len(idx) - window_len + 1, stride_days))
+    scored = []
+    for s0 in starts:
+        s1 = s0 + window_len
+        wv = sig[s0:s1]
+        if len(wv) == window_len:
+            scored.append((s0, _score_window(wv)))
+    scored.sort(key=lambda x: x[1], reverse=True)
+    keep = scored if topk_overall is None else scored[:topk_overall]
+    for s0, _ in keep:
+        out.append({'file': fp, 'gm_file': gmp, 'start': int(s0), 'stop': int(s0 + window_len)})
+    return out
+
+
+def _build_dynamic_windows(files, gridmet_dir, window_len, stride_days=7,
+                           topk_overall=None, num_workers=24):
+
+    windows = []
+    if not files:
+        return windows
+    with ProcessPoolExecutor(max_workers=num_workers) as ex:
+        futures = {ex.submit(_dyn_worker, (fp, gridmet_dir, window_len, stride_days, topk_overall)): fp for fp in files}
+        for fut in tqdm(as_completed(futures), total=len(futures), desc='Scoring dynamic windows'):
+            res = fut.result()
+            if res:
+                windows.extend(res)
+    return windows
+
+
 def run_training(data_dir, batch_size=64, epochs=50, mask_ratio=0.3, num_workers=4, seed=42, files=None,
                  gridmet_dir=None, window_len=730, stride=550, static_features_pqt=None, static_id_col=None,
-                 static_cols=None):
+                 static_cols=None, use_dynamic_windows=False, dyn_stride_days=7, dyn_topk_per_year=1):
     files = files if files is not None else sorted(glob(os.path.join(data_dir, '*.parquet')))
 
     # Build static features map first (if provided)
@@ -66,21 +117,27 @@ def run_training(data_dir, batch_size=64, epochs=50, mask_ratio=0.3, num_workers
     starts = list(range(0, max(T - window_len + 1, 0), stride))
     n_feat = g0.shape[1] if (gm0 and os.path.exists(gm0)) else 0
 
-    train_windows = []
-    for fp in train_files:
-        gmp = os.path.join(gridmet_dir, os.path.basename(fp)) if gridmet_dir else None
-        if gmp and not os.path.exists(gmp):
-            continue
-        for s in starts:
-            train_windows.append({'file': fp, 'gm_file': gmp, 'start': s, 'stop': s + window_len})
+    if use_dynamic_windows:
+        train_windows = _build_dynamic_windows(train_files, gridmet_dir, window_len,
+                                               stride_days=dyn_stride_days, topk_overall=10, num_workers=24)
+        val_windows = _build_dynamic_windows(val_files, gridmet_dir, window_len,
+                                             stride_days=dyn_stride_days, topk_overall=10, num_workers=24)
+    else:
+        train_windows = []
+        for fp in train_files:
+            gmp = os.path.join(gridmet_dir, os.path.basename(fp)) if gridmet_dir else None
+            if gmp and not os.path.exists(gmp):
+                continue
+            for s in starts:
+                train_windows.append({'file': fp, 'gm_file': gmp, 'start': s, 'stop': s + window_len})
 
-    val_windows = []
-    for fp in val_files:
-        gmp = os.path.join(gridmet_dir, os.path.basename(fp)) if gridmet_dir else None
-        if gmp and not os.path.exists(gmp):
-            continue
-        for s in starts:
-            val_windows.append({'file': fp, 'gm_file': gmp, 'start': s, 'stop': s + window_len})
+        val_windows = []
+        for fp in val_files:
+            gmp = os.path.join(gridmet_dir, os.path.basename(fp)) if gridmet_dir else None
+            if gmp and not os.path.exists(gmp):
+                continue
+            for s in starts:
+                val_windows.append({'file': fp, 'gm_file': gmp, 'start': s, 'stop': s + window_len})
 
     train_ds = CombinedVwcDataset(train_windows, zscore=True, mask_mode='mixed', static_map=static_map)
     val_ds = CombinedVwcDataset(val_windows, zscore=True, mask_mode='mixed', static_map=static_map)
@@ -147,6 +204,8 @@ if __name__ == '__main__':
 
     run_training(data_root_, batch_size=batch_size_, epochs=epochs_, mask_ratio=mask_ratio_,
                  num_workers=workers_, gridmet_dir=gridmet_dir_, static_cols=static_cols_,
-                 static_features_pqt=static_features_pqt_, static_id_col=static_id_col_)
+                 static_features_pqt=static_features_pqt_, static_id_col=static_id_col_,
+                 window_len=180,
+                 use_dynamic_windows=True)
 
 # ========================= EOF ====================================================================

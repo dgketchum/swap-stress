@@ -21,8 +21,16 @@ def run_inference(model_path, features_path, data_path, output_path):
     model = joblib.load(model_path)
 
     print(f'Loading features from {features_path}')
-    with open(features_path, 'r') as f:
-        training_features = json.load(f)
+    training_features = None
+    if features_path.endswith('.json'):
+        with open(features_path, 'r') as f:
+            training_features = json.load(f)
+    elif features_path.endswith('.csv'):
+        feats_df = pd.read_csv(features_path)
+        col = 'features' if 'features' in feats_df.columns else feats_df.columns[0]
+        training_features = feats_df[col].dropna().astype(str).tolist()
+    else:
+        raise ValueError(f'Unsupported features file: {features_path}')
 
     print(f'Loading data from {data_path}')
     inference_df = pd.read_parquet(data_path)
@@ -56,20 +64,17 @@ if __name__ == '__main__':
     output_dir_ = os.path.join(root_, 'training', 'predictions')
 
     model_path_ = os.path.join(model_dir_, 'rf_gshp_model.joblib')
-    features_path_ = os.path.join(model_dir_, 'rf_gshp_features.json')
+    # Use the unified station training table and the features list produced by station_training_table.py
+    features_path_ = os.path.join(data_dir_, 'current_features.csv')
+    data_path_ = os.path.join(data_dir_, 'stations_training_table_250m.parquet')
 
-    inference_targets = {
-        'mt_mesonet': os.path.join(data_dir_, 'mt_training_data_250m.parquet'),
-        'reesh': os.path.join(data_dir_, 'reesh_training_data_250m.parquet')
-    }
-
-    for name, data_path_ in inference_targets.items():
-        if os.path.exists(data_path_):
-            print(f'\n--- Running inference for {name} ---')
-            output_path_ = os.path.join(output_dir_, f'{name}_predictions.parquet')
-            run_inference(model_path=model_path_, features_path=features_path_,
-                          data_path=data_path_, output_path=output_path_)
-        else:
-            print(f'\n--- Skipping inference for {name}, file not found: {data_path_} ---')
+    os.makedirs(output_dir_, exist_ok=True)
+    if os.path.exists(data_path_):
+        print('\n--- Running inference for stations training table ---')
+        output_path_ = os.path.join(output_dir_, 'stations_predictions.parquet')
+        run_inference(model_path=model_path_, features_path=features_path_,
+                      data_path=data_path_, output_path=output_path_)
+    else:
+        print(f'Input data not found: {data_path_}')
 
 # ========================= EOF ====================================================================

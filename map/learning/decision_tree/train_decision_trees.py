@@ -77,6 +77,7 @@ def train_rf_gshp(f, model_dir=None, features_csv=None):
         feature_cols = pd.read_csv(features_csv)['features'].to_list()
     else:
         feature_cols = [c for c in df.columns if c not in rosetta_cols and c not in DROP_FEATURES]
+        # feature_cols = [c for c in feature_cols if len(c) == 3 and c.startswith('A')]
 
     all_metrics = {}
     targets = [p for p in GSHP_PARAMS if p in df.columns]
@@ -215,8 +216,7 @@ if __name__ == '__main__':
     home_ = os.path.expanduser('~')
     root_ = os.path.join(home_, 'data', 'IrrigationGIS', 'soils', 'swapstress')
 
-    # features_csv_ = os.path.join(root_, 'training', 'current_features.csv')
-    features_csv_ = None
+    features_csv_ = os.path.join(root_, 'training', 'current_features.csv')
 
     metrics_dir_ = os.path.join(root_, 'training', 'metrics')
     models_dir_ = os.path.join(root_, 'training', 'models')

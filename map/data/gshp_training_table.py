@@ -49,6 +49,7 @@ def build_gshp_training_table(ee_features_pqt, labels_csv, out_file, index_col='
     out_dir = os.path.dirname(out_file)
     if out_dir and not os.path.exists(out_dir):
         os.makedirs(out_dir)
+    # final_df.dropna(inplace=True)
     final_df.to_parquet(out_file)
     print(f'{len(final_df)} GSHP training samples written to {out_file}')
 
