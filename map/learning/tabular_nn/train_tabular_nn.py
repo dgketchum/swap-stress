@@ -19,7 +19,7 @@ from map.learning.tabular_nn.tabular_nn import VanillaMLP, MLPWithEmbeddings, Ta
 from map.learning import VG_PARAMS, DEVICE, DROP_FEATURES
 
 torch.set_float32_matmul_precision('medium')
-EPOCHS = 100
+EPOCHS = 300
 BATCH_SIZE = 16
 
 # GSHP label set (no log transform)
