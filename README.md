@@ -39,6 +39,9 @@ SWAP-Stress provides code and workflows to estimate soil hydraulic parameters (v
 - `vwc_series/`: Time-series helpers (e.g., `mt_mesonet.py` for Mesonet VWC processing).
 - `utils/`: Utility helpers (e.g., GSHP preprocessing, identifiers).
 
+R environment note
+- Some utilities (e.g., GSHP wrapper via `utils/ncss.py` → `run_fit_new_samples`) call external R scripts. You must use an R-enabled environment with the required R packages. This R setup is not part of the Python project requirements. Ensure `Rscript` on your PATH belongs to that environment, or place local `soilhypfit` R sources under `~/PycharmProjects/GSHP-database/soilhypfit/R/`.
+
 Notes
 - The README previously referenced `retention_curve/mt_mesonet.py`; Mesonet-specific time-series code now lives under `vwc_series/mt_mesonet.py`.
 - Bayesian fitting in `swrc.py` is scaffolded but currently disabled (imports and `fit_bayesian` are commented out). Use deterministic optimizers supported by `lmfit` (e.g., `nelder`, `least_squares`, `slsqp`).
@@ -182,51 +185,60 @@ Optional sequence model from VWC time series:
 - Reproducibility: Seeds are not globally enforced across all scripts (e.g., Lightning). Set seeds and environment variables if deterministic runs are required.
 - CRS alignment: Ensure point data match expected CRS for sampling (e.g., `rosetta_geotiff.py` reprojects to `ROSETTA_CRS` internally) and that MGRS shapefiles align with station coordinates.
 
-## Example: GSHP Workflow Using Standard SWRC
+## Example: MT Mesonet SWRC Processing
 
-This example builds a GSHP point shapefile, standardizes lab SWRC observations, and fits van Genuchten parameters using only the `SWRC` class (not `GshpSWRC`).
+Standardize MT Mesonet observations and fit van Genuchten parameters.
 
-- Build MGRS-joined GSHP shapefile for EE sampling
-  - Input: raw GSHP CSV (with columns like `profile_id`, `latitude_decimal_degrees`, `longitude_decimal_degrees`, plus per-horizon fields) and an MGRS grid shapefile.
-  - Script: `utils/gshp.py` → `process_soil_data(...)` writes `wrc_aggregated_mgrs.shp` and a cleaned CSV.
+- Prepare MT Mesonet time series as needed: `vwc_series/mt_mesonet.py` (optional helpers).
+- Programmatic example (succinct):
 
-- Standardize GSHP SWRC observations to `suction`/`theta`/`depth`
-  - Script: `retention_curve/standardize_swp.py` → `write_standardized_gshp(...)`
-  - Output: one CSV per `profile_id` with columns `suction` [cm], `theta` [fraction], `depth` [cm].
+```
+from retention_curve.standardize_swp import write_standardized_mt_mesonet
+from retention_curve.fit_swrc import fit_standardized_dir
+import os
 
-- Fit SWRC per profile/depth using `SWRC`
-  - Script: `retention_curve/fit_swrc.py` → `fit_standardized_dir(...)` (uses `SWRC` internally)
-  - Output: one JSON per profile with fitted parameters.
+home = os.path.expanduser('~')
+root = os.path.join(home, 'data', 'IrrigationGIS', 'soils', 'soil_potential_obs')
+
+swp_csv = os.path.join(root, 'mt_mesonet', 'swp.csv')
+meta_csv = os.path.join(root, 'mt_mesonet', 'station_metadata.csv')
+std_dir = os.path.join(root, 'preprocessed', 'mt_mesonet')
+
+write_standardized_mt_mesonet(swp_csv, meta_csv, std_dir, profile_key='station')
+
+fit_out = os.path.join(root, 'curve_fits', 'mt_mesonet', 'nelder')
+fit_standardized_dir(std_dir, fit_out, method='nelder')
+```
+
+- Or use the built-in mains:
+  - In `retention_curve/standardize_swp.py`, set `run_mt_mesonet = True` and edit the three paths (`swp_csv_`, `metadata_csv_`, `out_dir_`).
+  - Run: `python retention_curve/standardize_swp.py`
+  - In `retention_curve/fit_swrc.py`, set `run_mt_mesonet = True`, pick `method` (e.g., `nelder`), and set `in_dir_`/`out_dir_`.
+  - Run: `python retention_curve/fit_swrc.py`
+
+Outputs
+- One CSV per station in `preprocessed/mt_mesonet` with `suction_cm`, `theta`, `depth_cm`, `name`.
+- One JSON per station under `curve_fits/mt_mesonet/<method>` containing fitted parameters and a data snapshot.
 
 Example code
 
 ```python
 import os
-from utils.gshp import process_soil_data
-from retention_curve.standardize_swp import write_standardized_gshp
+from retention_curve.standardize_swp import write_standardized_mt_mesonet
 from retention_curve.fit_swrc import fit_standardized_dir
 
 home = os.path.expanduser('~')
-root = os.path.join(home, 'data', 'IrrigationGIS')
+root = os.path.join(home, 'data', 'IrrigationGIS', 'soils', 'soil_potential_obs')
 
-# 1) Build GSHP shapefile joined to MGRS tiles (for later EE sampling)
-gshp_dir = os.path.join(root, 'soils', 'soil_potential_obs', 'gshp')
-raw_gshp_csv = os.path.join(gshp_dir, 'WRC_dataset_surya_et_al_2021_final.csv')
-mgrs_shp = os.path.join(root, 'boundaries', 'mgrs', 'mgrs_world_attr.shp')
-process_soil_data(csv_path=raw_gshp_csv, shp_path=mgrs_shp, output_dir=gshp_dir)
+swp_csv = os.path.join(root, 'mt_mesonet', 'swp.csv')
+meta_csv = os.path.join(root, 'mt_mesonet', 'station_metadata.csv')
+std_dir = os.path.join(root, 'preprocessed', 'mt_mesonet')
 
-# 2) Standardize GSHP lab observations to suction/theta/depth tables
-std_dir = os.path.join(root, 'soils', 'soil_potential_obs', 'preprocessed', 'gshp')
-os.makedirs(std_dir, exist_ok=True)
-write_standardized_gshp(soil_csv_path=raw_gshp_csv, out_dir=std_dir)
+write_standardized_mt_mesonet(swp_csv, meta_csv, std_dir, profile_key='station')
 
-# 3) Fit SWRC using the standard SWRC class (no GSHP policy), write JSON results
-fits_dir = os.path.join(root, 'soils', 'soil_potential_obs', 'curve_fits', 'gshp', 'lbfgsb')
-fit_standardized_dir(in_dir=std_dir, out_dir=fits_dir, method='lbfgsb')  # or method='nelder'
+fit_out = os.path.join(root, 'curve_fits', 'mt_mesonet', 'nelder')
+fit_standardized_dir(std_dir, fit_out, method='nelder')
 ```
 
 Notes
-- `process_soil_data` also writes a cleaned metadata CSV and ensures `profile_id` is sanitized for file paths.
-- `write_standardized_gshp` filters to good-quality estimates (if `data_flag` present) and computes depth from horizon top/bottom when available.
 - Ensure units: suction in centimeters, theta as volumetric fraction, depth in centimeters.
-```
