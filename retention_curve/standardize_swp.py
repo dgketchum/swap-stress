@@ -1,7 +1,8 @@
-import os
 import pandas as pd
+import os
 import numpy as np
 from utils.gshp import sanitize_profile_id
+from utils.ncss import ncss_to_standardized, load_ncss_parquet
 
 from tqdm import tqdm
 
@@ -206,12 +207,46 @@ def write_standardized_reesh(in_dir, out_dir, profile_key):
         print(f"ReESH standardized: stations={stations}, suction_cm=[{s_min:.3g}, {s_max:.3g}], theta=[{t_min:.3f}, {t_max:.3f}]")
 
 
+def write_standardized_ncss(parquet_path, out_dir):
+    os.makedirs(out_dir, exist_ok=True)
+    df = load_ncss_parquet(parquet_path)
+    std = ncss_to_standardized(df)
+    if 'profile_id' in std.columns:
+        std['profile_id'] = std['profile_id'].astype(str).apply(sanitize_profile_id)
+
+    s_min, s_max = np.inf, -np.inf
+    t_min, t_max = np.inf, -np.inf
+    stations = 0
+    print(f'writing ncss obs to {out_dir}')
+    for pid, r in tqdm(std.groupby('profile_id'), total=len(std.groupby('profile_id')), desc='Processing NCSS data'):
+        out_path = os.path.join(out_dir, f'{pid}.csv')
+        cols = ['suction_cm', 'theta', 'depth_cm']
+        extras = [c for c in (
+            'SWCC_classes', 'sand_tot_psa', 'silt_tot_psa', 'clay_tot_psa', 'db_od', 'source_db'
+        ) if c in r.columns]
+        depth_counts = r.groupby('depth_cm').size()
+        keep_depths = depth_counts[depth_counts >= 4].index
+        r = r[r['depth_cm'].isin(keep_depths)]
+        if r.empty:
+            continue
+        out_df = r[cols + extras]
+        out_df.to_csv(out_path, index=False)
+        stations += 1
+        s_min = min(s_min, float(np.nanmin(r['suction_cm'].values)))
+        s_max = max(s_max, float(np.nanmax(r['suction_cm'].values)))
+        t_min = min(t_min, float(np.nanmin(r['theta'].values)))
+        t_max = max(t_max, float(np.nanmax(r['theta'].values)))
+    if stations:
+        print(f"NCSS standardized: stations={stations}, suction_cm=[{s_min:.3g}, {s_max:.3g}], theta=[{t_min:.3f}, {t_max:.3f}]")
+
+
 if __name__ == '__main__':
     home_ = os.path.expanduser('~')
 
     run_rosetta = False
-    run_mt_mesonet = True
-    run_reesh = False
+    run_mt_mesonet = False
+    run_reesh = True
+    run_ncss = False
 
     if run_rosetta:
         root_ = os.path.join(home_, 'data', 'IrrigationGIS', 'soils', 'rosetta', 'training_data')
@@ -231,5 +266,11 @@ if __name__ == '__main__':
         in_dir_ = os.path.join(home_, 'data', 'IrrigationGIS', 'soils', 'soil_potential_obs', 'reesh')
         out_dir_ = os.path.join(home_, 'data', 'IrrigationGIS', 'soils', 'soil_potential_obs', 'preprocessed', 'reesh')
         write_standardized_reesh(in_dir_, out_dir_, profile_key='Plot')
+
+    if run_ncss:
+        base_dir_ = os.path.join(home_, 'data', 'IrrigationGIS', 'soils', 'soil_potential_obs', 'ncss_labdatasqlite')
+        parquet_path_ = os.path.join(base_dir_, 'ncss_selection.parquet')
+        out_dir_ = os.path.join(home_, 'data', 'IrrigationGIS', 'soils', 'soil_potential_obs', 'preprocessed', 'ncss')
+        write_standardized_ncss(parquet_path_, out_dir_)
 
 # ========================= EOF ====================================================================
