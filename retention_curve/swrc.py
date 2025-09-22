@@ -5,8 +5,8 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from lmfit import Model
-# import pymc3 as pm
-# import aesara.tensor as at
+import pymc as pm
+import pytensor.tensor as pt
 
 
 class SWRC:
@@ -94,7 +94,8 @@ class SWRC:
         has_suction = ('suction' in cols) or ('suction_cm' in cols)
         has_depth = ('depth' in cols) or ('depth_cm' in cols)
         if not has_suction or 'theta' not in cols or not has_depth:
-            raise ValueError(f"DataFrame missing required columns: need ('suction'|'suction_cm'), 'theta', ('depth'|'depth_cm')")
+            raise ValueError(
+                f"DataFrame missing required columns: need ('suction'|'suction_cm'), 'theta', ('depth'|'depth_cm')")
 
         df = df.copy()
         if 'suction' not in df.columns and 'suction_cm' in df.columns:
@@ -175,37 +176,37 @@ class SWRC:
         print("\nAll fits complete.")
         return self.fit_results
 
-    # def fit_bayesian(self, draws=2000, tune=1000, target_accept=0.9, chains=2, cores=1, random_seed=None):
-    #     self.bayes_results = {}
-    #     for depth, data_df in self.data_by_depth.items():
-    #         d = data_df.dropna(subset=['suction', 'theta'])
-    #         if len(d) < 4:
-    #             self.bayes_results[depth] = None
-    #             continue
-    #         psi = d['suction'].astype(float).values
-    #         theta = d['theta'].astype(float).values
-    #         with pm.Model() as model:
-    #             theta_r = pm.Beta('theta_r', alpha=1.5, beta=8.0)
-    #             delta = pm.Beta('delta', alpha=2.0, beta=2.0)
-    #             theta_s = pm.Deterministic('theta_s', theta_r + delta * (1.0 - theta_r))
-    #             log_alpha = pm.Normal('log_alpha', mu=np.log(0.05), sigma=1.0)
-    #             alpha = pm.Deterministic('alpha', at.exp(log_alpha))
-    #             n_minus1 = pm.HalfNormal('n_minus1', sigma=0.75)
-    #             n = pm.Deterministic('n', 1.0 + n_minus1)
-    #             m = 1.0 - 1.0 / n
-    #             psi_safe = at.maximum(psi, 1e-9)
-    #             term = 1.0 + (alpha * psi_safe) ** n
-    #             mu_theta = theta_r + (theta_s - theta_r) / (term ** m)
-    #             sigma = pm.HalfNormal('sigma', sigma=0.05)
-    #             pm.Normal('obs', mu=mu_theta, sigma=sigma, observed=theta)
-    #             trace = pm.sample(
-    #                 draws=draws, tune=tune, chains=chains, cores=cores,
-    #                 target_accept=target_accept, random_seed=random_seed,
-    #                 progressbar=False, return_inferencedata=True
-    #             )
-    #         self.bayes_results[depth] = trace
-    #
-    #     return self.bayes_results
+    def fit_bayesian(self, draws=2000, tune=1000, target_accept=0.9, chains=4, cores=4, random_seed=None):
+        self.bayes_results = {}
+        for depth, data_df in self.data_by_depth.items():
+            d = data_df.dropna(subset=['suction', 'theta'])
+            if len(d) < 4:
+                self.bayes_results[depth] = None
+                continue
+            psi = d['suction'].astype(float).values
+            theta = d['theta'].astype(float).values
+            with pm.Model() as model:
+                theta_r = pm.Beta('theta_r', alpha=1.5, beta=8.0)
+                delta = pm.Beta('delta', alpha=2.0, beta=2.0)
+                theta_s = pm.Deterministic('theta_s', theta_r + delta * (1.0 - theta_r))
+                log_alpha = pm.Normal('log_alpha', mu=np.log(0.05), sigma=1.0)
+                alpha = pm.Deterministic('alpha', pt.exp(log_alpha))
+                n_minus1 = pm.HalfNormal('n_minus1', sigma=0.75)
+                n = pm.Deterministic('n', 1.0 + n_minus1)
+                m = 1.0 - 1.0 / n
+                psi_safe = pt.maximum(psi, 1e-9)
+                term = 1.0 + (alpha * psi_safe) ** n
+                mu_theta = theta_r + (theta_s - theta_r) / (term ** m)
+                sigma = pm.HalfNormal('sigma', sigma=0.05)
+                pm.Normal('obs', mu=mu_theta, sigma=sigma, observed=theta)
+                trace = pm.sample(
+                    draws=draws, tune=tune, chains=chains, cores=cores,
+                    target_accept=target_accept, random_seed=random_seed,
+                    progressbar=False, return_inferencedata=True
+                )
+            self.bayes_results[depth] = trace
+
+        return self.bayes_results
 
     def test_fit_methods(self, methods_to_test, depth=None):
         """
@@ -439,75 +440,7 @@ class SWRC:
         print(f"Successfully saved fit results to {output_path}")
 
 
-def test_fit_methods_across_stations(station_files, results_dir):
-    """
-    Tests a curated list of fitting methods across multiple station files,
-    aggregates the results, and identifies the best overall method.
-
-    The best method is determined by the lowest total AIC across all successful fits.
-
-    Args:
-        station_files (list): A list of file paths to the station data.
-        results_dir (str): Path to the directory to save the summary CSV.
-
-    Returns:
-        pandas.DataFrame: A summary DataFrame ranking the methods.
-    """
-
-    methods_to_test = [
-        'least_squares',  # Recommended: Local, bound-aware (TRF)
-        'lbfgsb',  # Recommended: General-purpose, bound-aware
-        'trust-constr',  # Recommended: Trust-region for constraints
-        'slsqp',  # Alternate: Constrained optimizer
-        'nelder',  # Fallback: Simplex method (gradient-free)
-        'differential_evolution'  # Global: Very robust, but slower
-    ]
-
-    all_results = []
-    total_files = len(station_files)
-
-    for i, station_file in enumerate(station_files):
-        station_name = os.path.basename(station_file).replace('.parquet', '')
-        print(f"\n--- Processing Station {i + 1}/{total_files}: {station_name} ---")
-
-        if not os.path.exists(station_file):
-            print(f"File not found: {station_file}. Skipping.")
-            continue
-
-        try:
-            swrc_fitter = SWRC(filepath=station_file, depth_col='Depth [cm]')
-            results_df = swrc_fitter.test_fit_methods(methods_to_test)
-
-            if results_df is not None and not results_df.empty:
-                results_df['station'] = station_name
-                all_results.append(results_df)
-        except Exception as e:
-            print(f"Could not process station {station_name}. Error: {e}")
-
-    if not all_results:
-        print("No results were generated. Exiting.")
-        return pd.DataFrame()
-
-    master_df = pd.concat(all_results, ignore_index=True)
-    param_cols = ['theta_r', 'theta_s', 'alpha', 'n']
-    stderr_cols = [f'{c}_stderr' for c in param_cols]
-    dropna_cols = param_cols + stderr_cols
-    master_df = master_df.dropna(subset=dropna_cols)
-    summary = master_df.groupby('method').agg(
-        total_aic=('AIC', 'sum'),
-        avg_theta_r_rel_err=('avg_rel_err (%)', 'mean'),
-        avg_time=('time (s)', 'mean'),
-        num_successes=('success', lambda x: x.sum()),
-        num_runs=('success', 'count')
-    ).reset_index()
-
-    summary['num_failures'] = summary['num_runs'] - summary['num_successes']
-    summary = summary.sort_values(by='total_aic', ascending=True).reset_index(drop=True)
-
-    master_df.to_csv(os.path.join(results_dir, 'all_stations_detailed_fit_results.csv'), index=False)
-    summary.to_csv(os.path.join(results_dir, 'overall_method_summary.csv'), index=False)
-
-    return summary
+    # moved: test_fit_methods_across_stations now in viz/fitting_comparisons/project_fits.py
 
 
 if __name__ == '__main__':
