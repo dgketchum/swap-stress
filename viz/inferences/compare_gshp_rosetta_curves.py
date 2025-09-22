@@ -1,5 +1,4 @@
 import os
-import json
 from typing import Dict, List, Optional
 
 import numpy as np
@@ -7,7 +6,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 from retention_curve import ROSETTA_LEVEL_DEPTHS
-from viz.compare_gshp_rosetta_params import find_rosetta_param_columns
+from viz.inferences.compare_gshp_rosetta_params import find_rosetta_param_columns
 
 """Compare GSHP SWRC fits to Rosetta curves.
 
