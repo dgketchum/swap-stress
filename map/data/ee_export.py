@@ -11,8 +11,7 @@ from shapely.geometry import box
 from map.data.call_ee import stack_bands_climatology, is_authorized
 
 
-def _export_tile_data(roi, points, desc, bucket, file_prefix, resolution, index_col, region, band_select=None,
-                      diagnose=False):
+def _export_tile_data(roi, points, desc, bucket, file_prefix, resolution, index_col, region, diagnose=False):
     """Helper function to run and export data for a given ROI and point set."""
     stack = stack_bands_climatology(roi, region=region)
 
@@ -20,13 +19,10 @@ def _export_tile_data(roi, points, desc, bucket, file_prefix, resolution, index_
         print(f'{desc}: no points to sample, skipping.')
         return
 
-    if band_select:
-        stack = stack.select(band_select)
-
     # Optional diagnostic: probe one point and check band-by-band values
     if diagnose:
         try:
-            print('diagnose', desc)
+            print(desc)
             filtered = ee.FeatureCollection([points.first()])
             bad_ = []
             bands = stack.bandNames().getInfo()
@@ -70,7 +66,7 @@ def _export_tile_data(roi, points, desc, bucket, file_prefix, resolution, index_
 
 
 def get_bands(shapefile_path, mgrs_shp_path, bucket, file_prefix, resolution, index_col=None, split_tiles=False,
-              check_dir=None, region='conus', select_bands=None, diagnose=False):
+              check_dir=None, region='conus', diagnose=False):
     """
     Extract climatological data for a set of points from a local shapefile.
     """
@@ -139,8 +135,7 @@ def get_bands(shapefile_path, mgrs_shp_path, bucket, file_prefix, resolution, in
                     resolution=resolution,
                     index_col=index_col,
                     region=region,
-                    diagnose=diagnose,
-                    band_select=select_bands,
+                    diagnose=diagnose
                 )
         else:
             geo_json = mgrs_tile_gdf.geometry.iloc[0].__geo_interface__
@@ -157,7 +152,6 @@ def get_bands(shapefile_path, mgrs_shp_path, bucket, file_prefix, resolution, in
                 resolution=resolution,
                 index_col=index_col,
                 region=region,
-                band_select=select_bands,
                 diagnose=diagnose
             )
 
@@ -167,7 +161,7 @@ if __name__ == '__main__':
     run_mt_mesonet_workflow = True
     run_rosetta_workflow = False
     run_gshp_workflow = False
-    run_reesh_workflow = True
+    run_reesh_workflow = False
     run_ismn_workflow = False
 
     resolution_ = 250
@@ -178,11 +172,10 @@ if __name__ == '__main__':
 
     if run_mt_mesonet_workflow:
         # TODO: re-run MT Mesonet extract with the clean file (has many extra columns right now)
-        extracts_dir_ = os.path.join(root_, 'soils', 'swapstress', 'extracts',
-                                     f'mt_mesonet_polaris_extracts_{resolution_}m')
+        extracts_dir_ = os.path.join(root_, 'soils', 'swapstress', 'extracts', f'mt_mesonet_extracts_{resolution_}m')
         shapefile_ = os.path.join(root_, 'soils', 'soil_potential_obs', 'mt_mesonet', 'station_metadata_clean_mgrs.shp')
         index_ = 'station'
-        output_prefix_ = f'swapstress/polaris/mesonet_training_data_{resolution_}m'
+        output_prefix_ = f'swapstress/mesonet_training_data_{resolution_}m'
         mgrs_shapefile_ = os.path.join(root_, 'boundaries', 'mgrs', 'mgrs_wgs.shp')
 
         is_authorized()
@@ -194,11 +187,9 @@ if __name__ == '__main__':
                   index_col=index_,
                   split_tiles=False,
                   check_dir=extracts_dir_,
-                  diagnose=False,
-                  select_bands=['alpha_mean', 'n_mean', 'theta_r_mean', 'theta_s_mean'],
-                  region='conus')
+                  region='global')
 
-    if run_rosetta_workflow:
+    elif run_rosetta_workflow:
         extracts_dir_ = os.path.join(root_, 'soils', 'swapstress', 'extracts', 'conus_extracts')
         shapefile_ = os.path.join(root_, 'soils', 'gis', 'pretraining-roi-10000_mgrs.shp')
         index_ = 'site_id'
@@ -215,11 +206,11 @@ if __name__ == '__main__':
                   split_tiles=True,
                   check_dir=extracts_dir_)
 
-    if run_gshp_workflow:
+    elif run_gshp_workflow:
         extracts_dir_ = os.path.join(root_, 'soils', 'swapstress', 'extracts', f'gshp_extracts_{resolution_}m')
         shapefile_ = os.path.join(root_, 'soils', 'soil_potential_obs', 'gshp', 'wrc_aggregated_mgrs.shp')
         index_ = 'profile_id'
-        output_prefix_ = f'swapstress/polaris/gshp_training_data_{resolution_}m'
+        output_prefix_ = f'swapstress/gshp_training_data_{resolution_}m'
         mgrs_shapefile_ = os.path.join(root_, 'boundaries', 'mgrs', 'mgrs_world_attr.shp')
 
         is_authorized()
@@ -234,8 +225,8 @@ if __name__ == '__main__':
                   check_dir=extracts_dir_,
                   region='global')
 
-    if run_reesh_workflow:
-        extracts_dir_ = os.path.join(root_, 'soils', 'swapstress', 'extracts', f'reesh_polaris_extracts_{resolution_}m')
+    elif run_reesh_workflow:
+        extracts_dir_ = os.path.join(root_, 'soils', 'swapstress', 'extracts', f'reesh_extracts_{resolution_}m')
         shapefile_ = os.path.join(root_, 'soils', 'soil_potential_obs', 'reesh', 'shapefile', 'reesh_sites_mgrs.shp')
         index_ = 'site_id'
         output_prefix_ = f'swapstress/reesh_training_data_{resolution_}m'
@@ -250,11 +241,10 @@ if __name__ == '__main__':
                   index_col=index_,
                   split_tiles=False,
                   diagnose=False,
-                  select_bands=['alpha_mean', 'n_mean', 'theta_r_mean', 'theta_s_mean'],
                   check_dir=extracts_dir_,
-                  region='conus')
+                  region='global')
 
-    if run_ismn_workflow:
+    elif run_ismn_workflow:
         extracts_dir_ = os.path.join(root_, 'sfofifls', 'swapstress', 'extracts', f'ismn_extracts_{resolution_}m')
         shapefile_ = os.path.join(root_, 'soils', 'vwc_timeseries', 'ismn', 'ismn_stations_mgrs.shp')
         index_ = 'station_ui'
