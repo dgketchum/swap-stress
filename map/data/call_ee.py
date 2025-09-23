@@ -173,8 +173,8 @@ def stack_bands_climatology(roi, start_yr=1991, end_yr=2020, subselection=None, 
 
     # annoying treatment of international DEM
     if region == 'conus':
-        ned = ee.Image('USGS/3DEP/10m')
-        terrain = ee.Terrain.products(ned).select('elevation', 'slope', 'aspect')
+        dem = ee.Image('USGS/3DEP/10m')
+        terrain = ee.Terrain.products(dem).select('elevation', 'slope', 'aspect')
     elif region == 'global':
         dem = ee.Image("projects/sat-io/open-datasets/ASTER/GDEM").select('b1').rename('elevation')
         terrain = ee.Terrain.products(dem).select('slope', 'aspect').addBands(dem)
@@ -224,7 +224,7 @@ def stack_bands_climatology(roi, start_yr=1991, end_yr=2020, subselection=None, 
 
     c3s_lc_coll = (ee.ImageCollection("projects/sat-io/open-datasets/ESA/C3S-LC-L4-LCCS")
                    .filterDate(f'{start_yr}-01-01', f'{end_yr}-12-31')
-                   .select('lccs_class'))
+                   .select('b1'))
     c3s_lc_mode = c3s_lc_coll.mode().rename('c3s_lccs_class_mode')
 
     from_glc10_img = (ee.ImageCollection('projects/sat-io/open-datasets/FROM-GLC10')
