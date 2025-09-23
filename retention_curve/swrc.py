@@ -77,6 +77,10 @@ class SWRC:
         else:
             raise ValueError("Data must contain either ('suction_cm', 'theta') or ('KPA', 'VWC') columns.")
 
+        # Ensure a consistent '_cm' column is available for downstream saving
+        if 'suction_cm' not in df.columns:
+            df['suction_cm'] = df['suction']
+
         if self.depth_col in df.columns:
             for depth, group in df.groupby(self.depth_col):
                 self.data_by_depth[depth] = group
@@ -92,26 +96,28 @@ class SWRC:
         """
         cols = set(df.columns)
         has_suction = ('suction' in cols) or ('suction_cm' in cols)
-        has_depth = ('depth' in cols) or ('depth_cm' in cols)
+        has_depth = ('depth_cm' in cols) or ('depth' in cols)
         if not has_suction or 'theta' not in cols or not has_depth:
             raise ValueError(
                 f"DataFrame missing required columns: need ('suction'|'suction_cm'), 'theta', ('depth'|'depth_cm')")
 
-        df = df.copy()
+        # Normalize inputs: create internal 'suction' if only 'suction_cm' provided
         if 'suction' not in df.columns and 'suction_cm' in df.columns:
-            df = df.rename(columns={'suction_cm': 'suction'})
-        if 'depth' not in df.columns and 'depth_cm' in df.columns:
-            df = df.rename(columns={'depth_cm': 'depth'})
+            df['suction'] = np.abs(df['suction_cm'].values)
+        # Choose grouping column preferring explicit centimeters
+        group_col = 'depth_cm' if 'depth_cm' in df.columns else 'depth'
+        self.depth_col = group_col
 
-        meta_cols = [c for c in df.columns if c not in {'suction', 'theta', 'depth'}]
-        meta_series = df[meta_cols + ['depth']].groupby('depth').first()
+        meta_cols = [c for c in df.columns if c not in {'suction_cm', 'theta', group_col}]
+        meta_series = df[meta_cols + [group_col]].groupby(group_col).first()
         meta_series = meta_series.to_dict(orient='index')
         self.metadata = meta_series
 
-        df['suction'] = np.abs(df['suction'].values)
+        if 'suction' in df.columns:
+            df['suction'] = np.abs(df['suction'].values)
 
-        if self.depth_col in df.columns:
-            for key, group in df.groupby(self.depth_col):
+        if group_col in df.columns:
+            for key, group in df.groupby(group_col):
                 self.data_by_depth[key] = group
             # print(f"DataFrame loaded and grouped by {self.depth_col} ({len(self.data_by_depth)} groups).")
         else:
@@ -375,7 +381,7 @@ class SWRC:
             df_raw = df_raw.dropna(subset=['suction', 'theta'])
             df_raw = df_raw[np.isfinite(df_raw['suction']) & np.isfinite(df_raw['theta'])]
             data_blob = {
-                'suction': df_raw['suction'].astype(float).tolist(),
+                'suction_cm': df_raw['suction'].astype(float).tolist(),
                 'theta': df_raw['theta'].astype(float).tolist(),
             }
             if result and result.success:
@@ -441,6 +447,60 @@ class SWRC:
 
 
     # moved: test_fit_methods_across_stations now in viz/fitting_comparisons/project_fits.py
+
+    def save_bayes_results(self, output_dir, output_filename=None):
+        if not hasattr(self, 'bayes_results') or not self.bayes_results:
+            return
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir)
+        if output_filename is None:
+            if self.filepath:
+                base_name = os.path.basename(self.filepath)
+                file_name_without_ext = os.path.splitext(base_name)[0]
+                output_filename = f"{file_name_without_ext}_bayes_results.json"
+            else:
+                output_filename = "swrc_bayes_results.json"
+        output_path = os.path.join(output_dir, output_filename)
+
+        summary = {}
+        for depth, trace in self.bayes_results.items():
+            if trace is None:
+                summary[depth] = {'status': 'Fit Failed or Not Performed'}
+                continue
+            params = {}
+            for name in ['theta_r', 'theta_s', 'alpha', 'n']:
+                if hasattr(trace.posterior, name):
+                    arr = getattr(trace.posterior, name).values.reshape(-1)
+                    mean_ = float(np.mean(arr))
+                    params[name] = {
+                        'value': mean_,  # align with downstream readers
+                        'q025': float(np.quantile(arr, 0.025)),
+                        'q975': float(np.quantile(arr, 0.975)),
+                    }
+            df_raw = self.data_by_depth.get(depth)
+            if df_raw is not None:
+                d = df_raw.dropna(subset=['suction', 'theta'])
+                d = d[np.isfinite(d['suction']) & np.isfinite(d['theta'])]
+                data_blob = {
+                    'suction_cm': d['suction'].astype(float).tolist(),
+                    'theta': d['theta'].astype(float).tolist(),
+                }
+                n_obs = int(len(d))
+            else:
+                data_blob = None
+                n_obs = 0
+            summary[depth] = {
+                'status': 'Success',
+                'n_obs': n_obs,
+                'parameters': params,
+                'data': data_blob,
+            }
+
+        if self.metadata:
+            summary['metadata'] = self.metadata.copy()
+
+        with open(output_path, 'w') as f:
+            json.dump(summary, f, indent=4)
 
 
 if __name__ == '__main__':
