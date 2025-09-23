@@ -19,7 +19,7 @@ from map.learning.tabular_nn.tabular_nn import VanillaMLP, MLPWithEmbeddings, Ta
 from map.learning import VG_PARAMS, DEVICE, DROP_FEATURES
 
 torch.set_float32_matmul_precision('medium')
-EPOCHS = 300
+EPOCHS = 25
 BATCH_SIZE = 16
 
 # GSHP label set (no log transform)
@@ -98,7 +98,7 @@ def prepare_data(df, target_cols, feature_cols, cat_cols, mappings=None, use_one
         return train_dataset, test_dataset, len(num_cols), cat_cardinalities, target_stats
 
 
-def run_training(f, model_type, mappings_json, checkpoint_dir, metrics_dir, mode='single', levels=None):
+def run_training(f, model_type, mappings_json, checkpoint_dir, metrics_dir, mode='single', levels=None, features_path=None):
 
     if levels is None:
         levels = [2]
@@ -109,7 +109,17 @@ def run_training(f, model_type, mappings_json, checkpoint_dir, metrics_dir, mode
 
     # Identify outputs and feature set
     rosetta_cols = [c for c in df.columns if any(p in c for p in VG_PARAMS) or c in GSHP_PARAMS]
-    feature_cols = [c for c in df.columns if c not in rosetta_cols and c not in DROP_FEATURES]
+    if features_path:
+        if features_path.endswith('.json'):
+            with open(features_path, 'r') as ffp:
+                listed = json.load(ffp)
+        else:
+            feats_df = pd.read_csv(features_path)
+            col = 'features' if 'features' in feats_df.columns else feats_df.columns[0]
+            listed = feats_df[col].dropna().astype(str).tolist()
+        feature_cols = [c for c in listed if c in df.columns and c not in rosetta_cols and c not in DROP_FEATURES]
+    else:
+        feature_cols = [c for c in df.columns if c not in rosetta_cols and c not in DROP_FEATURES]
 
     # Remove flags/classes that should not be used as predictors (GSHP-specific)
     if 'SWCC_classes' in feature_cols:
@@ -209,9 +219,10 @@ if __name__ == '__main__':
     os.makedirs(checkpoint_dir_, exist_ok=True)
     os.makedirs(metrics_dst, exist_ok=True)
 
+    features_csv_ = os.path.join(root, 'current_features.csv')
     for model_name in ['FTTransformer']:
         print("\n\n" + "=" * 50)
         print(f"RUNNING {model_name.upper()} for GSHP with embeddings")
-        run_training(f, model_name, mappings_json, checkpoint_dir_, metrics_dst)
+        run_training(f, model_name, mappings_json, checkpoint_dir_, metrics_dst, features_path=features_csv_)
 
 # ========================= EOF ====================================================================

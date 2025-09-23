@@ -6,7 +6,9 @@ import pandas as pd
 LABELS_COLS_KEEP = ['alpha', 'data_flag', 'n', 'theta_r', 'theta_s']
 
 def build_gshp_training_table(ee_features_pqt, labels_csv, out_file, index_col='profile_id', filter_good_quality=True,
-                              embeddings=None):
+                              embeddings=None, features_path=None):
+    if not features_path or not os.path.exists(features_path):
+        raise ValueError('features_path is required and must point to stations current_features.csv')
     # for "simplicity", all EE extracts concatenated in ee_tables.py will by indexed with 'station'
     ee_df = pd.read_parquet(ee_features_pqt)
     ee_df.index.name = index_col
@@ -46,12 +48,25 @@ def build_gshp_training_table(ee_features_pqt, labels_csv, out_file, index_col='
                 emb_df.index.name = index_col
                 final_df = final_df.join(emb_df, how='left')
 
+    # Enforce uniform feature set (from station_training_table current_features.csv)
+    if features_path.endswith('.csv'):
+        feats_df = pd.read_csv(features_path)
+        col = 'features' if 'features' in feats_df.columns else feats_df.columns[0]
+        listed = feats_df[col].dropna().astype(str).tolist()
+    else:
+        raise ValueError('Unsupported features file; expected CSV list of features')
+    missing = [c for c in listed if c not in final_df.columns]
+    if missing:
+        raise ValueError(f'Missing required features in GSHP table: {missing}')
+    label_cols = [c for c in LABELS_COLS_KEEP if c in final_df.columns]
+    final_df = final_df[listed + label_cols]
+
     out_dir = os.path.dirname(out_file)
     if out_dir and not os.path.exists(out_dir):
         os.makedirs(out_dir)
     # final_df.dropna(inplace=True)
     final_df.to_parquet(out_file)
-    print(f'{len(final_df)} GSHP training samples written to {out_file}')
+    print(f'{len(final_df)} x {final_df.shape[1]} rows GSHP training samples written to {out_file}')
 
 
 if __name__ == '__main__':
@@ -69,6 +84,7 @@ if __name__ == '__main__':
         vwc_root_ = '/data/ssd2/swapstress/vwc'
         embeddings_ = os.path.join(vwc_root_, 'embeddings', 'gshp')
 
+        features_csv_ = os.path.join(root_, 'soils', 'swapstress', 'training', 'current_features.csv')
         build_gshp_training_table(
             ee_features_pqt=ee_features_pqt_,
             labels_csv=labels_csv_,
@@ -76,5 +92,6 @@ if __name__ == '__main__':
             index_col='profile_id',
             filter_good_quality=True,
             embeddings=embeddings_,
+            features_path=features_csv_,
         )
 # ========================= EOF ====================================================================

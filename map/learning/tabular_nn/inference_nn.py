@@ -13,7 +13,7 @@ from torch.utils.data import DataLoader
 
 from map.learning import DEVICE, DROP_FEATURES, VG_PARAMS
 from map.learning.tabular_nn.dataset import TabularDataset, TabularDatasetVanilla
-from map.learning.tabular_nn import MLPWithEmbeddings, TabularLightningModule, VanillaMLP
+from map.learning.tabular_nn.tabular_nn import MLPWithEmbeddings, TabularLightningModule, VanillaMLP
 
 torch.set_float32_matmul_precision('medium')
 
@@ -50,174 +50,135 @@ def find_best_model_checkpoint(checkpoint_dir, target, model_type, use_finetuned
     return best_ckpt, max_r2
 
 
-def run_inference_on_empirical_data(station_data_pqt, training_data_pqt, rosetta_mappings_json,
-                                    rosetta_checkpoint_dir, output_pqt, unscale_predictions=False,
-                                    use_finetuned=False, use_validation_split=True, validation_split_json=None):
-    """
-    Uses models trained on Rosetta to predict VG parameters for empirical sites.
-    """
-    station_data = pd.read_parquet(station_data_pqt)
-    training_df = pd.read_parquet(training_data_pqt)
-
-    with open(rosetta_mappings_json, 'r') as f:
+def run_inference_on_station_table(station_table_pqt, gshp_training_pqt, gshp_mappings_json,
+                                   gshp_checkpoint_dir, output_pqt, features_path):
+    station_df = pd.read_parquet(station_table_pqt)
+    train_df = pd.read_parquet(gshp_training_pqt)
+    with open(gshp_mappings_json, 'r') as f:
         mappings = json.load(f)
 
-    cat_cols = list(mappings.keys())
-    rosetta_cols = [c for c in training_df.columns if any(p in c for p in VG_PARAMS)]
-    feature_cols = [c for c in training_df.columns if c not in rosetta_cols and c not in DROP_FEATURES]
+    targets = ['theta_r', 'theta_s', 'alpha', 'n']
+
+    feats_df = pd.read_csv(features_path)
+    col = 'features' if 'features' in feats_df.columns else feats_df.columns[0]
+    training_features = feats_df[col].dropna().astype(str).tolist()
+
+    # Mirror training feature handling
+    rosetta_cols = [c for c in train_df.columns if any(p in c for p in VG_PARAMS) or c in targets]
+    feature_cols = [c for c in training_features if c in train_df.columns and c not in rosetta_cols and c not in DROP_FEATURES]
+    if 'SWCC_classes' in feature_cols:
+        feature_cols.remove('SWCC_classes')
+    if 'data_flag' in feature_cols:
+        feature_cols.remove('data_flag')
+    missing_train = [c for c in feature_cols if c not in train_df.columns]
+    if missing_train:
+        raise ValueError(f'Missing required training features: {missing_train}')
+    missing_station = [c for c in feature_cols if c not in station_df.columns]
+    if missing_station:
+        raise ValueError(f'Missing required station features: {missing_station}')
+
+    cat_cols = [c for c in mappings.keys() if c in feature_cols]
     num_cols = [c for c in feature_cols if c not in cat_cols]
+    train_num = train_df[num_cols].copy()
+    train_num = train_num.fillna(train_num.mean())
+    scaler = StandardScaler().fit(train_num)
     cat_cardinalities = [len(mappings[col]) for col in cat_cols]
 
-    for col in rosetta_cols:
-        training_df[training_df[col] <= -9999] = np.nan
-
-    scaler = StandardScaler().fit(training_df[num_cols])
-
-    if use_validation_split:
-        split_path = validation_split_json or os.path.join(os.path.dirname(station_data_pqt), 'finetuning_split_info.json')
-        if os.path.exists(split_path):
-            with open(split_path, 'r') as f:
-                split = json.load(f)
-            try:
-                val_indices = [int(k) for k in split.get('validation', {}).keys()]
-                station_data = station_data.loc[val_indices]
-            except Exception:
-                pass  # likely index mismatch; use full dataset
-
-    inference_features = station_data[feature_cols].copy()
+    inf_feats = station_df[feature_cols].copy()
     for col in feature_cols:
         if col in cat_cols:
-            inference_features[col] = inference_features[col].fillna(training_df[col].mode()[0])
+            inf_feats[col] = inf_feats[col].fillna(train_df[col].mode()[0])
         else:
-            inference_features[col] = inference_features[col].fillna(training_df[col].mean())
+            inf_feats[col] = inf_feats[col].fillna(train_num[col].mean())
 
-    train_onehot_df = pd.get_dummies(training_df[feature_cols], columns=cat_cols, dummy_na=False, dtype=int)
+    onehot_train = pd.get_dummies(train_df[feature_cols], columns=cat_cols, dummy_na=False, dtype=int)
 
-    checkpoint_dir = os.path.join(rosetta_checkpoint_dir, 'fine_tuned') if use_finetuned else rosetta_checkpoint_dir
-
-    model_types = ['MLP', 'MLPEmbeddings', 'FTTransformer']
-    print("Searching for the best overall model type...")
-    all_checkpoints = glob(os.path.join(checkpoint_dir, '**', '*.ckpt'), recursive=True)
+    ckpt_root = os.path.join(gshp_checkpoint_dir, 'GSHP_VG_combined')
+    all_ckpts = glob(os.path.join(ckpt_root, '*.ckpt'))
+    if not all_ckpts:
+        raise FileNotFoundError(f'No checkpoints found under {ckpt_root}')
     r2_pattern = re.compile(r"val_r2=([-]?\d+\.\d+)")
-    best_r2 = -float('inf')
-    overall_best_model_type = None
+    best_ckpt, best_type, best_r2 = None, None, -float('inf')
+    for ckpt in all_ckpts:
+        m = r2_pattern.search(os.path.basename(ckpt))
+        if not m:
+            continue
+        r2 = float(m.group(1))
+        if r2 > best_r2:
+            best_r2 = r2
+            best_ckpt = ckpt
+            best_type = 'MLPEmbeddings' if 'MLPEmbeddings-' in ckpt else (
+                'FTTransformer' if 'FTTransformer-' in ckpt else 'MLP')
 
-    for ckpt in all_checkpoints:
-        basename = os.path.basename(ckpt)
-        match = r2_pattern.search(basename)
-        if match:
-            r2 = float(match.group(1))
-            if r2 > best_r2:
-                best_r2 = r2
-                for mt in model_types:
-                    if f'{mt}-' in basename:
-                        overall_best_model_type = mt
-                        break
+    if best_ckpt is None:
+        raise ValueError('Could not determine best checkpoint for GSHP_VG_combined')
 
-    if not overall_best_model_type:
-        raise ValueError("Could not determine the best model type. No valid checkpoints found.")
-
-    print(f"Found best overall model type: {overall_best_model_type} (R2={best_r2:.4f})")
-
-    all_ckpts = [os.path.basename(x) for x in glob(os.path.join(checkpoint_dir, '*'))]
-    levels = sorted([int(x) for x in set(re.findall(r'L(\d+)_VG_combined', ' '.join(all_ckpts)))])
-
-    predictions_df = station_data[['latitude', 'longitude']].copy()
-    n_outputs = len(VG_PARAMS)
-
-    for level in levels:
-        target_name = f'L{level}_VG_combined'
-        best_model_type = overall_best_model_type
-        best_ckpt, max_r2 = find_best_model_checkpoint(checkpoint_dir, target_name, best_model_type,
-                                                       use_finetuned=use_finetuned)
-
-        if best_ckpt:
-            print(f"Using {best_model_type} for {target_name} (R2={max_r2:.4f})")
-
-            level_targets = [f'US_R3H3_L{level}_VG_{p}' for p in VG_PARAMS]
-            target_stats = {t: {'mean': training_df[t].mean(), 'std': training_df[t].std()} for t in level_targets}
-
-            if best_model_type == 'MLP':
-                inference_onehot = pd.get_dummies(inference_features, columns=cat_cols,
-                                                  dummy_na=False, dtype=int)
-                missing_cols = set(train_onehot_df.columns) - set(inference_onehot.columns)
-                for c in missing_cols:
-                    inference_onehot[c] = 0
-                inference_onehot = inference_onehot[train_onehot_df.columns]
-                x_inference = inference_onehot.values
-                inf_dataset = TabularDatasetVanilla(x_inference, np.zeros((x_inference.shape[0], n_outputs)))
-                model = VanillaMLP(n_features=x_inference.shape[1], n_outputs=n_outputs, num_hidden_layers=2)
-
-            else:
-                inf_feats_emb = inference_features.copy()
-                for col in cat_cols:
-                    int_map = {int(k): int(v) for k, v in mappings[col].items()}
-                    inf_feats_emb[col] = inf_feats_emb[col].map(int_map)
-                x_inf_num = scaler.transform(inf_feats_emb[num_cols])
-                x_inf_cat = inf_feats_emb[cat_cols].values
-                inf_dataset = TabularDataset(x_inf_num, x_inf_cat, np.zeros((x_inf_num.shape[0], n_outputs)))
-
-                if best_model_type == 'MLPEmbeddings':
-                    model = MLPWithEmbeddings(
-                        n_num_features=len(num_cols),
-                        cat_cardinalities=cat_cardinalities,
-                        n_outputs=n_outputs,
-                        num_hidden_layers=2,
+    n_outputs = len(targets)
+    # Sanity check: ensure numeric feature count matches checkpoint expectations for transformer/embeddings
+    if best_type != 'MLP':
+        try:
+            ckpt = torch.load(best_ckpt, map_location='cpu')
+            w = ckpt['state_dict'].get('model.feature_tokenizer.num_tokenizer.weight')
+            if w is not None:
+                expected_num = int(w.shape[0])
+                if expected_num != len(num_cols):
+                    raise ValueError(
+                        f'Numeric feature count mismatch: checkpoint expects {expected_num}, got {len(num_cols)}. '
+                        f'Ensure GSHP training table matches current_features.csv and retrain.'
                     )
-                else:
-                    model = rtdl.FTTransformer.make_baseline(n_num_features=len(num_cols),
-                                                             cat_cardinalities=cat_cardinalities,
-                                                             d_token=256, ffn_d_hidden=32,
-                                                             residual_dropout=0.0, n_blocks=3,
-                                                             attention_dropout=0.2, ffn_dropout=0.2,
-                                                             d_out=n_outputs)
+        except Exception as e:
+            # likely error: checkpoint format unexpected
+            raise e
+    if best_type == 'MLP':
+        inf_onehot = pd.get_dummies(inf_feats, columns=cat_cols, dummy_na=False, dtype=int)
+        missing = set(onehot_train.columns) - set(inf_onehot.columns)
+        for c in missing:
+            inf_onehot[c] = 0
+        inf_onehot = inf_onehot[onehot_train.columns]
+        x_inf = inf_onehot.values
+        dataset = TabularDatasetVanilla(x_inf, np.zeros((x_inf.shape[0], n_outputs)))
+        model = VanillaMLP(n_features=x_inf.shape[1], n_outputs=n_outputs, num_hidden_layers=2)
+    else:
+        for col in cat_cols:
+            int_map = {int(k): int(v) for k, v in mappings[col].items()}
+            inf_feats[col] = inf_feats[col].map(int_map)
+        x_num = scaler.transform(inf_feats[num_cols])
+        x_cat = inf_feats[cat_cols].values
+        dataset = TabularDataset(x_num, x_cat, np.zeros((x_num.shape[0], n_outputs)))
+        if best_type == 'MLPEmbeddings':
+            model = MLPWithEmbeddings(n_num_features=len(num_cols), cat_cardinalities=cat_cardinalities,
+                                      n_outputs=n_outputs, num_hidden_layers=2)
+        else:
+            model = rtdl.FTTransformer.make_baseline(n_num_features=len(num_cols), cat_cardinalities=cat_cardinalities,
+                                                     d_token=256, ffn_d_hidden=32, residual_dropout=0.0, n_blocks=3,
+                                                     attention_dropout=0.2, ffn_dropout=0.2, d_out=n_outputs)
 
-            pl_module = TabularLightningModule.load_from_checkpoint(best_ckpt, model=model)
-            inf_loader = DataLoader(inf_dataset, batch_size=32, shuffle=False)
-            trainer = pl.Trainer(accelerator=DEVICE, devices=1)
-            preds = trainer.predict(pl_module, inf_loader)
-            scaled_preds = np.concatenate(preds)
+    pl_module = TabularLightningModule.load_from_checkpoint(best_ckpt, model=model)
+    loader = DataLoader(dataset, batch_size=32, shuffle=False)
+    trainer = pl.Trainer(accelerator=DEVICE, devices=1)
+    preds = trainer.predict(pl_module, loader)
+    y = np.concatenate(preds)
 
-            if unscale_predictions:
-                unscaled_preds = np.zeros_like(scaled_preds)
-                for i, target in enumerate(level_targets):
-                    mean = target_stats[target]['mean']
-                    std = target_stats[target]['std']
-                    unscaled_preds[:, i] = scaled_preds[:, i] * std + mean
-                for i, target in enumerate(level_targets):
-                    predictions_df[target] = unscaled_preds[:, i]
-            else:
-                for i, target in enumerate(level_targets):
-                    predictions_df[target] = scaled_preds[:, i]
-
-    predictions_df.to_parquet(output_pqt)
-
-    print(f"Inference complete. Predictions saved to {output_pqt}")
+    out = station_df[['station', 'profile_id', 'depth',
+                      'rosetta_level']].copy() if 'station' in station_df.columns else station_df.index.to_frame(
+        index=False)
+    out = out.reset_index(drop=True)
+    out['theta_r'] = y[:, 0]
+    out['theta_s'] = y[:, 1]
+    out['alpha'] = 10 ** y[:, 2]
+    out['n'] = 10 ** y[:, 3]
+    out.to_parquet(output_pqt)
+    print(f'Saved NN station predictions to {output_pqt}')
 
 
 if __name__ == '__main__':
-    """"""
     home = os.path.expanduser('~')
-
-    root = os.path.join(home, 'data', 'IrrigationGIS', 'soils', 'swapstress')
-    training_ = os.path.join(root, 'training')
-    inference_ = os.path.join(root, 'inference')
-
-    mesonet_training_data_ = os.path.join(training_, 'mt_training_data.parquet')
-    training_data_ = os.path.join(training_, 'training_data.parquet')
-    mappings_json = os.path.join(training_, 'categorical_mappings.json')
-    checkpoint_dir_ = os.path.join(training_, 'checkpoints', 'combined_params')
-
-    mode, finetuned = 'finetuned', True
-    # mode, finetuned = 'pretrained', False
-
-    run_inference_on_empirical_data(
-        station_data_pqt=mesonet_training_data_,
-        training_data_pqt=training_data_,
-        rosetta_mappings_json=mappings_json,
-        rosetta_checkpoint_dir=checkpoint_dir_,
-        output_pqt=os.path.join(inference_, f'{mode}_predictions.parquet'),
-        unscale_predictions=False,
-        use_finetuned=finetuned
-    )
+    base = os.path.join(home, 'data', 'IrrigationGIS', 'soils', 'swapstress', 'training')
+    station_table_ = os.path.join(base, 'stations_training_table_250m.parquet')
+    gshp_train_ = os.path.join(base, 'gshp_training_data_emb_250m.parquet')
+    gshp_maps_ = os.path.join(base, 'gshp_categorical_mappings_250m.json')
+    ckpts_ = os.path.join(base, 'checkpoints_gshp')
+    out_pq_ = os.path.join(base, 'predictions', 'stations_predictions_nn.parquet')
+    feats_csv_ = os.path.join(base, 'current_features.csv')
+    run_inference_on_station_table(station_table_, gshp_train_, gshp_maps_, ckpts_, out_pq_, features_path=feats_csv_)
 # ========================= EOF ====================================================================

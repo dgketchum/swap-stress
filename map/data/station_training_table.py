@@ -23,7 +23,7 @@ def _depth_to_rosetta_level(depth_cm):
     return int(levels[idx])
 
 
-def extract_station_fit_params(results_dir, networks):
+def extract_station_fit_params(results_dir, networks, fit_method='nelder'):
     """
     Extracts fitted VG parameters from station JSON summaries into a long table.
 
@@ -36,6 +36,7 @@ def extract_station_fit_params(results_dir, networks):
         p = os.path.join(results_dir, sd)
         files.extend(glob(os.path.join(p, '**', '*.json'), recursive=True))
 
+    files = [f for f in files if fit_method in f]
     rows = []
 
     for fp in files:
@@ -97,8 +98,8 @@ def extract_station_fit_params(results_dir, networks):
 
 
 def build_station_training_table(ee_stations_pqt, results_dir, out_file, include_subdirs=None,
-                                 embeddings=None, features_csv=None):
-    params_df = extract_station_fit_params(results_dir, include_subdirs)
+                                 embeddings=None, features_csv=None, fitting_method='nelder'):
+    params_df = extract_station_fit_params(results_dir, include_subdirs, fit_method=fitting_method)
     if params_df.empty:
         return params_df
 
@@ -148,7 +149,7 @@ def build_station_training_table(ee_stations_pqt, results_dir, out_file, include
         if out_dir and not os.path.exists(out_dir):
             os.makedirs(out_dir)
         merged.to_parquet(out_file)
-        print(f"Saving station training table to {out_file} {len(merged)} samples")
+        print(f"Saving station training table to {out_file} {len(merged)} samples by {merged.shape[1]} rows")
 
     # Optionally write current features (EE features + embeddings if present)
     if features_csv:
@@ -160,7 +161,7 @@ def build_station_training_table(ee_stations_pqt, results_dir, out_file, include
         emb_cols = [c for c in merged.columns if c.startswith('e') and len(c) in (3, 4)]
         features = pd.DataFrame(data=ee_feature_cols + emb_cols, columns=['features'])
         features.to_csv(features_csv, index=False)
-        print(f"Saved current features list to {features_csv}")
+        print(f"Saved current features list to {features_csv}, with {len(features)} features")
 
 
 if __name__ == '__main__':
@@ -173,7 +174,6 @@ if __name__ == '__main__':
         results_dir_ = os.path.join(root_, 'soil_potential_obs', 'curve_fits')
         ee_stations_pqt_ = os.path.join(root_, 'swapstress', 'training', 'stations_ee_data_250m.parquet')
         out_file_ = os.path.join(root_, 'swapstress', 'training', 'stations_training_table_250m.parquet')
-        reesh_replicates = os.path.join(root_, 'soil_potential_obs', 'reesh', 'replicate_key.csv')
 
         include_ = ('mt_mesonet', 'reesh')
         features_csv_ = os.path.join(root_, 'swapstress', 'training', 'current_features.csv')

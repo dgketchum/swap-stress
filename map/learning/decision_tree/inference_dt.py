@@ -34,6 +34,7 @@ def run_inference(model_path, features_path, data_path, output_path):
 
     print(f'Loading data from {data_path}')
     inference_df = pd.read_parquet(data_path)
+    inference_df.index = inference_df['station']
 
     missing_cols = [col for col in training_features if col not in inference_df.columns]
     if missing_cols:
