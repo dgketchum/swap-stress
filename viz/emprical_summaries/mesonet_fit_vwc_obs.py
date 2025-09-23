@@ -5,7 +5,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 
-def plot_mesonet_swp_vs_vwc_with_violin(swrc_csv_path, vwc_parquet_path, save_path=None, show=False):
+def plot_mesonet_swp_vs_vwc_with_violin(swrc_csv_path, vwc_parquet_path, save_path=None, show=False, station_name=None):
     df = pd.read_csv(swrc_csv_path)
     df = df.rename(columns={'suction_cm': 'suction', 'depth_cm': 'depth'})
     df['suction'] = np.abs(df['suction'].astype(float).values)
@@ -44,7 +44,10 @@ def plot_mesonet_swp_vs_vwc_with_violin(swrc_csv_path, vwc_parquet_path, save_pa
     ax.set_yscale('log')
     ax.set_ylabel('Soil Water Potential (cm)', fontsize=12)
     ax.set_xlabel('')
-    ax.set_title('SWRC Observations with VWC Frequency', fontsize=14, fontweight='bold')
+    station_code = os.path.splitext(os.path.basename(swrc_csv_path))[0]
+    title_base = 'SWRC Observations with VWC Frequency'
+    title_full = f"{title_base} — {station_name}" if station_name else f"{title_base} — {station_code}"
+    ax.set_title(title_full, fontsize=14, fontweight='bold')
     ax.legend(title='Depth', fontsize=9, title_fontsize=9, frameon=False)
     handles, labels = ax.get_legend_handles_labels()
     pairs = []
@@ -74,7 +77,7 @@ def plot_mesonet_swp_vs_vwc_with_violin(swrc_csv_path, vwc_parquet_path, save_pa
             violin_data.append(vals)
             positions.append(idx)
             vcolors.append(depth_to_color.get(dd, '0.6'))
-            labels.append(f"{dd} cm")
+            labels.append(f"{dd} cm (n={vals.size})")
         if violin_data:
             parts = axv.violinplot(violin_data, vert=False, positions=positions, showextrema=False, widths=0.85)
             for pc, col in zip(parts['bodies'], vcolors):
@@ -83,6 +86,7 @@ def plot_mesonet_swp_vs_vwc_with_violin(swrc_csv_path, vwc_parquet_path, save_pa
                 pc.set_alpha(0.6)
             axv.set_yticks(positions)
             axv.set_yticklabels(labels)
+            axv.tick_params(labelsize=9)
             axv.set_ylim(0, max(positions) + 1)
             axv.invert_yaxis()
             axv.set_xlabel('')
@@ -116,18 +120,25 @@ def plot_mesonet_swp_vs_vwc_with_violin(swrc_csv_path, vwc_parquet_path, save_pa
 
     # Put the shared x-label on the bottom (applies to violins and scatter x-axis)
     axv.set_xlabel('Volumetric Water Content ($cm^3/cm^3$)', fontsize=12)
-    plt.tight_layout()
+    fig.tight_layout()
+    fig.subplots_adjust(left=0.15)
     if save_path:
-        plt.savefig(save_path, dpi=350)
+        plt.savefig(save_path, dpi=350, bbox_inches='tight')
     if show:
         plt.show()
     plt.close(fig)
+    print(fig)
 
 
-def plot_mesonet_dirs_swp_vs_vwc_with_violin(swrc_dir, vwc_dir, out_dir, show=False):
+def plot_mesonet_dirs_swp_vs_vwc_with_violin(swrc_dir, vwc_dir, out_dir, show=False, meta_csv_path=None):
     os.makedirs(out_dir, exist_ok=True)
     swrc_files = [f for f in os.listdir(swrc_dir) if f.endswith('.csv')]
     vwc_set = set(os.listdir(vwc_dir))
+    name_map = None
+    if meta_csv_path and os.path.exists(meta_csv_path):
+        mdf = pd.read_csv(meta_csv_path)
+        if 'station' in mdf.columns and 'name' in mdf.columns:
+            name_map = dict(zip(mdf['station'].astype(str), mdf['name'].astype(str)))
     for fn in swrc_files:
         station = os.path.splitext(fn)[0]
         vwc_fn = f'{station}_daily.parquet'
@@ -136,13 +147,15 @@ def plot_mesonet_dirs_swp_vs_vwc_with_violin(swrc_dir, vwc_dir, out_dir, show=Fa
         swrc_csv_path = os.path.join(swrc_dir, fn)
         vwc_parquet_path = os.path.join(vwc_dir, vwc_fn)
         out_png = os.path.join(out_dir, f'{station}_swrc_vwc_violin.png')
-        plot_mesonet_swp_vs_vwc_with_violin(swrc_csv_path, vwc_parquet_path, save_path=out_png, show=show)
+        st_name = name_map.get(station) if name_map else None
+        plot_mesonet_swp_vs_vwc_with_violin(swrc_csv_path, vwc_parquet_path, save_path=out_png, show=show, station_name=st_name)
 
 
 if __name__ == '__main__':
     home_ = os.path.expanduser('~')
     swrc_dir_ = os.path.join(home_, 'data', 'IrrigationGIS', 'soils', 'soil_potential_obs', 'preprocessed', 'mt_mesonet')
     vwc_dir_ = os.path.join(home_, 'data', 'IrrigationGIS', 'soils', 'vwc_timeseries', 'mt_mesonet', 'preprocessed_by_station')
-    out_dir_ = os.path.join(home_, 'data', 'IrrigationGIS', 'soils', 'soil_potential_obs', 'mt_mesonet', 'plots')
-    plot_mesonet_dirs_swp_vs_vwc_with_violin(swrc_dir_, vwc_dir_, out_dir_, show=False)
+    out_dir_ = os.path.join(home_, 'data', 'IrrigationGIS', 'soils', 'soil_potential_obs', 'mt_mesonet', 'swrc_vwc_violin')
+    meta_csv_ = os.path.join(home_, 'data', 'IrrigationGIS', 'soils', 'soil_potential_obs', 'mt_mesonet', 'station_metadata.csv')
+    plot_mesonet_dirs_swp_vs_vwc_with_violin(swrc_dir_, vwc_dir_, out_dir_, show=False, meta_csv_path=meta_csv_)
 # ========================= EOF ====================================================================
