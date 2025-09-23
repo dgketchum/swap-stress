@@ -26,7 +26,10 @@ def _find_rosetta_value(row, level, param):
 
 
 def _prep_series(y_true, y_pred, param):
-    s = pd.DataFrame({'true': y_true, 'pred': y_pred}).replace([-9999, -9999.0], np.nan).dropna()
+    s = pd.DataFrame({'true': y_true, 'pred': y_pred})
+    s[s['true'] < -9999] = np.nan
+    s[s['pred'] < -9999] = np.nan
+    s = s.dropna()
     if param in ('theta_r', 'theta_s'):
         s = s[(s['true'] >= 0) & (s['true'] <= 1) & (s['pred'] >= 0) & (s['pred'] <= 1)]
     if param == 'alpha':
@@ -87,9 +90,18 @@ def compare_station_params_vs_rosetta(training_parquet, out_dir, make_scatter=Tr
 
     comp = pd.DataFrame(rows)
     metrics = []
-    for p in PARAMS:
+    plot_dir = os.path.join(out_dir, 'plots')
+    if make_scatter:
+        plt.style.use('seaborn-v0_8-whitegrid')
+        os.makedirs(plot_dir, exist_ok=True)
+        fig, axes = plt.subplots(2, 2, figsize=(10, 10))
+        fig.patch.set_facecolor('white')
+        axes = axes.ravel()
+    for i, p in enumerate(PARAMS):
         s = _prep_series(comp[f'fit_{p}'], comp[f'ros_{p}'], p)
         if s.empty:
+            if make_scatter:
+                axes[i].axis('off')
             continue
         r2 = _r2(s['true'].values, s['pred'].values)
         rmse = _rmse(s['true'].values, s['pred'].values)
@@ -97,21 +109,31 @@ def compare_station_params_vs_rosetta(training_parquet, out_dir, make_scatter=Tr
         metrics.append({'param': p, 'n': len(s), 'r2': r2, 'rmse': rmse, 'bias': bias})
 
         if make_scatter:
-            plt.style.use('seaborn-v0_8-whitegrid')
-            fig, ax = plt.subplots(figsize=(6, 6))
-            ax.scatter(s['true'], s['pred'], s=10, alpha=0.7)
+            ax = axes[i]
             vmin = float(min(s['true'].min(), s['pred'].min()))
             vmax = float(max(s['true'].max(), s['pred'].max()))
-            ax.plot([vmin, vmax], [vmin, vmax], 'r--', lw=1)
+            rng = vmax - vmin
+            pad = 0.05 * rng if rng > 0 else 0.05
+            vmin_m, vmax_m = vmin - pad, vmax + pad
+            ax.scatter(s['true'], s['pred'], s=12, alpha=0.6, color='#1f77b4', edgecolors='none', rasterized=True)
+            ax.plot([vmin_m, vmax_m], [vmin_m, vmax_m], color='0.3', lw=1.2, ls='--')
+            ax.set_xlim(vmin_m, vmax_m)
+            ax.set_ylim(vmin_m, vmax_m)
+            ax.set_aspect('equal', adjustable='box')
             label = f"log10({p})" if p in LOG10_PARAMS else p
             ax.set_xlabel(f"Fit {label}")
             ax.set_ylabel(f"Rosetta {label}")
-            ax.set_title(f"Station Fit vs Rosetta: {p} (R2={r2:.2f}, RMSE={rmse:.3f})")
-            plt.tight_layout()
-            plot_dir = os.path.join(out_dir, 'plots')
-            os.makedirs(plot_dir, exist_ok=True)
-            plt.savefig(os.path.join(plot_dir, f'station_vs_rosetta_{p}.png'), dpi=300)
-            plt.close(fig)
+            ax.set_title(f"{p}")
+            ax.text(0.02, 0.98, f"n={len(s)}\nR²={r2:.2f}\nRMSE={rmse:.3f}", transform=ax.transAxes,
+                    ha='left', va='top', fontsize=9, bbox=dict(boxstyle='round,pad=0.25', fc='white', ec='0.8'))
+            ax.spines['top'].set_visible(False)
+            ax.spines['right'].set_visible(False)
+            ax.tick_params(direction='out', length=4, width=0.8)
+
+    if make_scatter:
+        plt.tight_layout()
+        plt.savefig(os.path.join(plot_dir, 'station_vs_rosetta_all_params.png'), dpi=400)
+        plt.close(fig)
 
     if metrics:
         md = pd.DataFrame(metrics)
