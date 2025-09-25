@@ -137,7 +137,7 @@ def run_inference_on_station_table(station_table_pqt, gshp_training_pqt, gshp_ma
         inf_onehot = inf_onehot[onehot_train.columns]
         x_inf = inf_onehot.values
         dataset = TabularDatasetVanilla(x_inf, np.zeros((x_inf.shape[0], n_outputs)))
-        model = VanillaMLP(n_features=x_inf.shape[1], n_outputs=n_outputs, num_hidden_layers=2)
+        model = VanillaMLP(n_features=x_inf.shape[1], n_outputs=n_outputs)
     else:
         for col in cat_cols:
             int_map = {int(k): int(v) for k, v in mappings[col].items()}
@@ -147,7 +147,7 @@ def run_inference_on_station_table(station_table_pqt, gshp_training_pqt, gshp_ma
         dataset = TabularDataset(x_num, x_cat, np.zeros((x_num.shape[0], n_outputs)))
         if best_type == 'MLPEmbeddings':
             model = MLPWithEmbeddings(n_num_features=len(num_cols), cat_cardinalities=cat_cardinalities,
-                                      n_outputs=n_outputs, num_hidden_layers=2)
+                                      n_outputs=n_outputs)
         else:
             model = rtdl.FTTransformer.make_baseline(n_num_features=len(num_cols), cat_cardinalities=cat_cardinalities,
                                                      d_token=256, ffn_d_hidden=32, residual_dropout=0.0, n_blocks=3,
