@@ -89,10 +89,13 @@ def _load_polaris_by_station_level(polaris_parquet):
         g[ren.get(c, c)] = g[c]
     use_cols = ['station', 'rosetta_level'] + [ren[c] for c in keep]
     g = g[use_cols]
+    if 'pol_alpha' in g.columns:
+        g['pol_alpha'] = 10 ** g['pol_alpha']  # POLARIS alpha is log10(kPa^-1) though column name lacks 'log'
     return g
 
 
-def compare_station_params_vs_rosetta(training_parquet, out_dir, make_scatter=True, polaris_parquet=None):
+def compare_station_params_vs_rosetta(training_parquet, out_dir, make_scatter=True, polaris_parquet=None,
+                                      depth_cm=None):
     os.makedirs(out_dir, exist_ok=True)
     df = pd.read_parquet(training_parquet)
 
@@ -101,6 +104,11 @@ def compare_station_params_vs_rosetta(training_parquet, out_dir, make_scatter=Tr
     # plus all rosetta columns
     rosetta_cols = [c for c in df.columns if re.search(r"_L\d+_VG_", c)]
     use = df[keep + rosetta_cols].copy()
+    if depth_cm is not None and 'station' in use.columns and 'depth' in use.columns:
+        d = use[['station', 'depth']].copy()
+        d['_diff'] = (d['depth'].astype(float) - float(depth_cm)).abs()
+        idx = d.groupby('station')['_diff'].idxmin()
+        use = use.loc[idx].copy()
 
     rows = []
     for idx, row in use.iterrows():
@@ -124,6 +132,7 @@ def compare_station_params_vs_rosetta(training_parquet, out_dir, make_scatter=Tr
 
     comp = pd.DataFrame(rows)
     metrics = []
+    ros_metrics_map = {}
     plot_dir = os.path.join(out_dir, 'plots')
     if make_scatter:
         plt.style.use('seaborn-v0_8-whitegrid')
@@ -131,6 +140,23 @@ def compare_station_params_vs_rosetta(training_parquet, out_dir, make_scatter=Tr
         fig, axes = plt.subplots(2, 2, figsize=(10, 10))
         fig.patch.set_facecolor('white')
         axes = axes.ravel()
+
+    # Require POLARIS and merge for combined overlay plotting and metrics
+    if not polaris_parquet or not os.path.exists(polaris_parquet):
+        raise FileNotFoundError('polaris_parquet is required for combined comparison')
+    pol = _load_polaris_by_station_level(polaris_parquet)
+    if pol.empty:
+        raise ValueError('POLARIS parquet loaded but empty; cannot compute combined metrics')
+    m = comp.merge(pol, on=['station', 'rosetta_level'], how='left')
+    # Reorder columns to group parameters by source
+    order = [c for c in ['station', 'depth', 'rosetta_level'] if c in m.columns]
+    for p in PARAMS:
+        for prefix in ('fit_', 'ros_', 'pol_'):
+            c = f"{prefix}{p}"
+            if c in m.columns:
+                order.append(c)
+    rest = [c for c in m.columns if c not in order]
+    m = m[order + rest]
     for i, p in enumerate(PARAMS):
         s = _prep_series(comp[f'fit_{p}'], comp[f'ros_{p}'], p)
         if s.empty:
@@ -141,15 +167,29 @@ def compare_station_params_vs_rosetta(training_parquet, out_dir, make_scatter=Tr
         rmse = _rmse(s['true'].values, s['pred'].values)
         bias = float(np.mean(s['pred'].values - s['true'].values))
         metrics.append({'param': p, 'n': len(s), 'r2': r2, 'rmse': rmse, 'bias': bias})
+        ros_metrics_map[p] = {'n': len(s), 'r2': r2, 'rmse': rmse, 'bias': bias}
 
         if make_scatter:
             ax = axes[i]
+            # Rosetta series
             vmin = float(min(s['true'].min(), s['pred'].min()))
             vmax = float(max(s['true'].max(), s['pred'].max()))
+            # Optional POLARIS series for axis limits and overlay
+            s_pol = None
+            if m is not None and f'pol_{p}' in m.columns:
+                s_pol = _prep_series(m[f'fit_{p}'], m[f'pol_{p}'], p)
+                if not s_pol.empty:
+                    vmin = min(vmin, float(min(s_pol['true'].min(), s_pol['pred'].min())))
+                    vmax = max(vmax, float(max(s_pol['true'].max(), s_pol['pred'].max())))
             rng = vmax - vmin
             pad = 0.05 * rng if rng > 0 else 0.05
             vmin_m, vmax_m = vmin - pad, vmax + pad
-            ax.scatter(s['true'], s['pred'], s=12, alpha=0.6, color='#1f77b4', edgecolors='none', rasterized=True)
+            # Plot Rosetta (orange) and optional POLARIS (green)
+            ax.scatter(s['true'], s['pred'], s=12, alpha=0.6, color='#ff7f0e', edgecolors='none', rasterized=True,
+                       label='Rosetta')
+            if s_pol is not None and not s_pol.empty:
+                ax.scatter(s_pol['true'], s_pol['pred'], s=12, alpha=0.6, color='#2ca02c', edgecolors='none',
+                           rasterized=True, label='POLARIS')
             ax.plot([vmin_m, vmax_m], [vmin_m, vmax_m], color='0.3', lw=1.2, ls='--')
             ax.set_xlim(vmin_m, vmax_m)
             ax.set_ylim(vmin_m, vmax_m)
@@ -160,6 +200,7 @@ def compare_station_params_vs_rosetta(training_parquet, out_dir, make_scatter=Tr
             ax.set_title(f"{p}")
             ax.text(0.02, 0.98, f"n={len(s)}\nR²={r2:.2f}\nRMSE={rmse:.3f}", transform=ax.transAxes,
                     ha='left', va='top', fontsize=9, bbox=dict(boxstyle='round,pad=0.25', fc='white', ec='0.8'))
+            ax.legend(frameon=True, fontsize=9)
             ax.spines['top'].set_visible(False)
             ax.spines['right'].set_visible(False)
             ax.tick_params(direction='out', length=4, width=0.8)
@@ -174,70 +215,54 @@ def compare_station_params_vs_rosetta(training_parquet, out_dir, make_scatter=Tr
         md.to_csv(os.path.join(out_dir, 'station_vs_rosetta_metrics.csv'), index=False)
         comp.to_parquet(os.path.join(out_dir, 'station_vs_rosetta_compact.parquet'), index=False)
 
-    if polaris_parquet:
-        pol = _load_polaris_by_station_level(polaris_parquet)
-        if not pol.empty:
-            m = comp.merge(pol, on=['station', 'rosetta_level'], how='left')
-            p_metrics = []
-            if make_scatter:
-                plt.style.use('seaborn-v0_8-whitegrid')
-                p_plot_dir = os.path.join(out_dir, 'plots')
-                os.makedirs(p_plot_dir, exist_ok=True)
-                p_fig, p_axes = plt.subplots(2, 2, figsize=(10, 10))
-                p_fig.patch.set_facecolor('white')
-                p_axes = p_axes.ravel()
-            for i, p in enumerate(PARAMS):
-                col = f'pol_{p}'
-                if col not in m.columns:
-                    if make_scatter:
-                        p_axes[i].axis('off')
-                    continue
-                s = _prep_series(m[f'fit_{p}'], m[col], p)
-                if s.empty:
-                    if make_scatter:
-                        p_axes[i].axis('off')
-                    continue
-                r2 = _r2(s['true'].values, s['pred'].values)
-                rmse = _rmse(s['true'].values, s['pred'].values)
-                bias = float(np.mean(s['pred'].values - s['true'].values))
-                p_metrics.append({'param': p, 'n': len(s), 'r2': r2, 'rmse': rmse, 'bias': bias})
-
-                if make_scatter:
-                    ax = p_axes[i]
-                    vmin = float(min(s['true'].min(), s['pred'].min()))
-                    vmax = float(max(s['true'].max(), s['pred'].max()))
-                    rng = vmax - vmin
-                    pad = 0.05 * rng if rng > 0 else 0.05
-                    vmin_m, vmax_m = vmin - pad, vmax + pad
-                    ax.scatter(s['true'], s['pred'], s=12, alpha=0.6, color='#2ca02c', edgecolors='none', rasterized=True)
-                    ax.plot([vmin_m, vmax_m], [vmin_m, vmax_m], color='0.3', lw=1.2, ls='--')
-                    ax.set_xlim(vmin_m, vmax_m)
-                    ax.set_ylim(vmin_m, vmax_m)
-                    ax.set_aspect('equal', adjustable='box')
-                    label = f"log10({p})" if p in LOG10_PARAMS else p
-                    ax.set_xlabel(f"Fit {label}")
-                    ax.set_ylabel(f"POLARIS {label}")
-                    ax.set_title(f"{p}")
-                    ax.text(0.02, 0.98, f"n={len(s)}\nR²={r2:.2f}\nRMSE={rmse:.3f}", transform=ax.transAxes,
-                            ha='left', va='top', fontsize=9,
-                            bbox=dict(boxstyle='round,pad=0.25', fc='white', ec='0.8'))
-                    ax.spines['top'].set_visible(False)
-                    ax.spines['right'].set_visible(False)
-                    ax.tick_params(direction='out', length=4, width=0.8)
-
-            if p_metrics:
-                pd.DataFrame(p_metrics).to_csv(os.path.join(out_dir, 'station_vs_polaris_metrics.csv'), index=False)
-            if make_scatter:
-                plt.tight_layout()
-                plt.savefig(os.path.join(out_dir, 'plots', 'station_vs_polaris_all_params.png'), dpi=400)
-                plt.close(p_fig)
+    # POLARIS metrics and combined side-by-side presentation
+    if m is not None:
+        p_metrics = []
+        pol_metrics_map = {}
+        for p in PARAMS:
+            col = f'pol_{p}'
+            if col not in m.columns:
+                continue
+            s = _prep_series(m[f'fit_{p}'], m[col], p)
+            if s.empty:
+                continue
+            r2 = _r2(s['true'].values, s['pred'].values)
+            rmse = _rmse(s['true'].values, s['pred'].values)
+            bias = float(np.mean(s['pred'].values - s['true'].values))
+            p_metrics.append({'param': p, 'n': len(s), 'r2': r2, 'rmse': rmse, 'bias': bias})
+            pol_metrics_map[p] = {'n': len(s), 'r2': r2, 'rmse': rmse, 'bias': bias}
+        if p_metrics:
+            pd.DataFrame(p_metrics).to_csv(os.path.join(out_dir, 'station_vs_polaris_metrics.csv'), index=False)
+        # Build combined side-by-side metrics table
+        rows_combined = []
+        for p in PARAMS:
+            ros = ros_metrics_map.get(p, {})
+            polm = pol_metrics_map.get(p, {})
+            if not ros and not polm:
+                continue
+            row = {'param': p,
+                   'n_ros': ros.get('n'), 'r2_ros': ros.get('r2'), 'rmse_ros': ros.get('rmse'),
+                   'bias_ros': ros.get('bias'),
+                   'n_pol': polm.get('n'), 'r2_pol': polm.get('r2'), 'rmse_pol': polm.get('rmse'),
+                   'bias_pol': polm.get('bias')}
+            rows_combined.append(row)
+        if rows_combined:
+            out = pd.DataFrame(rows_combined)
+            out.to_csv(os.path.join(out_dir, 'station_vs_references_metrics.csv'), index=False)
 
 
 if __name__ == '__main__':
     home_ = os.path.expanduser('~')
+
+    # training_pq_ = os.path.join(home_, 'data', 'IrrigationGIS', 'soils', 'swapstress', 'training',
+    #                              'stations_training_table_250m.parquet')
+
     training_pq_ = os.path.join(home_, 'data', 'IrrigationGIS', 'soils', 'swapstress', 'training',
-                                 'stations_training_table_250m.parquet')
+                                'gshp_training_data_emb_250m.parquet')
+
     out_dir_ = os.path.join(home_, 'data', 'IrrigationGIS', 'soils', 'swapstress', 'training', 'station_vs_rosetta')
     polaris_pq_ = os.path.join(home_, 'data', 'IrrigationGIS', 'soils', 'polaris', 'polaris_stations.parquet')
-    compare_station_params_vs_rosetta(training_pq_, out_dir_, make_scatter=True, polaris_parquet=polaris_pq_)
+    depth_cm_ = 10.  # set to numeric depth (cm) to filter by nearest station depth
+    compare_station_params_vs_rosetta(training_pq_, out_dir_, make_scatter=True, polaris_parquet=polaris_pq_,
+                                      depth_cm=depth_cm_)
 # ========================= EOF ====================================================================
