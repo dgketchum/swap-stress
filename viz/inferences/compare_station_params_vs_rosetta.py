@@ -90,8 +90,10 @@ def _load_polaris_by_station_level(polaris_parquet, id_col='station'):
         g[ren.get(c, c)] = g[c]
     use_cols = [id_col, 'rosetta_level'] + [ren[c] for c in keep]
     g = g[use_cols]
+    # POLARIS alpha is log10(kPa^-1) though column name lacks 'log'
     if 'pol_alpha' in g.columns:
-        g['pol_alpha'] = 10 ** g['pol_alpha']  # POLARIS alpha is log10(kPa^-1) though column name lacks 'log'
+        g['pol_alpha'] = 10 ** g['pol_alpha']
+
     return g
 
 
@@ -116,7 +118,7 @@ def compare_station_params_vs_rosetta(training_parquet, out_dir, make_scatter=Tr
         lvl = row.get('rosetta_level')
         if pd.isna(lvl):
             continue
-        rec = {id_col: row.get(id_col), 'depth': row.get('depth'), 'rosetta_level': int(lvl)}
+        rec = {id_col: idx, 'depth': row.get('depth'), 'rosetta_level': int(lvl)}
         ok = True
         for p in PARAMS:
             if p not in row.index:
@@ -196,10 +198,16 @@ def compare_station_params_vs_rosetta(training_parquet, out_dir, make_scatter=Tr
             ax.set_ylim(vmin_m, vmax_m)
             ax.set_aspect('equal', adjustable='box')
             label = f"log10({p})" if p in LOG10_PARAMS else p
-            ax.set_xlabel(f"Fit {label}")
-            ax.set_ylabel(f"Rosetta {label}")
+            ax.set_xlabel(f"GSHP {label}")
+            ax.set_ylabel(f"Distributed Estimate: {label}")
             ax.set_title(f"{p}")
-            ax.text(0.02, 0.98, f"n={len(s)}\nR²={r2:.2f}\nRMSE={rmse:.3f}", transform=ax.transAxes,
+            # Annotate with labeled Rosetta metrics and optional POLARIS metrics
+            ann_lines = [f"Rosetta: n={len(s)} R²={r2:.2f} RMSE={rmse:.3f}"]
+            if s_pol is not None and not s_pol.empty:
+                r2_pol = _r2(s_pol['true'].values, s_pol['pred'].values)
+                rmse_pol = _rmse(s_pol['true'].values, s_pol['pred'].values)
+                ann_lines.append(f"POLARIS: n={len(s_pol)} R²={r2_pol:.2f} RMSE={rmse_pol:.3f}")
+            ax.text(0.02, 0.98, "\n".join(ann_lines), transform=ax.transAxes,
                     ha='left', va='top', fontsize=9, bbox=dict(boxstyle='round,pad=0.25', fc='white', ec='0.8'))
             ax.legend(frameon=True, fontsize=9)
             ax.spines['top'].set_visible(False)
@@ -208,7 +216,7 @@ def compare_station_params_vs_rosetta(training_parquet, out_dir, make_scatter=Tr
 
     if make_scatter:
         plt.tight_layout()
-        plt.savefig(os.path.join(plot_dir, 'station_vs_rosetta_all_params.png'), dpi=400)
+        plt.savefig(os.path.join(plot_dir, 'station_vs_rosetta_all_params_metrics.png'), dpi=400)
         plt.close(fig)
 
     if metrics:
@@ -255,17 +263,21 @@ def compare_station_params_vs_rosetta(training_parquet, out_dir, make_scatter=Tr
 if __name__ == '__main__':
     home_ = os.path.expanduser('~')
 
-    training_pq_ = os.path.join(home_, 'data', 'IrrigationGIS', 'soils', 'swapstress', 'training',
-                                 'stations_training_table_250m.parquet')
-
     # training_pq_ = os.path.join(home_, 'data', 'IrrigationGIS', 'soils', 'swapstress', 'training',
-    #                             'gshp_training_data_emb_250m.parquet')
+    #                              'stations_training_table_250m.parquet')
+    # polaris_pq_ = os.path.join(home_, 'data', 'IrrigationGIS', 'soils', 'polaris', 'polaris_stations.parquet')
+    # id_col_ = 'profile_id'
+
+    training_pq_ = os.path.join(home_, 'data', 'IrrigationGIS', 'soils', 'swapstress', 'training',
+                                'gshp_training_data_emb_250m.parquet')
+    polaris_pq_ = os.path.join(home_, 'data', 'IrrigationGIS', 'soils', 'polaris', 'polaris_gshp.parquet')
+    id_col_ = 'profile_id'
 
     out_dir_ = os.path.join(home_, 'data', 'IrrigationGIS', 'soils', 'swapstress', 'training', 'station_vs_rosetta')
-    polaris_pq_ = os.path.join(home_, 'data', 'IrrigationGIS', 'soils', 'polaris', 'polaris_stations.parquet')
+
 
     depth_cm_ = 10.  # set to numeric depth (cm) to filter by nearest station depth
 
     compare_station_params_vs_rosetta(training_pq_, out_dir_, make_scatter=True, polaris_parquet=polaris_pq_,
-                                      depth_cm=depth_cm_, id_col='station')
+                                      depth_cm=depth_cm_, id_col='profile_id')
 # ========================= EOF ====================================================================
