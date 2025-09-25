@@ -209,10 +209,10 @@ class SWRC:
                 mu_theta = theta_r + (theta_s - theta_r) / (term ** m)
                 sigma = pm.HalfNormal('sigma', sigma=0.05)
                 pm.Normal('obs', mu=mu_theta, sigma=sigma, observed=theta)
-                trace = pm.sampling_jax.sample_numpyro_nuts(
-                    draws=draws, tune=tune, chains=chains,
+                trace = pm.sample(
+                    draws=draws, tune=tune, chains=chains, cores=cores,
                     target_accept=target_accept, random_seed=random_seed,
-                    progressbar=False
+                    progressbar=False, return_inferencedata=True
                 )
             self.bayes_results[depth] = trace
 
