@@ -97,6 +97,85 @@ def concat_polaris_stations(in_dirs, out_file):
     return cat
 
 
+# --------------------------- Concatenate GSHP layers ---------------------------
+
+def concat_polaris_gshp(in_dirs, out_file):
+    files = []
+    dirs = in_dirs if isinstance(in_dirs, (list, tuple)) else [in_dirs]
+    for d in dirs:
+        files.extend(glob(os.path.join(d, '**', '*.*'), recursive=True))
+    files.reverse()
+    exts = {'.parquet', '.pq', '.csv'}
+    rows = []
+
+    for fp in files:
+        ext = os.path.splitext(fp)[1].lower()
+        if ext not in exts:
+            continue
+        if ext in ('.parquet', '.pq'):
+            df = pd.read_parquet(fp)
+        else:
+            df = pd.read_csv(fp)
+
+        df = df.copy()
+        if 'profile_id' not in df.columns:
+            if 'site_id' in df.columns:
+                df = df.rename(columns={'site_id': 'profile_id'})
+            else:
+                continue  # likely error: missing profile identifier
+
+        pat = re.compile(r'^polaris_(alpha|n|theta_r|theta_s)_(\d+)_(\d+)cm$')
+        matches = []
+        for c in df.columns:
+            m = pat.match(c)
+            if m:
+                var = m.group(1)
+                d0 = int(m.group(2))
+                d1 = int(m.group(3))
+                matches.append((c, var, d0, d1))
+        if not matches:
+            continue
+
+        buckets = {}
+        name_map = {'alpha': 'alpha_mean', 'n': 'n_mean', 'theta_r': 'theta_r_mean', 'theta_s': 'theta_s_mean'}
+        for col, var, d0, d1 in matches:
+            lvl = map_polaris_depth_range_to_rosetta_level(d0, d1)
+            tmp = pd.DataFrame({
+                'profile_id': df['profile_id'],
+                'depth_min_cm': float(d0),
+                'depth_max_cm': float(d1),
+                'rosetta_level': lvl,
+                name_map[var]: df[col]
+            })
+            key = (d0, d1, lvl)
+            if key in buckets:
+                buckets[key] = buckets[key].merge(
+                    tmp,
+                    on=['profile_id', 'depth_min_cm', 'depth_max_cm', 'rosetta_level'],
+                    how='outer'
+                )
+            else:
+                buckets[key] = tmp
+
+        for _, frame in buckets.items():
+            rows.append(frame)
+
+    if not rows:
+        return pd.DataFrame(columns=['profile_id', 'depth_min_cm', 'depth_max_cm', 'rosetta_level',
+                                     'alpha_mean', 'n_mean', 'theta_r_mean', 'theta_s_mean'])
+
+    cat = pd.concat(rows, ignore_index=True)
+    cat = cat.replace([np.inf, -np.inf], np.nan)
+    cat = cat.dropna(subset=['profile_id'])
+    cat = cat.groupby(['profile_id', 'rosetta_level', 'depth_min_cm', 'depth_max_cm'], as_index=False).mean()
+
+    out_dir = os.path.dirname(out_file)
+    if out_dir and not os.path.exists(out_dir):
+        os.makedirs(out_dir)
+    cat.to_parquet(out_file)
+    return cat
+
+
 # --------------------------- Earth Engine export ---------------------------
 
 def is_authorized(project: Optional[str] = 'ee-dgketchum') -> None:
@@ -259,14 +338,16 @@ def export_polaris_by_mgrs(
 if __name__ == '__main__':
     run_mt_mesonet_export = False
     run_reesh_export = False
-    run_concat = True
+    run_gshp_export = True
+    run_concat = False
+    run_concat_gshp = True
 
     resolution_ = 250
     home_ = os.path.expanduser('~')
     root_ = os.path.join(home_, 'data', 'IrrigationGIS')
     gcs_bucket_ = 'wudr'
 
-    if run_mt_mesonet_export or run_reesh_export:
+    if run_mt_mesonet_export or run_reesh_export or run_gshp_export:
         is_authorized()
 
     if run_mt_mesonet_export:
@@ -313,10 +394,36 @@ if __name__ == '__main__':
             diagnose=False,
         )
 
+    if run_gshp_export:
+        extracts_dir_ = os.path.join(
+            root_, 'soils', 'swapstress', 'extracts', f'gshp_polaris_all_depths_{resolution_}m'
+        )
+        shapefile_ = os.path.join(
+            root_, 'soils', 'soil_potential_obs', 'gshp', 'wrc_aggregated_mgrs.shp'
+        )
+        index_ = 'profile_id'
+        output_prefix_ = f'swapstress/polaris/gshp_training_all_depths_{resolution_}m'
+        mgrs_shapefile_ = os.path.join(root_, 'boundaries', 'mgrs', 'mgrs_world_attr.shp')
+
+        export_polaris_by_mgrs(
+            shapefile_path=shapefile_,
+            mgrs_shp_path=mgrs_shapefile_,
+            bucket=gcs_bucket_,
+            file_prefix=output_prefix_,
+            resolution=resolution_,
+            index_col=index_,
+            check_dir=extracts_dir_,
+            diagnose=False,
+        )
+
     if run_concat:
         mt_dir_ = os.path.join(root_, 'soils', 'swapstress', 'extracts',
                                f'mt_mesonet_polaris_all_depths_{resolution_}m')
         reesh_dir_ = os.path.join(root_, 'soils', 'swapstress', 'extracts', f'reesh_polaris_all_depths_{resolution_}m')
         out_file_ = os.path.join(home_, 'data', 'IrrigationGIS', 'soils', 'polaris', 'polaris_stations.parquet')
         concat_polaris_stations([mt_dir_, reesh_dir_], out_file_)
+    if run_concat_gshp:
+        gshp_dir_ = os.path.join(root_, 'soils', 'swapstress', 'extracts', f'gshp_polaris_all_depths_{resolution_}m')
+        out_gshp_ = os.path.join(home_, 'data', 'IrrigationGIS', 'soils', 'polaris', 'polaris_gshp.parquet')
+        concat_polaris_gshp(gshp_dir_, out_gshp_)
 # ========================= EOF ====================================================================
