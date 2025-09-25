@@ -11,9 +11,16 @@ def _csv_files(d):
 
 
 def _fit_file(args):
-    path, out_dir, method = args
+    path, out_dir, method, overwrite = args
     name = os.path.splitext(os.path.basename(path))[0]
     out_name = f"{name}.json"
+    out_path = os.path.join(out_dir, out_name)
+
+    # Skip work if output exists and overwrite is False
+    if not overwrite and os.path.exists(out_path):
+        print(f'{out_path} already exists, skipping.')
+        return out_name
+
     df = pd.read_csv(path)
     fitter = SWRC(df=df)
     is_bayes = str(method).lower() in {'bayes', 'fit_bayes', 'bayesian'}
@@ -25,15 +32,15 @@ def _fit_file(args):
     return out_name
 
 
-def fit_standardized_dir(in_dir, out_dir, method='slsqp', workers=12):
+def fit_standardized_dir(in_dir, out_dir, method='slsqp', workers=12, overwrite=False):
     os.makedirs(out_dir, exist_ok=True)
     files = _csv_files(in_dir)
     if workers and workers > 1:
         with ProcessPoolExecutor(max_workers=workers) as ex:
-            list(ex.map(_fit_file, [(p, out_dir, method) for p in files]))
+            list(ex.map(_fit_file, [(p, out_dir, method, overwrite) for p in files]))
     else:
         for p in files:
-            _fit_file((p, out_dir, method))
+            _fit_file((p, out_dir, method, overwrite))
 
 
 if __name__ == '__main__':
@@ -42,7 +49,7 @@ if __name__ == '__main__':
 
     run_rosetta = False
     run_mt_mesonet = True
-    run_reesh = True
+    run_reesh = False
 
     method = 'bayes'
 
@@ -58,7 +65,7 @@ if __name__ == '__main__':
         in_dir_ = os.path.join(root, 'preprocessed', 'mt_mesonet')
         out_dir_ = os.path.join(out_root, 'mt_mesonet', method)
         if os.path.exists(in_dir_):
-            fit_standardized_dir(in_dir_, out_dir_, method=method)
+            fit_standardized_dir(in_dir_, out_dir_, method=method, workers=12)
 
     if run_reesh:
         in_dir_ = os.path.join(root, 'preprocessed', 'reesh')
