@@ -13,6 +13,35 @@ except Exception:
 import pytensor.tensor as pt
 
 
+class VGFitResultLight:
+    """
+    Lightweight stand-in for lmfit.ModelResult backed by saved parameters.
+    Provides a compatible `.eval(psi=...)` for plotting without refitting.
+    """
+    def __init__(self, theta_r, theta_s, alpha, n):
+        self.success = True
+        self._theta_r = float(theta_r)
+        self._theta_s = float(theta_s)
+        self._alpha = float(alpha)
+        self._n = float(n)
+        # Minimal param objects with `.value`/`.stderr` for downstream consumers
+        Param = lambda v: type("Param", (), {"value": float(v), "stderr": None})()
+        self.params = {
+            'theta_r': Param(theta_r),
+            'theta_s': Param(theta_s),
+            'alpha': Param(alpha),
+            'n': Param(n),
+        }
+
+    def eval(self, psi=None, **kwargs):
+        psi_arr = np.asarray(psi if psi is not None else kwargs.get('psi'), dtype=float)
+        n = max(self._n, 1.0000001)
+        m = 1.0 - 1.0 / n
+        psi_safe = np.maximum(psi_arr, 1e-9)
+        term = 1.0 + (self._alpha * psi_safe) ** n
+        return self._theta_r + (self._theta_s - self._theta_r) / (term ** m)
+
+
 class SWRC:
     """
     A class to encapsulate Soil Water Retention Curve (SWRC) data,
@@ -365,6 +394,7 @@ class SWRC:
         if save_path:
             plt.savefig(save_path, dpi=300, facecolor=fig.get_facecolor())
             print(f"Plot saved to {save_path}")
+            plt.close()
         if show:
             plt.show()
 
@@ -505,6 +535,76 @@ class SWRC:
 
         with open(output_path, 'w') as f:
             json.dump(summary, f, indent=4)
+
+    # -------- Loading from saved results for plotting without refitting --------
+    def load_from_results_json(self, results_path):
+        """
+        Loads a saved results JSON (from save_results or save_bayes_results) and
+        reconstructs minimal data and fit objects sufficient for plotting.
+
+        After calling, `self.data_by_depth` and `self.fit_results` are populated
+        and `self.depth_col` is set to 'depth_cm'.
+        """
+        if not os.path.exists(results_path):
+            raise FileNotFoundError(results_path)
+
+        with open(results_path, 'r') as f:
+            summary = json.load(f)
+
+        self.data_by_depth = {}
+        self.fit_results = {}
+        self.depth_col = 'depth_cm'
+        self.filepath = results_path
+
+        # Capture optional metadata if present
+        if isinstance(summary, dict) and 'metadata' in summary and isinstance(summary['metadata'], dict):
+            self.metadata = summary['metadata']
+
+        for depth_key, entry in summary.items():
+            if depth_key == 'metadata':
+                continue
+            entry = entry or {}
+            # Convert depth keys to numeric when possible
+            try:
+                depth_val = int(depth_key)
+            except Exception:
+                try:
+                    depth_val = float(depth_key)
+                except Exception:
+                    depth_val = depth_key
+
+            # Rebuild raw data DataFrame
+            data_blob = entry.get('data') or {}
+            suction = data_blob.get('suction_cm') or []
+            theta = data_blob.get('theta') or []
+            if len(suction) and len(theta) and len(suction) == len(theta):
+                df = pd.DataFrame({
+                    'suction': np.asarray(suction, dtype=float),
+                    'theta': np.asarray(theta, dtype=float),
+                    'depth_cm': depth_val,
+                })
+            else:
+                # Create an empty frame to keep structure consistent
+                df = pd.DataFrame({'suction': [], 'theta': [], 'depth_cm': []})
+
+            self.data_by_depth[depth_val] = df
+
+            # Rebuild a lightweight fit result object when parameters present
+            params = (entry.get('parameters') or {})
+            try:
+                tr = params.get('theta_r', {}).get('value')
+                ts = params.get('theta_s', {}).get('value')
+                al = params.get('alpha', {}).get('value')
+                n_ = params.get('n', {}).get('value')
+            except Exception:
+                tr = ts = al = n_ = None
+
+            if all(v is not None for v in (tr, ts, al, n_)):
+                self.fit_results[depth_val] = VGFitResultLight(tr, ts, al, n_)
+            else:
+                self.fit_results[depth_val] = None
+
+        return self
 
 
 if __name__ == '__main__':
