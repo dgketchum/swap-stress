@@ -1,9 +1,25 @@
 import os
 from tqdm import tqdm
 from glob import glob
+import numpy as np
 import pandas as pd
+from retention_curve import ROSETTA_LEVEL_DEPTHS
 
 LABELS_COLS_KEEP = ['alpha', 'data_flag', 'n', 'theta_r', 'theta_s']
+
+def _depth_to_rosetta_level(depth_cm):
+    try:
+        d = float(depth_cm)
+    except Exception:
+        return None
+    for lvl, (lo, hi) in ROSETTA_LEVEL_DEPTHS.items():
+        if lo <= d < hi:
+            return int(lvl)
+    centers = {lvl: (rng[0] + rng[1]) / 2.0 for lvl, rng in ROSETTA_LEVEL_DEPTHS.items()}
+    levels = np.array(list(centers.keys()), dtype=int)
+    vals = np.array(list(centers.values()), dtype=float)
+    idx = int(np.argmin(np.abs(vals - d)))
+    return int(levels[idx])
 
 def build_gshp_training_table(ee_features_pqt, labels_csv, out_file, index_col='profile_id', filter_good_quality=True,
                               embeddings=None, features_path=None):
@@ -20,7 +36,20 @@ def build_gshp_training_table(ee_features_pqt, labels_csv, out_file, index_col='
     if filter_good_quality and 'data_flag' in labels_df.columns:
         labels_df = labels_df[labels_df['data_flag'] == 'good quality estimate']
 
-    keep = [c for c in LABELS_COLS_KEEP if c in labels_df.columns]
+    # derive Rosetta vertical level from available depth info
+    depth_series = None
+    if 'hzn_top' in labels_df.columns and 'hzn_bot' in labels_df.columns:
+        depth_series = (labels_df['hzn_top'].astype(float) + labels_df['hzn_bot'].astype(float)) / 2.0
+    elif 'depth_cm' in labels_df.columns:
+        depth_series = labels_df['depth_cm']
+    elif 'depth' in labels_df.columns:
+        depth_series = labels_df['depth']
+    if depth_series is not None:
+        labels_df['rosetta_level'] = [ _depth_to_rosetta_level(v) for v in depth_series ]
+    else:
+        labels_df['rosetta_level'] = np.nan
+
+    keep = [c for c in LABELS_COLS_KEEP + ['rosetta_level'] if c in labels_df.columns]
     labels_df = labels_df[keep]
 
     if any([c for c in LABELS_COLS_KEEP if c in ee_df.columns]):
@@ -59,6 +88,8 @@ def build_gshp_training_table(ee_features_pqt, labels_csv, out_file, index_col='
     if missing:
         raise ValueError(f'Missing required features in GSHP table: {missing}')
     label_cols = [c for c in LABELS_COLS_KEEP if c in final_df.columns]
+    if 'rosetta_level' in final_df.columns:
+        label_cols.append('rosetta_level')
     final_df = final_df[listed + label_cols]
 
     out_dir = os.path.dirname(out_file)
