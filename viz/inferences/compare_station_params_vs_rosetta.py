@@ -59,12 +59,13 @@ def _rmse(y_true, y_pred):
     return float(np.sqrt(np.mean((y_true - y_pred) ** 2)))
 
 
-def _load_polaris_by_station_level(polaris_parquet):
+def _load_polaris_by_station_level(polaris_parquet, id_col='station'):
     df = pd.read_parquet(polaris_parquet)
-    if 'station' not in df.columns:
-        return pd.DataFrame(columns=['station', 'rosetta_level'])
+    if id_col not in df.columns:
+        return pd.DataFrame(columns=[id_col, 'rosetta_level'])  # likely error: polaris parquet missing expected id_col
     df = df.copy()
-    df['station'] = df['station'].astype(str).str.lower().str.replace('_', '-', regex=False)
+    if id_col == 'station':
+        df['station'] = df['station'].astype(str).str.lower().str.replace('_', '-', regex=False)
     if 'rosetta_level' not in df.columns:
         if {'depth_min_cm', 'depth_max_cm'}.issubset(df.columns):
             df['rosetta_level'] = [map_polaris_depth_range_to_rosetta_level(a, b) for a, b in
@@ -78,7 +79,7 @@ def _load_polaris_by_station_level(polaris_parquet):
                 df['rosetta_level'] = np.nan  # likely error: missing depth info for POLARIS
     keep = ['alpha_mean', 'n_mean', 'theta_r_mean', 'theta_s_mean']
     keep = [c for c in keep if c in df.columns]
-    g = df.groupby(['station', 'rosetta_level'])[keep].mean().reset_index()
+    g = df.groupby([id_col, 'rosetta_level'])[keep].mean().reset_index()
     ren = {
         'theta_r_mean': 'pol_theta_r',
         'theta_s_mean': 'pol_theta_s',
@@ -87,7 +88,7 @@ def _load_polaris_by_station_level(polaris_parquet):
     }
     for c in keep:
         g[ren.get(c, c)] = g[c]
-    use_cols = ['station', 'rosetta_level'] + [ren[c] for c in keep]
+    use_cols = [id_col, 'rosetta_level'] + [ren[c] for c in keep]
     g = g[use_cols]
     if 'pol_alpha' in g.columns:
         g['pol_alpha'] = 10 ** g['pol_alpha']  # POLARIS alpha is log10(kPa^-1) though column name lacks 'log'
@@ -95,19 +96,19 @@ def _load_polaris_by_station_level(polaris_parquet):
 
 
 def compare_station_params_vs_rosetta(training_parquet, out_dir, make_scatter=True, polaris_parquet=None,
-                                      depth_cm=None):
+                                      depth_cm=None, id_col='station'):
     os.makedirs(out_dir, exist_ok=True)
     df = pd.read_parquet(training_parquet)
 
-    keep = [c for c in ['station', 'depth', 'rosetta_level'] if c in df.columns]
+    keep = [c for c in [id_col, 'depth', 'rosetta_level'] if c in df.columns]
     keep += [c for c in PARAMS if c in df.columns]
     # plus all rosetta columns
     rosetta_cols = [c for c in df.columns if re.search(r"_L\d+_VG_", c)]
     use = df[keep + rosetta_cols].copy()
-    if depth_cm is not None and 'station' in use.columns and 'depth' in use.columns:
-        d = use[['station', 'depth']].copy()
+    if depth_cm is not None and id_col in use.columns and 'depth' in use.columns:
+        d = use[[id_col, 'depth']].copy()
         d['_diff'] = (d['depth'].astype(float) - float(depth_cm)).abs()
-        idx = d.groupby('station')['_diff'].idxmin()
+        idx = d.groupby(id_col)['_diff'].idxmin()
         use = use.loc[idx].copy()
 
     rows = []
@@ -115,7 +116,7 @@ def compare_station_params_vs_rosetta(training_parquet, out_dir, make_scatter=Tr
         lvl = row.get('rosetta_level')
         if pd.isna(lvl):
             continue
-        rec = {'station': row.get('station'), 'depth': row.get('depth'), 'rosetta_level': int(lvl)}
+        rec = {id_col: row.get(id_col), 'depth': row.get('depth'), 'rosetta_level': int(lvl)}
         ok = True
         for p in PARAMS:
             if p not in row.index:
@@ -144,12 +145,12 @@ def compare_station_params_vs_rosetta(training_parquet, out_dir, make_scatter=Tr
     # Require POLARIS and merge for combined overlay plotting and metrics
     if not polaris_parquet or not os.path.exists(polaris_parquet):
         raise FileNotFoundError('polaris_parquet is required for combined comparison')
-    pol = _load_polaris_by_station_level(polaris_parquet)
+    pol = _load_polaris_by_station_level(polaris_parquet, id_col=id_col)
     if pol.empty:
         raise ValueError('POLARIS parquet loaded but empty; cannot compute combined metrics')
-    m = comp.merge(pol, on=['station', 'rosetta_level'], how='left')
+    m = comp.merge(pol, on=[id_col, 'rosetta_level'], how='left')
     # Reorder columns to group parameters by source
-    order = [c for c in ['station', 'depth', 'rosetta_level'] if c in m.columns]
+    order = [c for c in [id_col, 'depth', 'rosetta_level'] if c in m.columns]
     for p in PARAMS:
         for prefix in ('fit_', 'ros_', 'pol_'):
             c = f"{prefix}{p}"
@@ -254,15 +255,17 @@ def compare_station_params_vs_rosetta(training_parquet, out_dir, make_scatter=Tr
 if __name__ == '__main__':
     home_ = os.path.expanduser('~')
 
-    # training_pq_ = os.path.join(home_, 'data', 'IrrigationGIS', 'soils', 'swapstress', 'training',
-    #                              'stations_training_table_250m.parquet')
-
     training_pq_ = os.path.join(home_, 'data', 'IrrigationGIS', 'soils', 'swapstress', 'training',
-                                'gshp_training_data_emb_250m.parquet')
+                                 'stations_training_table_250m.parquet')
+
+    # training_pq_ = os.path.join(home_, 'data', 'IrrigationGIS', 'soils', 'swapstress', 'training',
+    #                             'gshp_training_data_emb_250m.parquet')
 
     out_dir_ = os.path.join(home_, 'data', 'IrrigationGIS', 'soils', 'swapstress', 'training', 'station_vs_rosetta')
     polaris_pq_ = os.path.join(home_, 'data', 'IrrigationGIS', 'soils', 'polaris', 'polaris_stations.parquet')
+
     depth_cm_ = 10.  # set to numeric depth (cm) to filter by nearest station depth
+
     compare_station_params_vs_rosetta(training_pq_, out_dir_, make_scatter=True, polaris_parquet=polaris_pq_,
-                                      depth_cm=depth_cm_)
+                                      depth_cm=depth_cm_, id_col='station')
 # ========================= EOF ====================================================================

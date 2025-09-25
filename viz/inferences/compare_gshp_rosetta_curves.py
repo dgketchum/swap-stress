@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
-from retention_curve import ROSETTA_LEVEL_DEPTHS
+from retention_curve import ROSETTA_LEVEL_DEPTHS, POLARIS_DEPTH_RANGES
 from viz.inferences.compare_gshp_rosetta_params import find_rosetta_param_columns
 
 """Compare GSHP SWRC fits to Rosetta curves.
@@ -25,7 +25,8 @@ def vg_theta(psi_cm, theta_r, theta_s, alpha, n):
 
 
 def plot_curves(gshp_csv, rosetta_parquet, out_dir,
-                sample_uids: Optional[List[str]] = None):
+                sample_uids: Optional[List[str]] = None,
+                depth_cm: Optional[float] = None):
     os.makedirs(out_dir, exist_ok=True)
 
     # Preload Rosetta params once (keep all columns)
@@ -41,6 +42,20 @@ def plot_curves(gshp_csv, rosetta_parquet, out_dir,
         keys = np.array(list(level_centers_cm.keys()), dtype=int)
         idx = int(np.argmin(np.abs(vals - float(depth_cm))))
         return int(keys[idx])
+
+    def polaris_level_for_depth(d_cm: float) -> Optional[int]:
+        try:
+            dv = float(d_cm)
+        except Exception:
+            return None
+        for lvl, (lo, hi) in POLARIS_DEPTH_RANGES.items():
+            if lo <= dv < hi:
+                return int(lvl)
+        mids = {lvl: (rng[0] + rng[1]) / 2.0 for lvl, rng in POLARIS_DEPTH_RANGES.items()}
+        k = np.array(list(mids.keys()), dtype=int)
+        v = np.array(list(mids.values()), dtype=float)
+        j = int(np.argmin(np.abs(v - dv)))
+        return int(k[j])
 
     psi = np.logspace(-2, 6, 400)
 
@@ -91,6 +106,10 @@ def plot_curves(gshp_csv, rosetta_parquet, out_dir,
             }
 
         depths = sorted(r['depth'].unique())
+        if depth_cm is not None and len(depths):
+            dvals = np.array([float(x) for x in depths], dtype=float)
+            j = int(np.argmin(np.abs(dvals - float(depth_cm))))
+            depths = [float(dvals[j])]
         if sample_uids and pid not in set(sample_uids):
             continue
 
@@ -129,8 +148,8 @@ def plot_curves(gshp_csv, rosetta_parquet, out_dir,
         row = ros_df[ros_df['profile_id'] == pid]
         if not row.empty:
             row = row.iloc[0]
-            for color, depth_cm in zip(colors, depths):
-                level = nearest_level(depth_cm)
+            for color, depth_cm_ in zip(colors, depths):
+                level = nearest_level(depth_cm_)
 
                 def get_ros_at_level(p: str):
                     cands = ros_cand_map.get(p, [])
@@ -160,7 +179,7 @@ def plot_curves(gshp_csv, rosetta_parquet, out_dir,
                         lbl = f"Rosetta L{level}"
                     ax.plot(theta_ros, psi, '--', color=color, lw=1.6, label=lbl)
                     try:
-                        rosetta_by_depth[float(depth_cm)] = {
+                        rosetta_by_depth[float(depth_cm_)] = {
                             'theta_r': float(tr_ros), 'theta_s': float(ts_ros), 'alpha': float(a_ros),
                             'n': float(n_ros),
                             'level': level,
@@ -197,6 +216,7 @@ def plot_curves(gshp_csv, rosetta_parquet, out_dir,
         if shallow_vals:
             sh_depth = float(shallow_vals[0])
             sh_color = colors[0]
+            _pol_lvl = polaris_level_for_depth(sh_depth)  # used for consistent depth selection across sources
 
             rows = []
             row_labels = []
@@ -259,5 +279,6 @@ if __name__ == '__main__':
     rosetta_parquet_ = os.path.join(gshp_dir_, 'extracted_rosetta_points.parquet')
     plots_dir_ = os.path.join(gshp_dir_, 'swrc_curve_plots')
 
-    plot_curves(gshp_csv_, rosetta_parquet_, plots_dir_, sample_uids=None)
+    depth_cm_ = None  # set to a numeric depth (cm) to filter comparison, e.g., 15
+    plot_curves(gshp_csv_, rosetta_parquet_, plots_dir_, sample_uids=None, depth_cm=depth_cm_)
 # ========================= EOF ====================================================================

@@ -195,9 +195,12 @@ if __name__ == '__main__':
     swap_root_ = os.path.join(root_, 'swapstress')
 
     # Corrected path for fitted results from fit_swrc.py
-    fitted_dir_ = os.path.join(root_, 'soil_potential_obs', 'curve_fits', 'mt_mesonet', 'nelder')
+    fitted_dir_ = os.path.join(root_, 'soil_potential_obs', 'curve_fits', 'mt_mesonet', 'bayes')
     rosetta_pq_ = os.path.join(root_, 'rosetta', 'mt_mesonet', 'extracted_rosetta_points.parquet')
+    # inferred_pq_ = os.path.join(swap_root_, 'training', 'predictions', 'stations_predictions_nn.parquet')
+
     inferred_pq_ = os.path.join(swap_root_, 'training', 'predictions', 'stations_predictions.parquet')
+
     output_dir_ = os.path.join(swap_root_, 'figures', 'station_curve_comparisons')
 
     if not os.path.exists(output_dir_):
