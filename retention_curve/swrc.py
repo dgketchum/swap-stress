@@ -6,6 +6,10 @@ import numpy as np
 import matplotlib.pyplot as plt
 from lmfit import Model
 import pymc as pm
+try:
+    from pymc.sampling.jax import sample_numpyro_nuts
+except Exception:
+    sample_numpyro_nuts = None
 import pytensor.tensor as pt
 
 

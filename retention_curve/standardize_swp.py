@@ -244,8 +244,8 @@ if __name__ == '__main__':
     home_ = os.path.expanduser('~')
 
     run_rosetta = False
-    run_mt_mesonet = False
-    run_reesh = True
+    run_mt_mesonet = True
+    run_reesh = False
     run_ncss = False
 
     if run_rosetta:

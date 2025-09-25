@@ -58,7 +58,7 @@ if __name__ == '__main__':
         in_dir_ = os.path.join(root, 'preprocessed', 'mt_mesonet')
         out_dir_ = os.path.join(out_root, 'mt_mesonet', method)
         if os.path.exists(in_dir_):
-            fit_standardized_dir(in_dir_, out_dir_, method=method, workers=1)
+            fit_standardized_dir(in_dir_, out_dir_, method=method)
 
     if run_reesh:
         in_dir_ = os.path.join(root, 'preprocessed', 'reesh')
