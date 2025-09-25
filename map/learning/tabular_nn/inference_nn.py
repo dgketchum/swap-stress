@@ -165,7 +165,7 @@ def run_inference_on_station_table(station_table_pqt, gshp_training_pqt, gshp_ma
     out = out.reset_index(drop=True)
     out['theta_r'] = y[:, 0]
     out['theta_s'] = y[:, 1]
-    out['alpha'] = 10 ** y[:, 2]
+    out['alpha'] = y[:, 2]
     out['n'] = 10 ** y[:, 3]
     out.to_parquet(output_pqt)
     print(f'Saved NN station predictions to {output_pqt}')
