@@ -22,15 +22,10 @@ def run_inference(model_path, features_path, data_path, output_path):
 
     print(f'Loading features from {features_path}')
     training_features = None
-    if features_path.endswith('.json'):
-        with open(features_path, 'r') as f:
-            training_features = json.load(f)
-    elif features_path.endswith('.csv'):
-        feats_df = pd.read_csv(features_path)
-        col = 'features' if 'features' in feats_df.columns else feats_df.columns[0]
-        training_features = feats_df[col].dropna().astype(str).tolist()
-    else:
-        raise ValueError(f'Unsupported features file: {features_path}')
+
+    feats_df = pd.read_csv(features_path)
+    col = 'features' if 'features' in feats_df.columns else feats_df.columns[0]
+    training_features = feats_df[col].dropna().astype(str).tolist()
 
     print(f'Loading data from {data_path}')
     inference_df = pd.read_parquet(data_path)
@@ -45,10 +40,25 @@ def run_inference(model_path, features_path, data_path, output_path):
 
     inference_features = inference_df[training_features]
 
+    targets = [p for p in GSHP_PARAMS if p in inference_features.columns]
+    target_info = {t: inference_features[t].mean() for t in targets}
+    print(f'Transformed Target Means')
+    [print(f'{k}: {v:.3f}') for k, v in target_info.items()]
+
+
     print('Running inference...')
     predictions = model.predict(inference_features)
 
     pred_df = pd.DataFrame(predictions, columns=GSHP_PARAMS, index=inference_df.index)
+
+
+    target_info = {t: pred_df[t].mean() for t in GSHP_PARAMS}
+    print(f'Transformed Prediction Means')
+    [print(f'{k}: {v:.3f}') for k, v in target_info.items()]
+
+    target_info = {t: pred_df[t].std() for t in GSHP_PARAMS}
+    print(f'Transformed Prediction Std')
+    [print(f'{k}: {v:.3f}') for k, v in target_info.items()]
 
     if not os.path.exists(os.path.dirname(output_path)):
         os.makedirs(os.path.dirname(output_path))

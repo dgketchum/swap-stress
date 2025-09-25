@@ -77,7 +77,7 @@ def train_rf_gshp(f, model_dir=None, features_csv=None):
         feature_cols = pd.read_csv(features_csv)['features'].to_list()
     else:
         feature_cols = [c for c in df.columns if c not in rosetta_cols and c not in DROP_FEATURES]
-        # feature_cols = [c for c in feature_cols if len(c) == 3 and c.startswith('A')]
+        feature_cols = [c for c in feature_cols if not (len(c) == 3 and c.startswith('e'))]
 
     all_metrics = {}
     targets = [p for p in GSHP_PARAMS if p in df.columns]
@@ -86,13 +86,17 @@ def train_rf_gshp(f, model_dir=None, features_csv=None):
 
     level_id = 'GSHP_VG_combined'
     print(f"\n--- Training RF for GSHP with {len(df)} Samples ---")
-    if 'data_flag' in df.columns:
-        df = df[df['data_flag'] == 'good quality estimate']
-        df.drop(columns=['data_flag'], inplace=True)
-        if 'data_flag' in feature_cols:
-            feature_cols.remove('data_flag')
+
+    # you already dropped these!
+    # if 'data_flag' in df.columns:
+    #     df = df[df['data_flag'] == 'good quality estimate']
+    #     df.drop(columns=['data_flag'], inplace=True)
+    #     if 'data_flag' in feature_cols:
+    #         feature_cols.remove('data_flag')
 
     data = df[targets + feature_cols].copy()
+    data = data.sort_index()
+    # data = data.dropna()
     initial_len = len(data)
 
     target_info = {t: data[t].mean() for t in targets}
@@ -112,7 +116,14 @@ def train_rf_gshp(f, model_dir=None, features_csv=None):
     print(f'Transformed Target Means')
     [print(f'{k}: {v:.3f}') for k, v in target_info.items()]
 
+    target_info = {t: data[t].std() for t in targets}
+    print(f'Transformed Target Std')
+    [print(f'{k}: {v:.3f}') for k, v in target_info.items()]
+
     x_train, x_test, y_train, y_test = train_test_split(features, y, test_size=0.2, random_state=42)
+    # x_train, x_test = features[: int(len(features) * 0.7)], features[int(len(features) * 0.7):]
+    # y_train, y_test = y[: int(len(features) * 0.7)], y[int(len(features) * 0.7):]
+
     print(f'{len(x_train)} training, {len(x_test)} test samples')
 
     model = RandomForestRegressor(n_estimators=250, random_state=42, n_jobs=-1)
@@ -164,6 +175,7 @@ def train_rf_stations(table_path, model_dir=None):
     print(f'Dropped {initial_len - len(data)} NaN records for Stations combined')
 
     features = data[feature_cols]
+
     y = data[targets]
 
     # Group-aware split: ensure all depths from a station stay in the same split
