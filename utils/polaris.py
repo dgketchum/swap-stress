@@ -116,6 +116,9 @@ def concat_polaris_gshp(in_dirs, out_file):
             df = pd.read_parquet(fp)
         else:
             df = pd.read_csv(fp)
+        if df.empty:
+            os.remove(fp)
+            print(f'{os.path.basename(fp)} empty')
 
         df = df.copy()
         if 'profile_id' not in df.columns:
@@ -172,6 +175,7 @@ def concat_polaris_gshp(in_dirs, out_file):
     out_dir = os.path.dirname(out_file)
     if out_dir and not os.path.exists(out_dir):
         os.makedirs(out_dir)
+    cat['profile_id'] = cat['profile_id'].astype(str)
     cat.to_parquet(out_file)
     return cat
 
@@ -338,7 +342,7 @@ def export_polaris_by_mgrs(
 if __name__ == '__main__':
     run_mt_mesonet_export = False
     run_reesh_export = False
-    run_gshp_export = True
+    run_gshp_export = False
     run_concat = False
     run_concat_gshp = True
 
@@ -422,8 +426,10 @@ if __name__ == '__main__':
         reesh_dir_ = os.path.join(root_, 'soils', 'swapstress', 'extracts', f'reesh_polaris_all_depths_{resolution_}m')
         out_file_ = os.path.join(home_, 'data', 'IrrigationGIS', 'soils', 'polaris', 'polaris_stations.parquet')
         concat_polaris_stations([mt_dir_, reesh_dir_], out_file_)
+
     if run_concat_gshp:
         gshp_dir_ = os.path.join(root_, 'soils', 'swapstress', 'extracts', f'gshp_polaris_all_depths_{resolution_}m')
         out_gshp_ = os.path.join(home_, 'data', 'IrrigationGIS', 'soils', 'polaris', 'polaris_gshp.parquet')
         concat_polaris_gshp(gshp_dir_, out_gshp_)
+
 # ========================= EOF ====================================================================
