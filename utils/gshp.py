@@ -40,7 +40,7 @@ def process_soil_data(csv_path, shp_path, output_dir):
         print("Preparing cleaned metadata CSV (uid, classes, coords, flags)...")
         required_cols = ['profile_id', 'layer_id', 'SWCC_classes', 'latitude_decimal_degrees',
                          'longitude_decimal_degrees', 'data_flag',
-                         'thetar', 'thetas', 'alpha', 'n']
+                         'thetar', 'thetas', 'alpha', 'n', 'hzn_top', 'hzn_bot']
 
         missing = [c for c in required_cols if c not in df.columns]
         if missing:
@@ -74,6 +74,7 @@ def process_soil_data(csv_path, shp_path, output_dir):
         if 'longitude_decimal_degrees' in clean_df.columns:
             rename_map['longitude_decimal_degrees'] = 'longitude'
         clean_df.rename(columns=rename_map, inplace=True)
+        clean_df['depth_cm'] = (clean_df['hzn_top'] + clean_df['hzn_bot']) * 0.5
 
         # Enforce unique profile_id if present
         if 'profile_id' in clean_df.columns:
