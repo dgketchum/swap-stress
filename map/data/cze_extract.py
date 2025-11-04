@@ -401,7 +401,7 @@ def export_landsat_bands_over_buffers(
                 )
                 try:
                     task.start()
-                    print('Started:', desc)
+                    print('Started:', f'{gcs_prefix}/landsat/{desc}')
                     exported += 1
                 except ee.ee_exception.EEException as e:
                     print('Landsat export start failed, will retry:', desc, e)
@@ -440,22 +440,22 @@ if __name__ == '__main__':
         raise ValueError
 
     bucket = 'wudr'
-    prefix = 'cze'
+    prefix = f'cze/{domain}'
     start_year = 2000
     end_year = 2024
 
     ee_init()
 
     # ERA5-Land daily variables by month (still supports full collection input)
-    fc_buffers = build_buffered_fc_from_points(shapefile, id_col=id_col, buffer_m=250.0)
-    export_era5_land_over_buffers(
-        feature_coll=fc_buffers,
-        bucket=bucket,
-        gcs_prefix=prefix,
-        id_col=id_col,
-        start_yr=start_year,
-        end_yr=end_year,
-        debug=False)
+    # fc_buffers = build_buffered_fc_from_points(shapefile, id_col=id_col, buffer_m=250.0)
+    # export_era5_land_over_buffers(
+    #     feature_coll=fc_buffers,
+    #     bucket=bucket,
+    #     gcs_prefix=prefix,
+    #     id_col=id_col,
+    #     start_yr=start_year,
+    #     end_yr=end_year,
+    #     debug=False)
 
     # Landsat all bands per-scene by year, iterating directly over shapefile
     export_landsat_bands_over_buffers(
