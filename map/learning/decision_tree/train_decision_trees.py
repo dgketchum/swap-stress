@@ -120,9 +120,9 @@ def train_rf_gshp(f, model_dir=None, features_csv=None):
     print(f'Transformed Target Std')
     [print(f'{k}: {v:.3f}') for k, v in target_info.items()]
 
-    x_train, x_test, y_train, y_test = train_test_split(features, y, test_size=0.2, random_state=42)
-    # x_train, x_test = features[: int(len(features) * 0.7)], features[int(len(features) * 0.7):]
-    # y_train, y_test = y[: int(len(features) * 0.7)], y[int(len(features) * 0.7):]
+    # x_train, x_test, y_train, y_test = train_test_split(features, y, test_size=0.2, random_state=42)
+    x_train, x_test = features[: int(len(features) * 0.7)], features[int(len(features) * 0.7):]
+    y_train, y_test = y[: int(len(features) * 0.7)], y[int(len(features) * 0.7):]
 
     print(f'{len(x_train)} training, {len(x_test)} test samples')
 
