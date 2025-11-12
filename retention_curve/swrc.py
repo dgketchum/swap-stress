@@ -215,7 +215,8 @@ class SWRC:
         print("\nAll fits complete.")
         return self.fit_results
 
-    def fit_bayesian(self, draws=2000, tune=1000, target_accept=0.9, chains=4, cores=4, random_seed=None):
+    def fit_bayesian(self, draws=2000, tune=1000, target_accept=0.9, chains=4, cores=4, random_seed=None,
+                     theta_r_cap=None, theta_s_floor=None, theta_s_upper=0.65):
         self.bayes_results = {}
         for depth, data_df in self.data_by_depth.items():
             d = data_df.dropna(subset=['suction', 'theta'])
@@ -225,13 +226,24 @@ class SWRC:
             psi = d['suction'].astype(float).values
             theta = d['theta'].astype(float).values
             with pm.Model() as model:
-                theta_r = pm.Beta('theta_r', alpha=1.5, beta=8.0)
-                delta = pm.Beta('delta', alpha=2.0, beta=2.0)
-                theta_s = pm.Deterministic('theta_s', theta_r + delta * (1.0 - theta_r))
-                log_alpha = pm.Normal('log_alpha', mu=np.log(0.05), sigma=1.0)
+                # theta_r: truncated Normal near 0.01, optionally capped by time-series min
+                cap = None if theta_r_cap is None else max(1e-6, min(float(theta_r_cap), 0.99))
+                upper_tr = cap if cap is not None else 0.05
+                theta_r = pm.TruncatedNormal('theta_r', mu=0.01, sigma=0.05, lower=0.0, upper=upper_tr)
+
+                # theta_s: truncated Normal near 0.45 with bounds [floor, upper], ensure > theta_r
+                floor_val = 0.45 if theta_s_floor is None else float(theta_s_floor)
+                upper_val = float(theta_s_upper) if theta_s_upper is not None else 0.65
+                eps = 1e-6
+                lower_ts = pt.maximum(floor_val, theta_r + eps)
+                theta_s = pm.TruncatedNormal('theta_s', mu=0.45, sigma=0.15, lower=lower_ts, upper=upper_val)
+
+                # alpha: recentered to ~0.0098 1/cm (a ≈ 100 1/MPa)
+                log_alpha = pm.Normal('log_alpha', mu=np.log(0.0098), sigma=1.0)
                 alpha = pm.Deterministic('alpha', pt.exp(log_alpha))
-                n_minus1 = pm.HalfNormal('n_minus1', sigma=0.75)
-                n = pm.Deterministic('n', 1.0 + n_minus1)
+
+                # n: truncated Normal around 1
+                n = pm.TruncatedNormal('n', mu=1.0, sigma=1.0, lower=1.001, upper=8.0)
                 m = 1.0 - 1.0 / n
                 psi_safe = pt.maximum(psi, 1e-9)
                 term = 1.0 + (alpha * psi_safe) ** n
