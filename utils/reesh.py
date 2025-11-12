@@ -20,7 +20,11 @@ def build_reesh_shapefile(in_dir, mgrs_shp_path, out_dir):
             print(f'failed to read {fp}')
             continue
         if 'Latitude' not in d.columns or 'Longitude' not in d.columns:
-            continue
+            if 'US_Jo2' in fp:
+                d['Latitude'] = 32.58494
+                d['Longitude'] = -106.60322
+            else:
+                continue
         r0 = d.iloc[0].copy()
         r0 = r0[['Latitude', 'Longitude']].copy()
         r0['source'] = os.path.basename(fp)
@@ -50,6 +54,8 @@ def build_reesh_shapefile(in_dir, mgrs_shp_path, out_dir):
 
     joined.to_file(shp_path)
     joined.drop(columns=['geometry']).to_csv(csv_path, index=False)
+    print(f'wrote {shp_path}')
+    print(f'{joined.shape[0]} sites')
 
 
 if __name__ == '__main__':
