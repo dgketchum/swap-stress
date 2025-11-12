@@ -52,6 +52,7 @@ def find_best_model_checkpoint(checkpoint_dir, target, model_type, use_finetuned
 
 def run_inference_on_station_table(station_table_pqt, gshp_training_pqt, gshp_mappings_json,
                                    gshp_checkpoint_dir, output_pqt, features_path):
+
     station_df = pd.read_parquet(station_table_pqt)
     train_df = pd.read_parquet(gshp_training_pqt)
     with open(gshp_mappings_json, 'r') as f:

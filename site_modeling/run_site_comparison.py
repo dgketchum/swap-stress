@@ -113,18 +113,20 @@ def build_data(
         site_coords: Dict[str, Tuple[float, float]],
         overwrite: bool = False,
 ) -> Dict[str, pd.DataFrame]:
+
     data_dir = os.path.join(out_root, 'data')
     summary_dir = os.path.join(out_root, 'summary')
     _ensure_dirs(out_root, data_dir, summary_dir)
     summary_records: List[Dict] = []
     data_by_site: Dict[str, pd.DataFrame] = {}
+
     for sid in site_ids:
 
         if 'martell' in sid.lower():
             continue
 
-        if 'cdm' not in sid.lower():
-            continue
+        # if 'cdm' not in sid.lower():
+        #     continue
 
         data_fp = os.path.join(data_dir, f'{sid}.parquet')
         status = 'ok'
@@ -262,6 +264,7 @@ def run_regressions(
         n_splits: int = 5,
         site_ids: Optional[List[str]] = None,
 ) -> pd.DataFrame:
+
     fig_dir = os.path.join(out_root, 'figures')
     met_dir = os.path.join(out_root, 'metrics')
     data_dir = os.path.join(out_root, 'data')
@@ -446,7 +449,7 @@ if __name__ == '__main__':
 
     out_root_ = '/home/dgketchum/data/IrrigationGIS/soils/swapstress/reesh_site_analysis/'
     gridmet_dir_ = '/home/dgketchum/data/IrrigationGIS/soils/swapstress/vwc/gridmet/reesh'
-    overwrite_ = True
+    overwrite_ = False
 
     # Build coordinate dict (lon, lat) in EPSG:4326
     gdf_ = gpd.read_file(shapefile_).to_crs(4326)

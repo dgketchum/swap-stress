@@ -6,7 +6,6 @@ from typing import Optional
 
 from et.ptjpl import export_ptjpl_zonal_stats
 
-
 try:
     # Earth Engine is optional; defer errors to runtime
     import ee  # noqa: F401
@@ -29,15 +28,15 @@ def ee_init(project: str = 'ee-dgketchum') -> None:
 
 
 def export_landsat_for_sites(
-    shapefile: str,
-    bucket: str,
-    gcs_prefix: str,
-    id_col: str,
-    start_year: int = 2000,
-    end_year: int = date.today().year,
-    buffer_m: float = 250.0,
-    check_dir: Optional[str] = None,
-    debug: bool = False,
+        shapefile: str,
+        bucket: str,
+        gcs_prefix: str,
+        id_col: str,
+        start_year: int = 2000,
+        end_year: int = date.today().year,
+        buffer_m: float = 250.0,
+        check_dir: Optional[str] = None,
+        debug: bool = False,
 ) -> None:
     """Export per-scene Landsat (C2 SR) band time series over site buffers.
 
@@ -65,14 +64,17 @@ def export_landsat_for_sites(
 
 
 def export_openet_ptjpl_for_sites(
-    shapefile: str,
-    id_col: str,
-    start_date: str,
-    end_date: str,
-    bucket: str = 'wudr',
-    check_dir: Optional[str] = None,
-    mask_type: str = 'inv_irr',
-    **kwargs,
+        shapefile: str,
+        id_col: str,
+        start_date: str,
+        gcs_prefix: str,
+        end_date: str,
+        chunk: bool,
+        chunk_size: int,
+        bucket: str = 'wudr',
+        check_dir: Optional[str] = None,
+        mask_type: str = 'inv_irr',
+        **kwargs,
 ) -> None:
     """Export PT-JPL ET fraction zonal stats to Cloud Storage using local et.ptjpl.
 
@@ -101,8 +103,11 @@ def export_openet_ptjpl_for_sites(
         feature_id=id_col,
         start_yr=start_year,
         end_yr=end_year,
+        gcs_prefix=gcs_prefix,
         check_dir=check_dir,
         mask_type=mask_type,
+        chunk=chunk,
+        chunk_size=chunk_size,
         **kwargs,
     )
 
@@ -132,20 +137,20 @@ if __name__ == '__main__':
 
     # ReESH/Flux sites: Landsat per-scene exports
     if run_reesh_flux_landsat:
-        reesh_shp_ = os.path.join(root_, 'soils', 'soil_potential_obs', 'reesh', 'shapefile', 'reesh_sites_mgrs.shp')
+        reesh_shp_ = os.path.join(root_, 'soils', 'soil_potential_obs', 'reesh', 'shapefile', 'reesh_sites_mgrs_5070.shp')
         reesh_check_dir_ = os.path.join(root_, 'soils', 'swapstress', 'cze', 'extracts', 'flux', 'landsat')
         os.makedirs(reesh_check_dir_, exist_ok=True)
-        export_landsat_for_sites(
-            shapefile=reesh_shp_,
-            bucket=bucket_,
-            gcs_prefix='cze/flux',
-            id_col='site_id',
-            start_year=start_year_,
-            end_year=end_year_,
-            buffer_m=250.0,
-            check_dir=reesh_check_dir_,
-            debug=False,
-        )
+        # export_landsat_for_sites(
+        #     shapefile=reesh_shp_,
+        #     bucket=bucket_,
+        #     gcs_prefix='cze/flux',
+        #     id_col='site_id',
+        #     start_year=start_year_,
+        #     end_year=end_year_,
+        #     buffer_m=250.0,
+        #     check_dir=reesh_check_dir_,
+        #     debug=False,
+        # )
 
     # OpenET PT-JPL: Landsat ET fraction zonal stats for flux sites
     if run_ptjpl_flux:
@@ -153,20 +158,20 @@ if __name__ == '__main__':
         end_ = '2024-12-31'
         check_dir_ = os.path.join(root_, 'soils', 'swapstress', 'et', 'flux', 'ptjpl_tables')
         os.makedirs(check_dir_, exist_ok=True)
-        flux_shp_ = os.path.join(root_, 'soils', 'soil_potential_obs', 'reesh', 'shapefile', 'reesh_sites_mgrs_5070.shp')
+        flux_shp_ = os.path.join(root_, 'soils', 'soil_potential_obs', 'reesh', 'shapefile',
+                                 'reesh_sites_mgrs_5070.shp')
         export_openet_ptjpl_for_sites(
             shapefile=flux_shp_,
             id_col='site_id',
             start_date=start_,
             end_date=end_,
+            gcs_prefix='swap/et/ptjpl',
             bucket=bucket_,
             check_dir=check_dir_,
             mask_type='inv_irr',
             buffer=250.0,
+            chunk_size=10,
+            chunk=True,
         )
-
-    # Provide a small delay to reduce chance of EE throttling between tasks
-    if run_reesh_flux_landsat or run_mesonet_landsat or run_ptjpl_flux:
-        time.sleep(1)
 
 # ========================= EOF ====================================================================

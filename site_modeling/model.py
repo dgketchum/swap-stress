@@ -53,6 +53,31 @@ def _fit_eval_single(x: np.ndarray, y: np.ndarray, n_splits: int = 5) -> Dict[st
     }
 
 
+def _fit_eval_multi(X: np.ndarray, y: np.ndarray, n_splits: int = 5) -> Dict[str, float]:
+    """CV evaluate a multi-feature linear regression for y ~ X.
+
+    Returns dict with mean R2, RMSE across folds.
+    """
+    n = len(y)
+    r2s: List[float] = []
+    rmses: List[float] = []
+
+    for tr, te in _timeseries_cv_indices(n, n_splits=n_splits):
+        if len(tr) < 2 or len(te) < 1:
+            continue
+        m = LinearRegression()
+        m.fit(X[tr], y[tr])
+        yp = m.predict(X[te])
+        r2s.append(r2_score(y[te], yp))
+        rmses.append(float(np.sqrt(mean_squared_error(y[te], yp))))
+
+    return {
+        'r2_mean': float(np.nanmean(r2s)) if r2s else np.nan,
+        'rmse_mean': float(np.nanmean(rmses)) if rmses else np.nan,
+        'folds': int(len(r2s)),
+    }
+
+
 def evaluate_theta_vs_psi(
     df: pd.DataFrame,
     targets: Iterable[str] = ('GPP', 'ET'),
@@ -84,6 +109,53 @@ def evaluate_theta_vs_psi(
     return out
 
 
+def evaluate_multivariate(
+    df: pd.DataFrame,
+    target: str,
+    predictors: Iterable[str],
+    mask: Optional[pd.Series] = None,
+    n_splits: int = 5,
+) -> Dict[str, float]:
+    """Evaluate y ~ predictors (linear) with time-series CV.
+
+    Drops rows with NaNs in target/predictors before evaluation.
+    """
+    data = df.copy()
+    if mask is not None:
+        data = data.loc[mask]
+    cols = [c for c in predictors] + [target]
+    d = data[cols].dropna()
+    if d.empty:
+        return {'r2_mean': np.nan, 'rmse_mean': np.nan, 'folds': 0}
+    X = d[list(predictors)].to_numpy(dtype=float)
+    y = d[target].to_numpy(dtype=float)
+    return _fit_eval_multi(X, y, n_splits=n_splits)
+
+
+def evaluate_lagged(
+    df: pd.DataFrame,
+    target: str,
+    base_predictor: str,
+    covariates: Iterable[str],
+    lags: Iterable[int] = (0, 3, 7, 14),
+    mask: Optional[pd.Series] = None,
+    n_splits: int = 5,
+) -> Dict[int, Dict[str, float]]:
+    """Evaluate y ~ shifted(base_predictor, lag) + covariates for each lag.
+
+    Returns dict keyed by lag with CV metrics.
+    """
+    results: Dict[int, Dict[str, float]] = {}
+    for lag in lags:
+        tmp = df.copy()
+        tmp[f'{base_predictor}__lag{lag}'] = tmp[base_predictor].shift(lag)
+        preds = [f'{base_predictor}__lag{lag}'] + list(covariates)
+        results[int(lag)] = evaluate_multivariate(
+            tmp, target=target, predictors=preds, mask=mask, n_splits=n_splits
+        )
+    return results
+
+
 def save_metrics(metrics: Dict, out_file: str) -> None:
     os.makedirs(os.path.dirname(out_file), exist_ok=True)
     with open(out_file, 'w') as f:
@@ -102,6 +174,16 @@ def correlation_matrix(
         d = df[cols].select_dtypes(include=[np.number])
     return d.corr(method=method)
 
+
+def calculate_ccf(df: pd.DataFrame, target: str, lags: Iterable[int]) -> pd.DataFrame:
+    records = []
+    for lag in lags:
+        shifted = df[target].shift(lag)
+        corr_vwc = shifted.corr(df['theta'])
+        corr_psi = shifted.corr(df['psi_cm'])
+        records.append({'lag': int(lag), 'corr_vwc': corr_vwc, 'corr_psi': corr_psi})
+    out = pd.DataFrame(records, columns=['lag', 'corr_vwc', 'corr_psi'])
+    return out
 
 if __name__ == '__main__':
     """Example modeling driver: load prepared datasets and evaluate linear models.

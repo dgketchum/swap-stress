@@ -162,13 +162,13 @@ def export_et_fraction(shapefile, bucket, feature_id='FID', select=None, start_y
                 exported += 1
 
 
-def _export_chunked_tables(bands, selectors, polygon, fid, desc, bucket, part, feature_id, scale=30, chunk_size=50):
+def _export_chunked_tables(bands, selectors, polygon, fid, desc, bucket, part, feature_id, fn_prefix, scale=30, chunk_size=50):
     fc = ee.FeatureCollection(ee.Feature(polygon, {feature_id: fid}))
     chunk_band_names = selectors[1:]
     img_chunk = bands.select(chunk_band_names)
     data_chunk = img_chunk.reduceRegions(collection=fc, reducer=ee.Reducer.mean(), scale=scale)
     chunk_desc = f"{desc}_chunk_{part:03d}"
-    fn_prefix = os.path.join('ptjpl_tables', 'chunked', str(fid), chunk_desc)
+    fn_prefix = os.path.join(fn_prefix, 'chunked', chunk_desc)
     task = ee.batch.Export.table.toCloudStorage(
         data_chunk,
         description=chunk_desc,
@@ -188,7 +188,7 @@ def _export_chunked_tables(bands, selectors, polygon, fid, desc, bucket, part, f
             raise
 
 
-def export_ptjpl_zonal_stats(shapefile, bucket, feature_id='FID', polygon_asset=None,
+def export_ptjpl_zonal_stats(shapefile, bucket, gcs_prefix, feature_id='FID', polygon_asset=None,
                              select=None, start_yr=2000, end_yr=2024, chunk=False, chunk_size=50,
                              mask_type='irr', check_dir=None, state_col='state', buffer=False):
     fc = None
@@ -196,6 +196,7 @@ def export_ptjpl_zonal_stats(shapefile, bucket, feature_id='FID', polygon_asset=
     df = df.set_index(feature_id, drop=False)
 
     if buffer:
+        assert df.crs != 'EPSG:4326' # running the buffer on geographic will blow up the area
         df.geometry = df.geometry.buffer(buffer)
 
     original_crs = df.crs
@@ -232,12 +233,12 @@ def export_ptjpl_zonal_stats(shapefile, bucket, feature_id='FID', polygon_asset=
 
             # Use fid-specific subdirectory similar to export_et_fraction
             desc = f'ptjpl_etf_{fid}_{mask_type}_{year}'
-            fn_prefix = os.path.join('ptjpl_tables', mask_type, str(fid), desc)
+            fn_prefix = os.path.join(gcs_prefix, mask_type, desc)
 
             if check_dir:
-                f = os.path.join(check_dir, mask_type, str(fid), f'{desc}.csv')
+                f = os.path.join(check_dir, f'{desc}.csv')
                 if os.path.exists(f):
-                    # print(f'{f} exists, skipping')
+                    print(f'{f} exists, skipping')
                     continue
 
             if mask_type in ['irr', 'inv_irr']:
@@ -304,7 +305,7 @@ def export_ptjpl_zonal_stats(shapefile, bucket, feature_id='FID', polygon_asset=
                 if chunk and band_ct == chunk_size:
                     chunk_ct += 1
                     _export_chunked_tables(bands, selectors, polygon, fid, desc, bucket, chunk_ct,
-                                           feature_id, scale=30, chunk_size=chunk_size)
+                                           feature_id, gcs_prefix, scale=30, chunk_size=chunk_size)
                     band_ct = 0
                     bands = None
                     first = True
@@ -316,7 +317,7 @@ def export_ptjpl_zonal_stats(shapefile, bucket, feature_id='FID', polygon_asset=
             if chunk:
                 chunk_ct += 1
                 _export_chunked_tables(bands, selectors, polygon, fid, desc, bucket, chunk_ct,
-                                       feature_id, scale=30, chunk_size=chunk_size)
+                                       feature_id, gcs_prefix, scale=30, chunk_size=chunk_size)
                 continue
 
             data = bands.reduceRegions(collection=fc, reducer=ee.Reducer.mean(),
