@@ -7,6 +7,7 @@ import pandas as pd
 import numpy as np
 import xarray as xr
 from tqdm import tqdm
+from map.data.thredds import GridMet
 
 
 def _list_gridmet_files(base_dir, var):
@@ -98,8 +99,8 @@ def _worker_point(args):
     return out_fp
 
 
-def extract_gridmet_timeseries(points_shp, base_dir, variables, out_dir, index_col,
-                               num_workers=4, overwrite=False, debug=False):
+def extract_gridmet_timeseries_ee(points_shp, base_dir, variables, out_dir, index_col,
+                                  num_workers=4, overwrite=False, debug=False):
     print("Reading points and reprojecting to EPSG:4326...")
     gdf = gpd.read_file(points_shp)
     gdf = gdf.to_crs(4326)
@@ -134,6 +135,18 @@ def extract_gridmet_timeseries(points_shp, base_dir, variables, out_dir, index_c
     print("Done.")
 
 
+def get_gridmet_point_timeseries_thredds(lon: float, lat: float, start_date: str, end_date: str,
+                                         variables=('pet', 'pr')) -> pd.DataFrame:
+    frames = []
+    for var in variables:
+        g = GridMet(variable=var, start=start_date, end=end_date, lat=lat, lon=lon)
+        dfv = g.get_point_timeseries()
+        frames.append(dfv)
+    df = pd.concat(frames, axis=1)
+    df.index.name = 'date'
+    return df
+
+
 if __name__ == '__main__':
     run_mt_mesonet_workflow = True
     run_rosetta_workflow = True
@@ -149,45 +162,45 @@ if __name__ == '__main__':
 
     if run_mt_mesonet_workflow:
         points_shp_ = os.path.join(root_, 'soils', 'soil_potential_obs', 'mt_mesonet', 'station_metadata_mgrs.shp')
-        extract_gridmet_timeseries(points_shp=points_shp_,
-                                   base_dir=base_dir_,
-                                   variables=gridmet_vars_,
-                                   out_dir=os.path.join(out_dir_, 'mt_mesonet'),
-                                   index_col='station',
-                                   num_workers=36,
-                                   overwrite=False,
-                                   debug=False)
+        extract_gridmet_timeseries_ee(points_shp=points_shp_,
+                                      base_dir=base_dir_,
+                                      variables=gridmet_vars_,
+                                      out_dir=os.path.join(out_dir_, 'mt_mesonet'),
+                                      index_col='station',
+                                      num_workers=36,
+                                      overwrite=False,
+                                      debug=False)
 
     if run_gshp_workflow:
         points_shp_ = os.path.join(root_, 'soils', 'soil_potential_obs', 'gshp', 'wrc_aggregated_mgrs.shp')
-        extract_gridmet_timeseries(points_shp=points_shp_,
-                                   base_dir=base_dir_,
-                                   variables=gridmet_vars_,
-                                   out_dir=os.path.join(out_dir_, 'gshp'),
-                                   index_col='profile_id',
-                                   num_workers=36,
-                                   overwrite=False,
-                                   debug=False)
+        extract_gridmet_timeseries_ee(points_shp=points_shp_,
+                                      base_dir=base_dir_,
+                                      variables=gridmet_vars_,
+                                      out_dir=os.path.join(out_dir_, 'gshp'),
+                                      index_col='profile_id',
+                                      num_workers=36,
+                                      overwrite=False,
+                                      debug=False)
 
     if run_reesh_workflow:
         points_shp_ = os.path.join(root_, 'soils', 'soil_potential_obs', 'reesh', 'shapefile', 'reesh_sites_mgrs.shp')
-        extract_gridmet_timeseries(points_shp=points_shp_,
-                                   base_dir=base_dir_,
-                                   variables=gridmet_vars_,
-                                   out_dir=os.path.join(out_dir_, 'reesh'),
-                                   index_col='site_id',
-                                   num_workers=36,
-                                   overwrite=False,
-                                   debug=False)
+        extract_gridmet_timeseries_ee(points_shp=points_shp_,
+                                      base_dir=base_dir_,
+                                      variables=gridmet_vars_,
+                                      out_dir=os.path.join(out_dir_, 'reesh'),
+                                      index_col='site_id',
+                                      num_workers=36,
+                                      overwrite=False,
+                                      debug=False)
 
     if run_rosetta_workflow:
         points_shp_ = os.path.join(root_, 'soils', 'gis', 'pretraining-roi-10000_mgrs.shp')
-        extract_gridmet_timeseries(points_shp=points_shp_,
-                                   base_dir=base_dir_,
-                                   variables=gridmet_vars_,
-                                   out_dir=os.path.join(out_dir_, 'rosetta'),
-                                   index_col='site_id',
-                                   num_workers=36,
-                                   overwrite=False,
-                                   debug=False)
+        extract_gridmet_timeseries_ee(points_shp=points_shp_,
+                                      base_dir=base_dir_,
+                                      variables=gridmet_vars_,
+                                      out_dir=os.path.join(out_dir_, 'rosetta'),
+                                      index_col='site_id',
+                                      num_workers=36,
+                                      overwrite=False,
+                                      debug=False)
 # ========================= EOF ====================================================================
