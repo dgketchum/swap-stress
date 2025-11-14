@@ -1,16 +1,162 @@
 import os
 import time
+import calendar
 from typing import List, Dict, Any, Tuple
 
 import ee
 import geopandas as gpd
 import multiprocessing as mp
+from multiprocessing.pool import ThreadPool
+
+from ee.ee_exception import EEException
 
 try:
     # Optional, only needed for ERA5 ETo
     from openet.refetgee import Daily as RefETDaily
 except Exception:
     RefETDaily = None
+
+
+def _execute_with_backoff(func, *, tries: int = 6, delay: float = 1.0,
+                          backoff: float = 2.0, exceptions: Tuple[type[BaseException], ...] = (Exception,),
+                          fallback=None):
+    """Execute callable with exponential backoff; return fallback on exhaustion."""
+    wait = delay
+    for attempt in range(int(tries)):
+        try:
+            return func()
+        except exceptions as exc:  # pragma: no cover - utility guard
+            if attempt == int(tries) - 1:
+                if fallback is not None:
+                    return fallback
+                raise
+            time.sleep(wait)
+            wait = min(wait * backoff, 60.0)
+
+
+_BIG_DATA_ERROR_SUBSTRINGS = (
+    'response too large',
+    'payload is too large',
+    'more than 50000 elements',
+    'exceeds the allowed amount',
+)
+
+
+def _fetch_features_from_expression(expression: ee.FeatureCollection,
+                                     use_big_data_api: bool = False,
+                                     page_size: int = 5000) -> List[Dict[str, Any]]:
+    """Fetch features either via getInfo or the Big Data API with pagination."""
+
+    def _getinfo() -> List[Dict[str, Any]]:
+        data = expression.getInfo()
+        if isinstance(data, dict):
+            return data.get('features', []) or []
+        return []
+
+    def _compute_features() -> List[Dict[str, Any]]:
+        params: Dict[str, Any] = {'expression': expression, 'pageSize': page_size}
+        features: List[Dict[str, Any]] = []
+        next_token: str | None = None
+        while True:
+            if next_token:
+                params['pageToken'] = next_token
+            resp = ee.data.computeFeatures(params)
+            features.extend(resp.get('features', []) or [])
+            next_token = resp.get('next_page_token')
+            if not next_token:
+                break
+        return features
+
+    if use_big_data_api:
+        return _compute_features()
+
+    try:
+        return _getinfo()
+    except EEException as exc:
+        message = str(exc).lower()
+        if any(token in message for token in _BIG_DATA_ERROR_SUBSTRINGS):
+            return _compute_features()
+        raise
+
+
+def _build_monthly_era5_image(year: int, month: int) -> Tuple[ee.Image | None, List[str]]:
+    """Assemble a multiband ERA5-Land image for the given month."""
+    month_start = ee.Date.fromYMD(year, month, 1)
+    days_in_month = calendar.monthrange(year, month)[1]
+    selectors: List[str] = []
+    monthly_images: List[ee.Image] = []
+    for day in range(1, days_in_month + 1):
+        day_start = ee.Date.fromYMD(year, month, day)
+        day_end = day_start.advance(1, 'day')
+        day_str = f'{year}{str(month).zfill(2)}{str(day).zfill(2)}'
+        coll_day = ee.ImageCollection('ECMWF/ERA5_LAND/HOURLY').filterDate(day_start, day_end)
+
+        swe = coll_day.select('snow_depth_water_equivalent').mean().multiply(1000).rename(f'swe_{day_str}')
+        swe = swe.set('system:time_start', day_start.millis())
+
+        if RefETDaily is not None:
+            eto = RefETDaily.era5_land(coll_day).etr.rename(f'eto_{day_str}')
+            eto = eto.set('system:time_start', day_start.millis())
+        else:
+            eto = ee.Image(0).rename(f'eto_{day_str}')
+
+        t_hourly = coll_day.select('temperature_2m')
+        tmean = t_hourly.mean().subtract(273.15).rename(f'tmean_{day_str}')
+        tmin = t_hourly.min().subtract(273.15).rename(f'tmin_{day_str}')
+        tmax = t_hourly.max().subtract(273.15).rename(f'tmax_{day_str}')
+        tmean = tmean.set('system:time_start', day_start.millis())
+        tmin = tmin.set('system:time_start', day_start.millis())
+        tmax = tmax.set('system:time_start', day_start.millis())
+
+        precip = coll_day.select('total_precipitation_hourly').sum().multiply(1000).rename(f'precip_{day_str}')
+        precip = precip.set('system:time_start', day_start.millis())
+
+        srad = coll_day.select('surface_solar_radiation_downwards_hourly').mean().rename(f'srad_{day_str}')
+        srad = srad.set('system:time_start', day_start.millis())
+
+        for nm in [f'swe_{day_str}', f'eto_{day_str}', f'tmean_{day_str}', f'tmin_{day_str}',
+                   f'tmax_{day_str}', f'precip_{day_str}', f'srad_{day_str}']:
+            selectors.append(nm)
+
+        monthly_images.extend([swe, eto, tmean, tmin, tmax, precip, srad])
+
+    if not monthly_images:
+        return None, selectors
+
+    combined = monthly_images[0]
+    for img in monthly_images[1:]:
+        combined = combined.addBands(img)
+    return combined, selectors
+
+
+def _era5_chunk_worker(args: Tuple[ee.Image, ee.List, int, int, float, str, bool]) -> List[Dict[str, Any]]:
+    """Reduce ERA5 monthly image over a slice of features."""
+    monthly_image, feats_list, start_idx, end_idx, scale, id_col, use_big_data_api = args
+    sub_fc = ee.FeatureCollection(feats_list.slice(start_idx, end_idx))
+    expression = monthly_image.reduceRegions(
+        collection=sub_fc,
+        reducer=ee.Reducer.mean(),
+        scale=scale,
+    )
+
+    def _fetch_rows() -> List[Dict[str, Any]]:
+        features = _fetch_features_from_expression(expression, use_big_data_api=use_big_data_api)
+        rows_local: List[Dict[str, Any]] = []
+        for feat in features:
+            props = feat.get('properties', {}) or {}
+            if id_col not in props:
+                props[id_col] = None
+            rows_local.append(props)
+        return rows_local
+
+    return _execute_with_backoff(
+        _fetch_rows,
+        tries=6,
+        delay=1.0,
+        backoff=2.0,
+        exceptions=(Exception,),
+        fallback=[],
+    )
 
 
 def ee_init(project: str = 'ee-dgketchum', high_volume: bool = False) -> None:
@@ -78,6 +224,8 @@ def export_era5_land_over_buffers(
         project: str = 'ee-dgketchum',
         high_volume: bool = True,
         chunk_size: int = 200,
+        workers: int = 8,
+        use_big_data_api: bool = True,
 ) -> None:
     """Write daily ERA5-Land variables reduced over buffered features by month.
 
@@ -85,161 +233,91 @@ def export_era5_land_over_buffers(
     `era5_vars_YYYY_MM.csv` containing columns: `{id_col}`, daily SWE, ETo,
     Tmean/Tmin/Tmax (C), precipitation (mm), and shortwave radiation (W/m^2).
     """
-    era5_land_hourly = ee.ImageCollection('ECMWF/ERA5_LAND/HOURLY')
     scale_era5 = 11132  # ~10 km at equator; consistent with reference workflows
 
-    # Build list of (year, month)
+    if direct_out_dir is None:
+        raise ValueError("Provide 'direct_out_dir' for ERA5 direct export.")
+
+    try:
+        import pandas as _pd
+    except Exception as e:
+        raise RuntimeError('pandas is required for direct ERA5 export') from e
+
+    # Ensure high-volume endpoint init for direct requests
+    try:
+        if high_volume:
+            ee.Initialize(project=project, opt_url='https://earthengine-highvolume.googleapis.com')
+        else:
+            ee.Initialize(project=project)
+    except Exception:
+        pass
+
+    try:
+        n_feat = int(feature_coll.size().getInfo())
+    except Exception as e:
+        raise RuntimeError(f'Failed to get feature count: {e}')
+
+    if n_feat == 0:
+        print('No features available for ERA5 export')
+        return
+
+    feats_list = feature_coll.toList(n_feat)
     dtimes = [(y, m) for y in range(start_yr, end_yr + 1) for m in range(1, 13)]
 
-    for year, month in dtimes:
-        try:
-            first_band_in_month = True
-            monthly_bands_image = None
-            selectors = [id_col]
+    pool: ThreadPool | None = ThreadPool(processes=max(1, int(workers))) if workers and workers > 1 else None
 
+    try:
+        for year, month in dtimes:
             desc = f'era5_vars_{year}_{str(month).zfill(2)}'
-
-            month_start = ee.Date.fromYMD(year, month, 1)
-            month_end = month_start.advance(1, 'month')
-
-            # Build list of day start dates for month
-            try:
-                days_in_month_list = []
-                d = month_start
-                while d.millis().lt(month_end.millis()).getInfo():
-                    days_in_month_list.append(d)
-                    d = d.advance(1, 'day')
-            except Exception as e:
-                print(f'ERA5 {year}-{str(month).zfill(2)} failed building date list: {e}')
-                continue
-
-            if not days_in_month_list:
-                continue
-
-            for day_date in days_in_month_list:
-                try:
-                    day_str = day_date.format('YYYYMMdd').getInfo()
-                    day_start = day_date
-                    day_end = day_date.advance(1, 'day')
-
-                    coll_day = era5_land_hourly.filterDate(day_start, day_end)
-
-                    # SWE mm
-                    swe = coll_day.select('snow_depth_water_equivalent').mean().multiply(1000).rename(f'swe_{day_str}')
-                    swe = swe.set('system:time_start', day_start.millis())
-                    # ETo (alfalfa) via RefET; optional if refetgee missing
-                    if RefETDaily is not None:
-                        eto = RefETDaily.era5_land(coll_day).etr.rename(f'eto_{day_str}')
-                        eto = eto.set('system:time_start', day_start.millis())
-                    else:
-                        eto = ee.Image(0).rename(f'eto_{day_str}')
-                    # Temps C
-                    t_hourly = coll_day.select('temperature_2m')
-                    tmean = t_hourly.mean().subtract(273.15).rename(f'tmean_{day_str}')
-                    tmin = t_hourly.min().subtract(273.15).rename(f'tmin_{day_str}')
-                    tmax = t_hourly.max().subtract(273.15).rename(f'tmax_{day_str}')
-                    tmean = tmean.set('system:time_start', day_start.millis())
-                    tmin = tmin.set('system:time_start', day_start.millis())
-                    tmax = tmax.set('system:time_start', day_start.millis())
-                    # Precip mm
-                    precip = coll_day.select('total_precipitation_hourly').sum().multiply(1000).rename(
-                        f'precip_{day_str}')
-                    precip = precip.set('system:time_start', day_start.millis())
-                    # Shortwave W/m^2
-                    srad = coll_day.select('surface_solar_radiation_downwards_hourly').mean().rename(f'srad_{day_str}')
-                    srad = srad.set('system:time_start', day_start.millis())
-
-                    for nm in [
-                        f'swe_{day_str}', f'eto_{day_str}', f'tmean_{day_str}',
-                        f'tmin_{day_str}', f'tmax_{day_str}', f'precip_{day_str}', f'srad_{day_str}'
-                    ]:
-                        selectors.append(nm)
-
-                    daily_bands = [swe, eto, tmean, tmin, tmax, precip, srad]
-                    if first_band_in_month:
-                        monthly_bands_image = ee.Image(daily_bands)
-                        first_band_in_month = False
-                    else:
-                        monthly_bands_image = monthly_bands_image.addBands(ee.Image(daily_bands))
-                except Exception as e:
-                    print(f'ERA5 {year}-{str(month).zfill(2)} day build failed: {e}')
-                    continue
-
-            if monthly_bands_image is None:
-                continue
-
-            # Direct mode only: request results via getInfo() and save locally per month.
-            if direct_out_dir is None:
-                raise ValueError("Provide 'direct_out_dir' for ERA5 direct export.")
-
             out_fp = os.path.join(direct_out_dir, f'{desc}.csv')
             if os.path.exists(out_fp):
-                print('Exists, skipping:', out_fp)
+                if debug:
+                    print('Exists, skipping:', out_fp)
                 continue
 
             try:
-                import pandas as _pd
+                monthly_bands_image, selectors = _build_monthly_era5_image(year, month)
             except Exception as e:
-                raise RuntimeError('pandas is required for direct ERA5 export') from e
-
-            # Ensure high-volume endpoint init for direct requests
-            try:
-                if high_volume:
-                    ee.Initialize(project=project, opt_url='https://earthengine-highvolume.googleapis.com')
-                else:
-                    ee.Initialize(project=project)
-            except Exception:
-                pass
-
-            # Chunk the feature collection to keep responses under limits
-            try:
-                n_feat = int(feature_coll.size().getInfo())
-            except Exception as e:
-                print(f'ERA5 {desc}: failed to get feature count: {e}')
+                print(f'ERA5 {year}-{str(month).zfill(2)} build failed: {e}')
                 continue
 
-            rows: list[Dict[str, Any]] = []
-            feats_list = feature_coll.toList(n_feat)
-            for start in range(0, n_feat, max(1, int(chunk_size))):
-                end = min(start + int(chunk_size), n_feat)
-                sub_fc = ee.FeatureCollection(feats_list.slice(start, end))
+            if monthly_bands_image is None:
+                print(f'ERA5 {year}-{str(month).zfill(2)} produced no bands, skipping')
+                continue
 
-                # Backoff for each chunk in case of 429s
-                delay = 1.0
-                for attempt in range(6):
-                    try:
-                        sub = monthly_bands_image.reduceRegions(
-                            collection=sub_fc,
-                            reducer=ee.Reducer.mean(),
-                            scale=scale_era5,
-                        ).getInfo()
-                        features = sub.get('features', []) if isinstance(sub, dict) else []
-                        for f in features:
-                            props = f.get('properties', {})
-                            if not props:
-                                continue
-                            if id_col not in props:
-                                props[id_col] = None
-                            rows.append(props)
-                        break
-                    except Exception:
-                        time.sleep(delay)
-                        delay = min(delay * 2, 30)
-                        continue
+            chunk_args = [
+                (monthly_bands_image, feats_list, start, min(start + max(1, int(chunk_size)), n_feat),
+                 scale_era5, id_col, use_big_data_api)
+                for start in range(0, n_feat, max(1, int(chunk_size)))
+            ]
+
+            if not chunk_args:
+                continue
+
+            if pool:
+                chunk_results = pool.map(_era5_chunk_worker, chunk_args)
+            else:
+                chunk_results = [_era5_chunk_worker(arg) for arg in chunk_args]
+
+            rows: List[Dict[str, Any]] = []
+            for chunk in chunk_results:
+                if chunk:
+                    rows.extend(chunk)
 
             if not rows:
                 print('No rows for', desc)
                 continue
 
-            # Order columns: id first, then bands in the original selectors order
-            cols = [id_col] + [c for c in selectors if c != id_col]
+            cols = [id_col] + selectors
             df = _pd.DataFrame(rows)
             df = df.reindex(columns=cols)
             os.makedirs(os.path.dirname(out_fp), exist_ok=True)
             df.to_csv(out_fp, index=False)
             print('Saved:', out_fp)
-        except Exception as e:
-            print(f'ERA5 {year}-{str(month).zfill(2)} failed: {e}')
+    finally:
+        if pool:
+            pool.close()
+            pool.join()
 
 
 def landsat_c2_sr(input_img: ee.Image) -> ee.Image:
@@ -305,50 +383,47 @@ def _ensure_ee_in_worker(high_volume: bool, project: str):
             ee.Initialize(project=project)
 
 
-def _landsat_scene_worker(args: Tuple[str, Dict[str, Any], int, List[str], bool, str, float]) -> Dict[str, float]:
+def _landsat_scene_worker(args: Tuple[str, str, Dict[str, Any], int, List[str], bool, str, float]) -> Tuple[str, Dict[str, float]]:
     """Worker to compute per-scene band means for a single image ID.
 
-    Args tuple: (img_id, region_geojson, year, select_bands, high_volume, project, scale)
-    Returns: mapping from '{scene}_{band}' -> value
+    Args tuple: (job_id, img_id, region_geojson, year, select_bands, high_volume, project, scale)
+    Returns: (job_id, mapping from '{scene}_{band}' -> value)
     """
-    img_id, region_geojson, year, select_bands, high_volume, project, scale = args
+    job_id, img_id, region_geojson, year, select_bands, high_volume, project, scale = args
     _ensure_ee_in_worker(high_volume=high_volume, project=project)
 
     # Rebuild the filtered collection cheaply and select the one image
     region = ee.Geometry(region_geojson)
     coll = landsat_masked(year, region).select(select_bands)
 
-    # Retry loop with exponential backoff for transient errors
-    delay = 1.0
-    for attempt in range(8):
-        try:
-            img = coll.filter(ee.Filter.eq('system:index', img_id)).first()
-            sel = img.select(select_bands)
-            # Compute per-band means over the region
-            vals = sel.reduceRegion(
-                reducer=ee.Reducer.mean(),
-                geometry=region,
-                scale=scale,
-                maxPixels=1e13,
-                bestEffort=True
-            ).getInfo()
-            if vals is None:
-                vals = {}
-            # Format keys like export path: '{scene}_{band}'
-            parts = img_id.split('_')
-            scene_name = '_'.join(parts[-3:])
-            out = {}
-            for b in select_bands:
-                v = vals.get(b)
-                if v is not None:
-                    out[f'{scene_name}_{b}'] = float(v)
-            return out
-        except Exception:
-            time.sleep(delay)
-            delay = min(delay * 2, 30)
-            continue
-    # If all retries failed, return empty dict so caller can proceed
-    return {}
+    def _compute_scene_values() -> Dict[str, float]:
+        img = coll.filter(ee.Filter.eq('system:index', img_id)).first()
+        sel = img.select(select_bands)
+        vals = sel.reduceRegion(
+            reducer=ee.Reducer.mean(),
+            geometry=region,
+            scale=scale,
+            maxPixels=1e13,
+            bestEffort=True
+        ).getInfo() or {}
+        parts = img_id.split('_')
+        scene_name = '_'.join(parts[-3:])
+        out: Dict[str, float] = {}
+        for b in select_bands:
+            v = vals.get(b)
+            if v is not None:
+                out[f'{scene_name}_{b}'] = float(v)
+        return out
+
+    result = _execute_with_backoff(
+        _compute_scene_values,
+        tries=8,
+        delay=1.0,
+        backoff=2.0,
+        exceptions=(Exception,),
+        fallback={},
+    )
+    return job_id, result
 
 
 def export_landsat_bands_over_buffers(
@@ -393,10 +468,19 @@ def export_landsat_bands_over_buffers(
     os.makedirs(direct_out_dir, exist_ok=True)
 
     skipped, exported = 0, 0
+    job_meta: Dict[str, Dict[str, Any]] = {}
+    job_expected: Dict[str, int] = {}
+    job_received: Dict[str, int] = {}
+    job_rows: Dict[str, Dict[str, Any]] = {}
+    scene_requests: List[Tuple[str, str, Dict[str, Any], int, List[str], bool, str, float]] = []
+
+    try:
+        import pandas as _pd
+    except Exception as e:
+        raise RuntimeError('pandas is required for Landsat direct export') from e
 
     for idx, row in gdf.iterrows():
         try:
-            # Determine identifier
             fid_val = row[id_col] if (id_col in row and row[id_col] is not None) else f'feat_{idx}'
 
             geom = row.geometry
@@ -404,26 +488,20 @@ def export_landsat_bands_over_buffers(
                 print(f'Feature {fid_val}: geometry missing, skipping')
                 continue
 
-            # Build EE geometry: buffer points; otherwise use polygon/geometry centroid buffer if requested
             if geom.geom_type.lower() == 'point':
                 lon, lat = float(geom.x), float(geom.y)
                 ee_geom = ee.Geometry.Point([lon, lat]).buffer(float(buffer_m)) if buffer_m and buffer_m > 0 else ee.Geometry.Point([lon, lat])
             else:
-                # Use the provided geometry; no additional buffering by default
                 coords = None
                 try:
-                    # Prefer polygons; fall back to centroid buffer for non-area types
                     if geom.geom_type.lower() in ['polygon', 'multipolygon']:
-                        # ee.Geometry expects lists of lists; take exterior ring for polygon
                         if geom.geom_type.lower() == 'polygon':
                             coords = [[list(tup) for tup in list(geom.exterior.coords)]]
                         else:
-                            # Multipolygon: pick the largest polygon's exterior
                             largest = max(geom.geoms, key=lambda g: g.area)
                             coords = [[list(tup) for tup in list(largest.exterior.coords)]]
                         ee_geom = ee.Geometry.Polygon(coords)
                     else:
-                        # Lines/others: fallback to centroid with optional buffer
                         lon, lat = float(geom.centroid.x), float(geom.centroid.y)
                         ee_geom = ee.Geometry.Point([lon, lat]).buffer(float(buffer_m)) if buffer_m and buffer_m > 0 else ee.Geometry.Point([lon, lat])
                 except Exception:
@@ -431,61 +509,72 @@ def export_landsat_bands_over_buffers(
                     ee_geom = ee.Geometry.Point([lon, lat]).buffer(float(buffer_m)) if buffer_m and buffer_m > 0 else ee.Geometry.Point([lon, lat])
 
             fc_single = ee.FeatureCollection([ee.Feature(ee_geom, {id_col: fid_val})])
+            region_geojson = ee_geom.toGeoJSON()
 
             for year in range(start_yr, end_yr + 1):
                 desc = f'landsat_bands_{fid_val}_{year}'
-
                 out_fp = os.path.join(direct_out_dir, f'{desc}.csv')
                 if os.path.exists(out_fp):
                     skipped += 1
                     continue
 
-                # Build minimal request list: image IDs for this year/feature
                 try:
                     coll = landsat_masked(year, fc_single).select(select_bands)
                     img_ids = coll.aggregate_array('system:index').getInfo() or []
                 except Exception as e:
                     print(f'{desc}: failed to list scenes: {e}')
                     continue
+
                 if len(img_ids) == 0:
                     print(f'{desc}: no scenes, skipping')
                     continue
 
-                # Parallel reduceRegion for each image
-                region_geojson = ee_geom.toGeoJSON()
-                args = [(img_id, region_geojson, year, select_bands, high_volume, project, 30.0)
-                        for img_id in img_ids]
+                job_id = f'{fid_val}_{year}'
+                job_meta[job_id] = {'out_fp': out_fp, 'id_val': fid_val}
+                job_expected[job_id] = len(img_ids)
+                job_received[job_id] = 0
+                job_rows[job_id] = {id_col: fid_val}
 
-                # Initialize EE once in parent for HV endpoint
-                # (workers will re-init in their process)
-                try:
-                    if high_volume:
-                        ee.Initialize(project=project, opt_url='https://earthengine-highvolume.googleapis.com')
-                    else:
-                        ee.Initialize(project=project)
-                except Exception:
-                    pass
-
-                with mp.Pool(processes=max(1, int(workers))) as pool:
-                    results = pool.map(_landsat_scene_worker, args)
-
-                # Merge per-scene dicts into one row
-                row: Dict[str, Any] = {id_col: fid_val}
-                for d in results:
-                    if d:
-                        row.update(d)
-
-                # Persist a single-row CSV
-                try:
-                    import pandas as _pd  # local import to avoid dependency when unused
-                    df = _pd.DataFrame([row])
-                    df.to_csv(out_fp, index=False)
-                    print('Saved:', out_fp)
-                    exported += 1
-                except Exception as e:
-                    print(f'{desc}: failed to save CSV: {e}')
+                for img_id in img_ids:
+                    scene_requests.append((job_id, img_id, region_geojson, year, select_bands, high_volume, project, 30.0))
         except Exception as e:
             print(f'Feature {idx} failed: {e}')
+
+    if not scene_requests:
+        print('No Landsat scene requests to process.')
+        if direct_out_dir:
+            print(f'Landsat bands (direct): Exported {exported}, skipped {skipped} files found in {direct_out_dir}')
+        return
+
+    try:
+        if high_volume:
+            ee.Initialize(project=project, opt_url='https://earthengine-highvolume.googleapis.com')
+        else:
+            ee.Initialize(project=project)
+    except Exception:
+        pass
+
+    with mp.Pool(processes=max(1, int(workers))) as pool:
+        for job_id, scene_vals in pool.imap_unordered(_landsat_scene_worker, scene_requests, chunksize=1):
+            if job_id not in job_meta:
+                continue
+            if scene_vals:
+                job_rows[job_id].update(scene_vals)
+            job_received[job_id] += 1
+            if job_received[job_id] >= job_expected[job_id]:
+                out_fp = job_meta[job_id]['out_fp']
+                try:
+                    df = _pd.DataFrame([job_rows[job_id]])
+                    df.to_csv(out_fp, index=False)
+                    exported += 1
+                    print('Saved:', out_fp)
+                except Exception as e:
+                    print(f'{job_id}: failed to save CSV: {e}')
+                finally:
+                    job_rows.pop(job_id, None)
+                    job_meta.pop(job_id, None)
+                    job_expected.pop(job_id, None)
+                    job_received.pop(job_id, None)
 
     if direct_out_dir:
         print(f'Landsat bands (direct): Exported {exported}, skipped {skipped} files found in {direct_out_dir}')
@@ -530,6 +619,8 @@ if __name__ == '__main__':
         project='ee-dgketchum',
         high_volume=True,
         chunk_size=200,
+        workers=1,
+        use_big_data_api=True,
     )
 
     # Landsat all bands per-scene by year, iterating directly over shapefile
@@ -545,7 +636,7 @@ if __name__ == '__main__':
         debug=False,
         buffer_m=250.0,
         direct_out_dir=direct_dir_,
-        workers=25,
+        workers=12,
         project='ee-dgketchum',
         high_volume=True,
     )
