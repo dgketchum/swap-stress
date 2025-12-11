@@ -7,10 +7,17 @@ import pandas as pd
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.model_selection import train_test_split
 
-from map.learning.decision_tree.train_decision_trees import DROP_FEATURES, VG_PARAMS, GSHP_PARAMS
+from map.learning.decision_tree.train_decision_trees import (
+    DROP_FEATURES,
+    VG_PARAMS,
+    GSHP_PARAMS,
+    filter_base_data_features,
+    filter_soil_features,
+)
 
 
-def rf_feature_importance_gshp(f, features_csv=None, n_estimators=250, random_state=42):
+def rf_feature_importance_gshp(f, features_csv=None, n_estimators=250,
+                               random_state=42, base_data=False, include_soils=True):
     df = pd.read_parquet(f)
     rosetta_cols = [c for c in df.columns if any(p in c for p in VG_PARAMS) or c in GSHP_PARAMS]
 
@@ -19,6 +26,11 @@ def rf_feature_importance_gshp(f, features_csv=None, n_estimators=250, random_st
     else:
         feature_cols = [c for c in df.columns if c not in rosetta_cols and c not in DROP_FEATURES]
         feature_cols = [c for c in feature_cols if not (len(c) == 3 and c.startswith('e'))]
+
+    if base_data:
+        feature_cols = filter_base_data_features(feature_cols)
+    if not include_soils:
+        feature_cols = filter_soil_features(feature_cols)
 
     targets = [p for p in GSHP_PARAMS if p in df.columns]
     if not targets:
@@ -47,13 +59,19 @@ def rf_feature_importance_gshp(f, features_csv=None, n_estimators=250, random_st
     return result
 
 
-def rf_feature_importance_rosetta(f, levels=None, n_estimators=250, random_state=42):
+def rf_feature_importance_rosetta(f, levels=None, n_estimators=250,
+                                  random_state=42, base_data=False, include_soils=True):
     if levels is None:
         levels = list(range(1, 8))
 
     df = pd.read_parquet(f)
     rosetta_cols = [c for c in df.columns if any(p in c for p in VG_PARAMS) or c in GSHP_PARAMS]
     feature_cols = [c for c in df.columns if c not in rosetta_cols and c not in DROP_FEATURES]
+
+    if base_data:
+        feature_cols = filter_base_data_features(feature_cols)
+    if not include_soils:
+        feature_cols = filter_soil_features(feature_cols)
 
     all_importances = {}
     for vert_level in levels:
@@ -91,6 +109,8 @@ def rf_feature_importance_rosetta(f, levels=None, n_estimators=250, random_state
 if __name__ == '__main__':
     run_gshp_importance = True
     run_rosetta_importance = False
+    base_data_only = True
+    include_soils = False
 
     home_ = os.path.expanduser('~')
     root_ = os.path.join(home_, 'data', 'IrrigationGIS', 'soils', 'swapstress')
@@ -104,18 +124,34 @@ if __name__ == '__main__':
 
     if run_gshp_importance:
         gshp_file_ = os.path.join(root_, 'training', 'gshp_training_data_emb_250m.parquet')
-        importances_ = rf_feature_importance_gshp(gshp_file_, features_csv=features_csv_)
+        importances_ = rf_feature_importance_gshp(gshp_file_, features_csv=features_csv_,
+                                                  base_data=base_data_only,
+                                                  include_soils=include_soils)
         ts_ = datetime.now().strftime('%Y%m%d_%H%M%S')
-        out_path_ = os.path.join(out_dir_, f'RF_Importance_GSHP_{ts_}.json')
+        suffix_parts = []
+        if base_data_only:
+            suffix_parts.append('BaseData')
+        if not include_soils:
+            suffix_parts.append('NoSoils')
+        suffix_ = f"_{'_'.join(suffix_parts)}" if suffix_parts else ''
+        out_path_ = os.path.join(out_dir_, f'RF_Importance_GSHP{suffix_}_{ts_}.json')
         with open(out_path_, 'w') as f:
             json.dump(importances_, f, indent=4)
         print(f'Wrote GSHP RF feature importances')
 
     elif run_rosetta_importance:
         rosetta_file_ = os.path.join(root_, 'training', 'training_data.parquet')
-        importances_by_level_ = rf_feature_importance_rosetta(rosetta_file_, levels=list(range(1, 8)))
+        importances_by_level_ = rf_feature_importance_rosetta(rosetta_file_, levels=list(range(1, 8)),
+                                                              base_data=base_data_only,
+                                                              include_soils=include_soils)
         ts_ = datetime.now().strftime('%Y%m%d_%H%M%S')
-        out_path_ = os.path.join(out_dir_, f'RF_Importance_Rosetta_{ts_}.json')
+        suffix_parts = []
+        if base_data_only:
+            suffix_parts.append('BaseData')
+        if not include_soils:
+            suffix_parts.append('NoSoils')
+        suffix_ = f"_{'_'.join(suffix_parts)}" if suffix_parts else ''
+        out_path_ = os.path.join(out_dir_, f'RF_Importance_Rosetta{suffix_}_{ts_}.json')
         with open(out_path_, 'w') as f:
             json.dump(importances_by_level_, f, indent=4)
         print(f'Wrote Rosetta RF feature importances')

@@ -1,5 +1,6 @@
 import json
 import os
+import re
 from datetime import datetime
 from pprint import pprint
 
@@ -10,6 +11,8 @@ from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import r2_score, mean_absolute_error, root_mean_squared_error
 from sklearn.model_selection import train_test_split
 
+from map.data import ee_feature_list
+
 DROP_FEATURES = ['MGRS_TILE', 'station', 'rosetta_level', 'profile_id',
                  'nwsli_id', 'network', 'mesowest_i', 'data_flag', 'obs_ct', 'SWCC_class',
                  ]
@@ -17,14 +20,77 @@ DROP_FEATURES = ['MGRS_TILE', 'station', 'rosetta_level', 'profile_id',
 VG_PARAMS = ['theta_r', 'theta_s', 'log10_alpha', 'log10_n', 'log10_Ks']
 GSHP_PARAMS = ['theta_r', 'theta_s', 'alpha', 'n']
 
+_EMBEDDING_PATTERNS = [
+    re.compile(r'^embedding_\d+$'),
+    re.compile(r'^e\d+$'),
+    re.compile(r'^A\d+$'),
+    re.compile(r'^b\d+$'),
+    re.compile(r'^US_R3H3_'),  # Rosetta layers
+]
 
-def train_rf_rosetta(f, levels=None):
+
+def filter_base_data_features(feature_cols):
+    """Return only non-modeled 'base data' features.
+
+    This removes learned/embedded features (e.g., satellite embeddings) so that
+    the Random Forest is trained or analyzed using only surface reflectance,
+    soil properties, and meteorology/climatology inputs.
+    """
+    polaris_keys = set(ee_feature_list._POLARIS.keys())
+    smap_keys = set(ee_feature_list._SMAP_L4.keys())
+
+    base_cols = []
+    for c in feature_cols:
+        name = str(c)
+        # Drop embedded / modeled / Rosetta features
+        if any(pat.match(name) for pat in _EMBEDDING_PATTERNS):
+            continue
+        # Drop POLARIS hydraulic properties (and any simple suffix forms)
+        if name in polaris_keys:
+            continue
+        if any(name.startswith(k + '_') for k in polaris_keys):
+            continue
+        # Drop SMAP L4 variables (and any simple suffix forms)
+        if name in smap_keys:
+            continue
+        if any(name.startswith(k + '_') for k in smap_keys):
+            continue
+        base_cols.append(c)
+    return base_cols
+
+
+def filter_soil_features(feature_cols):
+    """Remove soil information features (SoilGrids + FAO/HWSD bands)."""
+    soilgrids_keys = set(ee_feature_list._SOILGRIDS.keys())
+    fao_keys = set(ee_feature_list._FAO_SOILS.keys())
+
+    soil_prop_prefixes = sorted({k.split('_')[0] for k in soilgrids_keys})
+
+    filtered = []
+    for c in feature_cols:
+        name = str(c)
+        if name in soilgrids_keys:
+            continue
+        if any(name.startswith(p + '_') for p in soil_prop_prefixes):
+            continue
+        if name in fao_keys:
+            continue
+        filtered.append(c)
+    return filtered
+
+
+def train_rf_rosetta(f, levels=None, base_data=False, include_soils=True):
     if levels is None:
         levels = list(range(1, 8))
 
     df = pd.read_parquet(f)
     rosetta_cols = [c for c in df.columns if any(p in c for p in VG_PARAMS) or c in GSHP_PARAMS]
     feature_cols = [c for c in df.columns if c not in rosetta_cols and c not in DROP_FEATURES]
+
+    if base_data:
+        feature_cols = filter_base_data_features(feature_cols)
+    if not include_soils:
+        feature_cols = filter_soil_features(feature_cols)
 
     all_metrics = {}
     for vert_level in levels:
@@ -69,7 +135,8 @@ def train_rf_rosetta(f, levels=None):
     return all_metrics
 
 
-def train_rf_gshp(f, model_dir=None, features_csv=None):
+def train_rf_gshp(f, model_dir=None, features_csv=None, base_data=False,
+                  include_soils=True, split_type='grouped'):
     df = pd.read_parquet(f)
     rosetta_cols = [c for c in df.columns if any(p in c for p in VG_PARAMS) or c in GSHP_PARAMS]
 
@@ -78,6 +145,11 @@ def train_rf_gshp(f, model_dir=None, features_csv=None):
     else:
         feature_cols = [c for c in df.columns if c not in rosetta_cols and c not in DROP_FEATURES]
         feature_cols = [c for c in feature_cols if not (len(c) == 3 and c.startswith('e'))]
+
+    if base_data:
+        feature_cols = filter_base_data_features(feature_cols)
+    if not include_soils:
+        feature_cols = filter_soil_features(feature_cols)
 
     all_metrics = {}
     targets = [p for p in GSHP_PARAMS if p in df.columns]
@@ -120,9 +192,19 @@ def train_rf_gshp(f, model_dir=None, features_csv=None):
     print(f'Transformed Target Std')
     [print(f'{k}: {v:.3f}') for k, v in target_info.items()]
 
-    # x_train, x_test, y_train, y_test = train_test_split(features, y, test_size=0.2, random_state=42)
-    x_train, x_test = features[: int(len(features) * 0.7)], features[int(len(features) * 0.7):]
-    y_train, y_test = y[: int(len(features) * 0.7)], y[int(len(features) * 0.7):]
+    # Split strategy:
+    # - 'naive': standard random row-wise split
+    # - 'grouped': sequential split along the sorted index (default)
+    if split_type == 'naive':
+        x_train, x_test, y_train, y_test = train_test_split(
+            features, y, test_size=0.3, random_state=42
+        )
+    elif split_type == 'grouped':
+        split_idx = int(len(features) * 0.7)
+        x_train, x_test = features[:split_idx], features[split_idx:]
+        y_train, y_test = y[:split_idx], y[split_idx:]
+    else:
+        raise ValueError(f"Unsupported split_type '{split_type}'. Use 'naive' or 'grouped'.")
 
     print(f'{len(x_train)} training, {len(x_test)} test samples')
 
@@ -159,10 +241,16 @@ def train_rf_gshp(f, model_dir=None, features_csv=None):
     return all_metrics
 
 
-def train_rf_stations(table_path, model_dir=None):
+def train_rf_stations(table_path, model_dir=None, base_data=False,
+                      include_soils=True, split_type='grouped'):
     df = pd.read_parquet(table_path)
     rosetta_cols = [c for c in df.columns if any(p in c for p in VG_PARAMS) or c in GSHP_PARAMS]
     feature_cols = [c for c in df.columns if c not in rosetta_cols and c not in DROP_FEATURES]
+
+    if base_data:
+        feature_cols = filter_base_data_features(feature_cols)
+    if not include_soils:
+        feature_cols = filter_soil_features(feature_cols)
 
     targets = [p for p in GSHP_PARAMS if p in df.columns]
     station_ids = df['station'].astype(str)
@@ -175,18 +263,28 @@ def train_rf_stations(table_path, model_dir=None):
     print(f'Dropped {initial_len - len(data)} NaN records for Stations combined')
 
     features = data[feature_cols]
-
     y = data[targets]
 
-    # Group-aware split: ensure all depths from a station stay in the same split
-    station_ids = station_ids.loc[data.index]
-    unique_stations = station_ids.dropna().unique()
-    tr_stations, te_stations = train_test_split(unique_stations, test_size=0.2, random_state=42)
-    train_mask = station_ids.isin(tr_stations)
-    test_mask = station_ids.isin(te_stations)
+    # Split strategy:
+    # - 'naive': standard random row-wise split
+    # - 'grouped': group-aware split by station (default, preserves station integrity)
+    if split_type == 'naive':
+        x_train, x_test, y_train, y_test = train_test_split(
+            features, y, test_size=0.2, random_state=42
+        )
+    elif split_type == 'grouped':
+        station_ids = station_ids.loc[data.index]
+        unique_stations = station_ids.dropna().unique()
+        tr_stations, te_stations = train_test_split(
+            unique_stations, test_size=0.2, random_state=42
+        )
+        train_mask = station_ids.isin(tr_stations)
+        test_mask = station_ids.isin(te_stations)
 
-    x_train, x_test = features.loc[train_mask], features.loc[test_mask]
-    y_train, y_test = y.loc[train_mask], y.loc[test_mask]
+        x_train, x_test = features.loc[train_mask], features.loc[test_mask]
+        y_train, y_test = y.loc[train_mask], y.loc[test_mask]
+    else:
+        raise ValueError(f"Unsupported split_type '{split_type}'. Use 'naive' or 'grouped'.")
     print(f'{len(x_train)} training, {len(x_test)} test samples')
 
     model = RandomForestRegressor(n_estimators=250, random_state=42, n_jobs=-1)
@@ -224,6 +322,9 @@ if __name__ == '__main__':
     run_gshp_workflow = True
     run_rosetta_workflow = False
     run_stations_workflow = False
+    base_data_only = True
+    include_soils = False
+    split_type_ = 'naive'
 
     home_ = os.path.expanduser('~')
     root_ = os.path.join(home_, 'data', 'IrrigationGIS', 'soils', 'swapstress')
@@ -238,7 +339,14 @@ if __name__ == '__main__':
 
     if run_gshp_workflow:
         gshp_file_ = os.path.join(root_, 'training', 'gshp_training_data_emb_250m.parquet')
-        gshp_metrics_ = train_rf_gshp(gshp_file_, model_dir=models_dir_, features_csv=features_csv_)
+        gshp_metrics_ = train_rf_gshp(
+            gshp_file_,
+            model_dir=models_dir_,
+            features_csv=features_csv_,
+            base_data=base_data_only,
+            include_soils=include_soils,
+            split_type=split_type_,
+        )
         gshp_dst_ = os.path.join(metrics_dir_, 'learn_gshp')
         if not os.path.exists(gshp_dst_):
             os.makedirs(gshp_dst_)
@@ -250,7 +358,12 @@ if __name__ == '__main__':
     elif run_rosetta_workflow:
 
         rosetta_file_ = os.path.join(root_, 'training', 'training_data.parquet')
-        rosetta_metrics_ = train_rf_rosetta(rosetta_file_, levels=list(range(1, 8)))
+        rosetta_metrics_ = train_rf_rosetta(
+            rosetta_file_,
+            levels=list(range(1, 8)),
+            base_data=base_data_only,
+            include_soils=include_soils,
+        )
         rosetta_dst_ = os.path.join(metrics_dir_, 'learn_rosetta')
         if not os.path.exists(rosetta_dst_):
             os.makedirs(rosetta_dst_)
@@ -262,7 +375,13 @@ if __name__ == '__main__':
     elif run_stations_workflow:
 
         training_table = os.path.join(root_, 'training', 'stations_training_table_250m.parquet')
-        station_metrics_ = train_rf_stations(training_table, model_dir=models_dir_)
+        station_metrics_ = train_rf_stations(
+            training_table,
+            model_dir=models_dir_,
+            base_data=base_data_only,
+            include_soils=include_soils,
+            split_type='grouped',
+        )
         stations_dst_ = os.path.join(metrics_dir_, 'learn_stations')
         ts_ = datetime.now().strftime('%Y%m%d_%H%M%S')
         with open(os.path.join(stations_dst_, f'RandomForest_Stations_{ts_}.json'), 'w') as f:

@@ -6,7 +6,7 @@ from matplotlib.lines import Line2D
 from shapely.geometry import box
 
 
-def _load_sources():
+def _load_sources(include_rosetta=True):
     home_ = os.path.expanduser('~')
     root_ = os.path.join(home_, 'data', 'IrrigationGIS')
     soils_ = os.path.join(root_, 'soils')
@@ -17,7 +17,7 @@ def _load_sources():
     reesh = gpd.read_file(reesh_shp).to_crs(4326)
     mesonet = gpd.read_file(mesonet_shp).to_crs(4326)
     gshp = gpd.read_file(gshp_shp).to_crs(4326)
-    rosetta = gpd.read_file(rosetta_pts).to_crs(4326)
+    rosetta = gpd.read_file(rosetta_pts).to_crs(4326) if include_rosetta else None
     return reesh, mesonet, gshp, rosetta
 
 
@@ -42,9 +42,9 @@ def _apply_modern_style():
     })
 
 
-def plot_training_data_map(out_path, figsize=(10, 6), dpi=300):
+def plot_training_data_map(out_path, figsize=(10, 6), dpi=300, include_rosetta=True):
     _apply_modern_style()
-    reesh, mesonet, gshp, rosetta = _load_sources()
+    reesh, mesonet, gshp, rosetta = _load_sources(include_rosetta=include_rosetta)
 
     land_shp = _find_land_shapefile()
     land = gpd.read_file(land_shp).to_crs(4326)
@@ -65,12 +65,12 @@ def plot_training_data_map(out_path, figsize=(10, 6), dpi=300):
     lbl_reesh = f"ReESH (n = {len(reesh)})"
     lbl_mesonet = f"MT Mesonet (n = {len(mesonet)})"
     lbl_gshp = f"GSHP (n = {len(gshp)})"
-    lbl_rosetta = f"Rosetta3 Points (n = {len(rosetta)})"
+    lbl_rosetta = f"Rosetta3 Points (n = {len(rosetta)})" if include_rosetta and rosetta is not None else None
     # Exclude CONUS points from global view
     reesh_in = gpd.sjoin(reesh, conus[['geometry']], predicate='intersects', how='inner')
     mesonet_in = gpd.sjoin(mesonet, conus[['geometry']], predicate='intersects', how='inner')
     gshp_in = gpd.sjoin(gshp, conus[['geometry']], predicate='intersects', how='inner')
-    rosetta_in = gpd.sjoin(rosetta, conus[['geometry']], predicate='intersects', how='inner')
+    rosetta_in = gpd.sjoin(rosetta, conus[['geometry']], predicate='intersects', how='inner') if include_rosetta and rosetta is not None else None
     reesh_g = reesh.loc[~reesh.index.isin(reesh_in.index)]
     mesonet_g = mesonet.loc[~mesonet.index.isin(mesonet_in.index)]
     gshp_g = gshp.loc[~gshp.index.isin(gshp_in.index)]
@@ -94,7 +94,6 @@ def plot_training_data_map(out_path, figsize=(10, 6), dpi=300):
                linestyle='None', label=lbl_mesonet),
         Line2D([0], [0], marker='s', color='none', markerfacecolor='#2ca02c', markeredgecolor='#2ca02c', markersize=7,
                linestyle='None', label=lbl_gshp),
-        # Rosetta legend entry omitted in global panel
     ]
     ax_g.legend(
         handles=legend_elems,
@@ -120,14 +119,14 @@ def plot_training_data_map(out_path, figsize=(10, 6), dpi=300):
     reesh_c = reesh.cx[xmin:xmax, ymin:ymax]
     mesonet_c = mesonet.cx[xmin:xmax, ymin:ymax]
     gshp_c = gshp.cx[xmin:xmax, ymin:ymax]
-    rosetta_c = rosetta.cx[xmin:xmax, ymin:ymax]
+    rosetta_c = rosetta.cx[xmin:xmax, ymin:ymax] if include_rosetta and rosetta is not None else None
     if not reesh_c.empty:
         reesh_c.plot(ax=ax_c, markersize=24, marker='^', color='#d62728', linewidth=0.2, zorder=3)
     if not mesonet_c.empty:
         mesonet_c.plot(ax=ax_c, markersize=16, marker='o', color='#1f77b4', linewidth=0.2, zorder=3)
     if not gshp_c.empty:
         gshp_c.plot(ax=ax_c, markersize=16, marker='s', color='#2ca02c', linewidth=0.2, zorder=3)
-    if not rosetta_c.empty:
+    if rosetta_c is not None and not rosetta_c.empty:
         rosetta_c.plot(ax=ax_c, markersize=3, marker='x', color='#ff7f0e', linewidth=0.2, zorder=3)
 
     # Draw CONUS outline
@@ -155,6 +154,6 @@ def plot_training_data_map(out_path, figsize=(10, 6), dpi=300):
 
 
 if __name__ == '__main__':
-    out_path_ = os.path.join('poster', 'training_data_world_map.png')
-    plot_training_data_map(out_path_)
+    out_path_ = os.path.join('poster', 'training_data_world_map_no_rosetta.png')
+    plot_training_data_map(out_path_, include_rosetta=False)
 # ========================= EOF ====================================================================
