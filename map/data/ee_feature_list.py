@@ -57,6 +57,23 @@ _SOILGRIDS = {
     'ocs_mean': 'SoilGrids OCS (mean)'
 }
 
+_FAO_SOILS = {
+    'HWSD2_ID': 'HWSD v2 soil unit ID',
+    'WISE30s_ID': 'WISE30s soil unit ID',
+    'COVERAGE': 'HWSD v2 coverage fraction',
+    'SHARE': 'HWSD v2 soil share',
+    'WRB4': 'WRB4 soil class',
+    'WRB_PHASES': 'WRB phases',
+    'WRB2_CODE': 'WRB2 soil code',
+    'FAO90': 'FAO 1990 soil unit',
+    'KOPPEN': 'Köppen climate class',
+    'TEXTURE_USDA': 'USDA soil texture class',
+    'REF_BULK_DENSITY': 'Reference bulk density',
+    'BULK_DENSITY': 'Bulk density',
+    'DRAINAGE': 'Soil drainage class',
+    'ROOT_DEPTH': 'Rooting depth',
+    'AWC': 'Available water capacity',
+}
 _POLARIS = {
     'bd_mean': 'POLARIS bulk density (mean)',
     'clay_mean': 'POLARIS clay (mean)',
@@ -116,6 +133,17 @@ def label_feature(n):
         lbl = f'SMAP L4 {v_lbl} {stat_lbl}'
         return lbl
 
+    # SoilGrids depth-resolved layers, e.g., clay_100-200cm_mean
+    m = re.match(r'^(bdod|cec|cfvo|clay|sand|silt|nitrogen|phh2o|soc|ocd|ocs)_(\d+-\d+cm)_(mean|stdDev|sd)$', x)
+    if m:
+        prop, depth, stat = m.groups()
+        base_key = f'{prop}_mean'
+        base_lbl = _SOILGRIDS.get(base_key, prop)
+        base_lbl = base_lbl.replace(' (mean)', '')
+        stat_lbl = _STAT_LABELS.get(stat, stat)
+        lbl = f'{base_lbl} {stat_lbl} ({depth})'
+        return lbl
+
     m = re.match(r'^wc_(prec|tavg|tmin|tmax)_(winter|spring|summer|autumn)$', x)
     if m:
         v, season = m.groups()
@@ -158,9 +186,8 @@ def label_feature(n):
     if x in _POLARIS:
         return _POLARIS[x]
 
-    if x in ['HWSD2_ID', 'WISE30s_ID', 'COVERAGE', 'SHARE', 'WRB4', 'WRB_PHASES', 'WRB2_CODE', 'FAO90', 'KOPPEN',
-             'TEXTURE_USDA', 'REF_BULK_DENSITY', 'BULK_DENSITY', 'DRAINAGE', 'ROOT_DEPTH', 'AWC']:
-        return f'HWSD v2 {x}'
+    if x in _FAO_SOILS:
+        return _FAO_SOILS[x]
 
     if x == 'c3s_lccs_class_mode':
         return 'C3S LCCS class (mode)'
