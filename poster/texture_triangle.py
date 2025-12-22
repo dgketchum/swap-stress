@@ -329,12 +329,12 @@ def plot_texture_triangle(out_path, reesh_dir=None, gshp_file=None, property_key
         if use_color and gshp_vals.size:
             stp.scatter(
                 gshp_points,
-                s=10,
+                s=8,
                 c=gshp_vals,
                 cmap=cm.viridis,
                 vmin=vmin,
                 vmax=vmax,
-                marker='o',
+                marker='s',
                 alpha=0.7,
                 label='GSHP',
                 zorder=2,
@@ -342,9 +342,9 @@ def plot_texture_triangle(out_path, reesh_dir=None, gshp_file=None, property_key
         else:
             stp.scatter(
                 gshp_points,
-                s=10,
-                c='#1f77b4',
-                marker='o',
+                s=8,
+                c='#2ca02c',
+                marker='s',
                 alpha=0.7,
                 label='GSHP',
                 zorder=2,
@@ -354,7 +354,7 @@ def plot_texture_triangle(out_path, reesh_dir=None, gshp_file=None, property_key
         if use_color and reesh_vals.size:
             stp.scatter(
                 reesh_points,
-                s=20,
+                s=16,
                 c=reesh_vals,
                 cmap=cm.viridis,
                 vmin=vmin,
@@ -367,7 +367,7 @@ def plot_texture_triangle(out_path, reesh_dir=None, gshp_file=None, property_key
         else:
             stp.scatter(
                 reesh_points,
-                s=20,
+                s=16,
                 c='#d62728',
                 marker='^',
                 alpha=0.7,
@@ -390,16 +390,16 @@ def plot_texture_triangle(out_path, reesh_dir=None, gshp_file=None, property_key
     # legend with fixed marker appearance, independent of color ramp
     legend_handles = []
     if gshp_points:
-        gshp_color = '0.5' if use_color else '#1f77b4'
+        gshp_color = '0.5' if use_color else '#2ca02c'
         legend_handles.append(
             Line2D(
                 [0],
                 [0],
-                marker='o',
+                marker='s',
                 color='none',
                 markerfacecolor=gshp_color,
                 markeredgecolor=gshp_color,
-                markersize=6,
+                markersize=5,
                 linestyle='None',
                 label='GSHP',
             )
@@ -414,7 +414,7 @@ def plot_texture_triangle(out_path, reesh_dir=None, gshp_file=None, property_key
                 color='none',
                 markerfacecolor=reesh_color,
                 markeredgecolor=reesh_color,
-                markersize=7,
+                markersize=6,
                 linestyle='None',
                 label='ReESH',
             )
@@ -435,13 +435,8 @@ if __name__ == '__main__':
 
     out_dir_ = '/home/dgketchum/data/IrrigationGIS/soils/swapstress/texture'
 
-    # One figure with no fourth property
-    # base_out_ = os.path.join(out_dir_, 'texture_triangle.png')
-    # plot_texture_triangle(base_out_, property_key=None)
-
-    # One figure for each generic property
-    for property_key_ in ['alpha', 'n']: # sorted(GENERIC_PROPERTY_MAP.keys()):, 'theta_r', 'theta_s',
-        out_path_ = os.path.join(out_dir_, f'texture_triangle_{property_key_}.png')
-        plot_texture_triangle(out_path_, property_key=property_key_)
+    # One figure with no fourth property, matching map markers
+    base_out_ = os.path.join(out_dir_, 'texture_triangle.png')
+    plot_texture_triangle(base_out_, property_key=None)
 
 # ========================= EOF ====================================================================
