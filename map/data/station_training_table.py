@@ -1,35 +1,45 @@
+"""
+DEPRECATED: This module is superseded by build_training_table.py
+
+Use build_training_table.py with source='mt_mesonet' or 'reesh' instead:
+
+    from map.data.build_training_table import build_unified_table
+    build_unified_table(['mt_mesonet', 'reesh'], data_root, output_path, include_embeddings=True)
+
+The extract_station_fit_params() function is now available in build_training_table.py
+as load_vg_params_from_json().
+
+This file is retained for backward compatibility only.
+"""
 import os
 import json
+import warnings
 from glob import glob
 
 import numpy as np
 import pandas as pd
 
-from retention_curve import ROSETTA_LEVEL_DEPTHS
+from retention_curve.depth_utils import depth_to_rosetta_level
 
 
-def _depth_to_rosetta_level(depth_cm):
-    try:
-        d = float(depth_cm)
-    except Exception:
-        return None
-    for lvl, (lo, hi) in ROSETTA_LEVEL_DEPTHS.items():
-        if lo <= d < hi:
-            return int(lvl)
-    centers = {lvl: (rng[0] + rng[1]) / 2.0 for lvl, rng in ROSETTA_LEVEL_DEPTHS.items()}
-    levels = np.array(list(centers.keys()), dtype=int)
-    vals = np.array(list(centers.values()), dtype=float)
-    idx = int(np.argmin(np.abs(vals - d)))
-    return int(levels[idx])
+def _deprecation_warning():
+    warnings.warn(
+        "station_training_table is deprecated. Use build_training_table.py instead.",
+        DeprecationWarning,
+        stacklevel=3
+    )
 
 
 def extract_station_fit_params(results_dir, networks, fit_method='nelder'):
     """
+    DEPRECATED: Use build_training_table.load_vg_params_from_json() instead.
+
     Extracts fitted VG parameters from station JSON summaries into a long table.
 
     Returns a DataFrame with columns:
       ['station', 'depth', 'rosetta_level', 'theta_r', 'theta_s', 'alpha', 'n']
     """
+    _deprecation_warning()
 
     files = []
     for sd in networks:
@@ -78,7 +88,7 @@ def extract_station_fit_params(results_dir, networks, fit_method='nelder'):
                 'station': station,
                 'profile_id': profile_id,
                 'depth': depth_cm,
-                'rosetta_level': _depth_to_rosetta_level(depth_cm),
+                'rosetta_level': depth_to_rosetta_level(depth_cm),
                 'theta_r': tr,
                 'theta_s': ts,
                 'alpha': a,
@@ -99,6 +109,8 @@ def extract_station_fit_params(results_dir, networks, fit_method='nelder'):
 
 def build_station_training_table(ee_stations_pqt, results_dir, out_file, include_subdirs=None,
                                  embeddings=None, features_csv=None, fitting_method='nelder'):
+    """DEPRECATED: Use build_training_table.build_unified_table() instead."""
+    _deprecation_warning()
     params_df = extract_station_fit_params(results_dir, include_subdirs, fit_method=fitting_method)
     if params_df.empty:
         return params_df

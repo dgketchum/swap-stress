@@ -23,9 +23,10 @@ def concatenate_and_join(ee_in_dir, out_file, network, rosetta_pqt=None, index_c
     print(f"Found {len(csv_files)} CSV files to concatenate.")
     df_list = []
 
-    for f in csv_files:
+    for f in sorted(csv_files):
         try:
             c = pd.read_csv(f)
+            print(os.path.basename(f), len(c))
         except pd.errors.EmptyDataError:
             print(f'Found empty file {os.path.basename(f)}, removing')
             os.remove(f)
@@ -92,33 +93,9 @@ def concatenate_and_join(ee_in_dir, out_file, network, rosetta_pqt=None, index_c
     if not os.path.exists(out_dir):
         os.makedirs(out_dir)
 
-    final_df.index.name = 'station'
+    final_df.index.name = index_col
     final_df.to_parquet(out_file)
     print(f"Saving final concatenated data to {out_file} {len(final_df)} samples")
-
-
-def _concat_station_tables(mt_file, flux_file, out_file, features_csv):
-    frames = []
-    if mt_file and os.path.exists(mt_file):
-        frames.append(pd.read_parquet(mt_file))
-    if flux_file and os.path.exists(flux_file):
-        frames.append(pd.read_parquet(flux_file))
-    if not frames:
-        return
-
-    cols = [c for c in frames[0].columns if c in frames[1].columns]
-
-    combined = pd.concat(frames, ignore_index=False, sort=False)
-    combined = combined[cols]
-
-    out_dir = os.path.dirname(out_file)
-    if out_dir and not os.path.exists(out_dir):
-        os.makedirs(out_dir)
-
-    combined.to_parquet(out_file)
-    features = pd.DataFrame(data=combined.columns, index=range(combined.shape[1]), columns=['features'])
-    features.to_csv(features_csv, index=False)
-    print(f"Saving merged station data to {out_file} {len(combined)} samples")
 
 
 if __name__ == '__main__':
@@ -143,8 +120,9 @@ if __name__ == '__main__':
                  'HWSD2_ID', 'WISE30s_ID', 'COVERAGE', 'SHARE', 'SWCC_class', 'obs_ct']
 
     run_mt_mesonet_workflow = False
-    run_reesh_workflow = False
-    run_gshp_workflow = True
+    run_reesh_workflow = True
+    run_gshp_workflow = False
+    run_ncss_workflow = False
 
     if run_gshp_workflow:
         network_ = 'gshp'
@@ -174,6 +152,15 @@ if __name__ == '__main__':
         rosetta_pqt_ = os.path.join(root_, 'soils', 'soil_potential_obs', 'reesh', 'extracted_rosetta_points.parquet')
         do_run = True
 
+    if run_ncss_workflow:
+        network_ = 'ncss'
+        index_col_ = 'profile_id'
+        ee_in_dir_ = os.path.join(root_, 'soils', 'swapstress', 'extracts', 'ncss_extracts_250m')
+        out_file_ = os.path.join(root_, 'soils', 'swapstress', 'training', 'ncss_ee_data_250m.parquet')
+        mappings_json_ = os.path.join(root_, 'soils', 'swapstress', 'training', 'ncss_categorical_mappings_250m.json')
+        rosetta_pqt_ = None  # NCSS has lab-measured soil properties, no Rosetta needed
+        do_run = True
+
     if do_run:
         concatenate_and_join(
             ee_in_dir=ee_in_dir_,
@@ -185,11 +172,5 @@ if __name__ == '__main__':
             categories=categories_,
             dropcols=dropcols_
         )
-        if run_mt_mesonet_workflow or run_reesh_workflow:
-            mt_path_ = os.path.join(root_, 'soils', 'swapstress', 'training', 'mt_ee_data_250m.parquet')
-            flux_path_ = os.path.join(root_, 'soils', 'swapstress', 'training', 'reesh_ee_data_250m.parquet')
-            stations_out_ = os.path.join(root_, 'soils', 'swapstress', 'training', 'stations_ee_data_250m.parquet')
-            features_csv_ = os.path.join(root_, 'soils', 'swapstress', 'training', 'current_features.csv')
-            _concat_station_tables(mt_path_, flux_path_, stations_out_, features_csv_)
 
 # ========================= EOF ====================================================================

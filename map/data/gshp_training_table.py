@@ -1,28 +1,36 @@
+"""
+DEPRECATED: This module is superseded by build_training_table.py
+
+Use build_training_table.py with source='gshp' instead:
+
+    from map.data.build_training_table import build_unified_table
+    build_unified_table(['gshp'], data_root, output_path, include_embeddings=True)
+
+This file is retained for backward compatibility only.
+"""
 import os
+import warnings
 from tqdm import tqdm
 from glob import glob
 import numpy as np
 import pandas as pd
-from retention_curve import ROSETTA_LEVEL_DEPTHS
+
+from retention_curve.depth_utils import depth_to_rosetta_level
 
 LABELS_COLS_KEEP = ['alpha', 'data_flag', 'n', 'theta_r', 'theta_s']
 
-def _depth_to_rosetta_level(depth_cm):
-    try:
-        d = float(depth_cm)
-    except Exception:
-        return None
-    for lvl, (lo, hi) in ROSETTA_LEVEL_DEPTHS.items():
-        if lo <= d < hi:
-            return int(lvl)
-    centers = {lvl: (rng[0] + rng[1]) / 2.0 for lvl, rng in ROSETTA_LEVEL_DEPTHS.items()}
-    levels = np.array(list(centers.keys()), dtype=int)
-    vals = np.array(list(centers.values()), dtype=float)
-    idx = int(np.argmin(np.abs(vals - d)))
-    return int(levels[idx])
+
+def _deprecation_warning():
+    warnings.warn(
+        "gshp_training_table is deprecated. Use build_training_table.py instead.",
+        DeprecationWarning,
+        stacklevel=3
+    )
 
 def build_gshp_training_table(ee_features_pqt, labels_csv, out_file, index_col='profile_id', filter_good_quality=True,
                               embeddings=None, features_path=None):
+    """DEPRECATED: Use build_training_table.build_unified_table() instead."""
+    _deprecation_warning()
     if not features_path or not os.path.exists(features_path):
         raise ValueError('features_path is required and must point to stations current_features.csv')
     # for "simplicity", all EE extracts concatenated in ee_tables.py will by indexed with 'station'
@@ -45,7 +53,7 @@ def build_gshp_training_table(ee_features_pqt, labels_csv, out_file, index_col='
     elif 'depth' in labels_df.columns:
         depth_series = labels_df['depth']
     if depth_series is not None:
-        labels_df['rosetta_level'] = [ _depth_to_rosetta_level(v) for v in depth_series ]
+        labels_df['rosetta_level'] = [depth_to_rosetta_level(v) for v in depth_series]
     else:
         labels_df['rosetta_level'] = np.nan
 

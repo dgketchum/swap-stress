@@ -80,7 +80,7 @@ def standardize_gshp(df, depth_col=None):
     return d[keep]
 
 
-def write_standardized_gshp(soil_csv_path, out_dir):
+def write_standardized_gshp(soil_csv_path, out_dir, minimum_points):
     os.makedirs(out_dir, exist_ok=True)
     df = pd.read_csv(soil_csv_path, encoding='latin1')
     if 'profile_id' in df.columns:
@@ -91,6 +91,11 @@ def write_standardized_gshp(soil_csv_path, out_dir):
     t_min, t_max = np.inf, -np.inf
     print(f'writing gshp obs to {out_dir}')
     for pid, r in tqdm(std.groupby('profile_id'), total=len(std.groupby('profile_id'))):
+        depth_counts = r.groupby('depth_cm').size()
+        keep_depths = depth_counts[depth_counts >= minimum_points].index
+        r = r[r['depth_cm'].isin(keep_depths)]
+        if r.empty:
+            continue
         out_path = os.path.join(out_dir, f'{pid}.csv')
         r[['suction_cm', 'theta', 'depth_cm', 'SWCC_classes',
            'sand_tot_psa',
@@ -207,7 +212,7 @@ def write_standardized_reesh(in_dir, out_dir, profile_key):
         print(f"ReESH standardized: stations={stations}, suction_cm=[{s_min:.3g}, {s_max:.3g}], theta=[{t_min:.3f}, {t_max:.3f}]")
 
 
-def write_standardized_ncss(parquet_path, out_dir):
+def write_standardized_ncss(parquet_path, out_dir, minimum_points):
     os.makedirs(out_dir, exist_ok=True)
     df = load_ncss_parquet(parquet_path)
     std = ncss_to_standardized(df)
@@ -225,7 +230,7 @@ def write_standardized_ncss(parquet_path, out_dir):
             'SWCC_classes', 'sand_tot_psa', 'silt_tot_psa', 'clay_tot_psa', 'db_od', 'source_db'
         ) if c in r.columns]
         depth_counts = r.groupby('depth_cm').size()
-        keep_depths = depth_counts[depth_counts >= 4].index
+        keep_depths = depth_counts[depth_counts >= minimum_points].index
         r = r[r['depth_cm'].isin(keep_depths)]
         if r.empty:
             continue
@@ -243,10 +248,17 @@ def write_standardized_ncss(parquet_path, out_dir):
 if __name__ == '__main__':
     home_ = os.path.expanduser('~')
 
+    run_gshp = False
     run_rosetta = False
     run_mt_mesonet = False
-    run_reesh = True
-    run_ncss = False
+    run_reesh = False
+    run_ncss = True
+
+    if run_gshp:
+        gshp_dir_ = os.path.join(home_, 'data', 'IrrigationGIS', 'soils', 'soil_potential_obs', 'gshp')
+        soil_csv_path_ = os.path.join(gshp_dir_, 'WRC_dataset_surya_et_al_2021_final.csv')
+        out_dir_ = os.path.join(home_, 'data', 'IrrigationGIS', 'soils', 'soil_potential_obs', 'preprocessed', 'gshp')
+        write_standardized_gshp(soil_csv_path_, out_dir_, minimum_points=4)
 
     if run_rosetta:
         root_ = os.path.join(home_, 'data', 'IrrigationGIS', 'soils', 'rosetta', 'training_data')
@@ -271,6 +283,6 @@ if __name__ == '__main__':
         base_dir_ = os.path.join(home_, 'data', 'IrrigationGIS', 'soils', 'soil_potential_obs', 'ncss_labdatasqlite')
         parquet_path_ = os.path.join(base_dir_, 'ncss_selection.parquet')
         out_dir_ = os.path.join(home_, 'data', 'IrrigationGIS', 'soils', 'soil_potential_obs', 'preprocessed', 'ncss')
-        write_standardized_ncss(parquet_path_, out_dir_)
+        write_standardized_ncss(parquet_path_, out_dir_, minimum_points=4)
 
 # ========================= EOF ====================================================================
