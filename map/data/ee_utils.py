@@ -103,6 +103,9 @@ def landsat_composites(start_yr, end_yr, start_doy, end_doy, roi, append_name):
     reducers = ee.Reducer.mean().combine(ee.Reducer.stdDev(), '', True)
     stats = lsSR_with_indices.select(bands_to_reduce).reduce(reducers)
 
+    # Unmask with nodata value to prevent row drops during export
+    stats = stats.unmask(-9999)
+
     original_names = stats.bandNames()
     new_names = original_names.map(lambda b: ee.String(b).cat('_').cat(append_name))
 

@@ -92,7 +92,8 @@ if __name__ == '__main__':
     run_mt_mesonet_workflow = False
     run_rosetta_workflow = False
     run_gshp_workflow = False
-    run_reesh_workflow = True
+    run_ncss_workflow = True
+    run_reesh_workflow = False
 
     home = os.path.expanduser('~')
     root_ = os.path.join(home, 'data', 'IrrigationGIS')
@@ -119,6 +120,14 @@ if __name__ == '__main__':
     elif run_gshp_workflow:
         points_shp_ = os.path.join(root_, 'soils', 'soil_potential_obs', 'gshp', 'wrc_aggregated_mgrs.shp')
         out_parquet_ = os.path.join(root_, 'soils', 'soil_potential_obs', 'gshp', 'extracted_rosetta_points.parquet')
+        extract_rosetta_parameters(points_shp=points_shp_,
+                                   rosetta_dir=os.path.expanduser(rosetta_dir_),
+                                   out_parquet=out_parquet_,
+                                   num_workers=12,
+                                   debug=False)
+    elif run_ncss_workflow:
+        points_shp_ = os.path.join(root_, 'soils', 'soil_potential_obs', 'ncss_labdatasqlite', 'ncss_profiles.shp')
+        out_parquet_ = os.path.join(root_, 'soils', 'soil_potential_obs', 'ncss_labdatasqlite', 'extracted_rosetta_points.parquet')
         extract_rosetta_parameters(points_shp=points_shp_,
                                    rosetta_dir=os.path.expanduser(rosetta_dir_),
                                    out_parquet=out_parquet_,

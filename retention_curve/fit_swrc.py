@@ -83,7 +83,8 @@ if __name__ == '__main__':
 
     run_rosetta = False
     run_mt_mesonet = False
-    run_reesh = True
+    run_reesh = False
+    run_ncss = True
 
     method = 'bayes'
 
@@ -110,5 +111,11 @@ if __name__ == '__main__':
         ts_src = ('reesh', amf_root_) if os.path.exists(amf_root_) else None
         if os.path.exists(in_dir_):
             fit_standardized_dir(in_dir_, out_dir_, method=method, ts_source=ts_src, overwrite=True, workers=16)
+
+    if run_ncss:
+        in_dir_ = os.path.join(root, 'preprocessed', 'ncss')
+        out_dir_ = os.path.join(out_root, 'ncss', method)
+        if os.path.exists(in_dir_):
+            fit_standardized_dir(in_dir_, out_dir_, method=method, workers=12)
 
 # ========================= EOF ====================================================================

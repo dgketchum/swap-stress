@@ -71,12 +71,17 @@ def get_bands(shapefile_path, mgrs_shp_path, bucket, file_prefix, resolution, in
     Extract climatological data for a set of points from a local shapefile.
     """
     points_df = gpd.read_file(shapefile_path)
-    mgrs_gdf = gpd.read_file(mgrs_shp_path)
+    bounds = tuple(points_df.total_bounds)  # (minx, miny, maxx, maxy)
+    mgrs_gdf = gpd.read_file(mgrs_shp_path, bbox=bounds)
 
     if index_col not in points_df.columns:
         raise ValueError(f"Index column '{index_col}' not found in shapefile.")
 
     mgrs_tiles = points_df['MGRS_TILE'].sample(frac=1).unique()
+    print(f'{len(mgrs_tiles)} MGRS tiles to process', flush=True)
+
+    empty_tiles = 0
+    pts_identified = 0
 
     for tile in mgrs_tiles:
         desc = f'swapstress_{tile}'
@@ -88,8 +93,12 @@ def get_bands(shapefile_path, mgrs_shp_path, bucket, file_prefix, resolution, in
                 continue
 
         tile_df = points_df[points_df['MGRS_TILE'] == tile]
+        print(f'{desc}.csv', len(tile_df))
         if tile_df.empty:
+            empty_tiles += 1
             continue
+        else:
+            pts_identified += len(tile_df)
 
         tile_points = ee.FeatureCollection(tile_df.__geo_interface__)
 
@@ -155,13 +164,17 @@ def get_bands(shapefile_path, mgrs_shp_path, bucket, file_prefix, resolution, in
                 diagnose=diagnose
             )
 
+    print(f'{pts_identified} points identified for export')
+    print(f'{empty_tiles} tiles missing')
+
 
 if __name__ == '__main__':
     """"""
-    run_mt_mesonet_workflow = True
+    run_mt_mesonet_workflow = False
     run_rosetta_workflow = False
     run_gshp_workflow = False
-    run_reesh_workflow = False
+    run_ncss_workflow = False
+    run_reesh_workflow = True
     run_ismn_workflow = False
 
     resolution_ = 250
@@ -211,6 +224,26 @@ if __name__ == '__main__':
         shapefile_ = os.path.join(root_, 'soils', 'soil_potential_obs', 'gshp', 'wrc_aggregated_mgrs.shp')
         index_ = 'profile_id'
         output_prefix_ = f'swapstress/gshp_training_data_{resolution_}m'
+        mgrs_shapefile_ = os.path.join(root_, 'boundaries', 'mgrs', 'mgrs_world_attr.shp')
+
+        is_authorized()
+        get_bands(shapefile_path=shapefile_,
+                  mgrs_shp_path=mgrs_shapefile_,
+                  bucket=gcs_bucket_,
+                  file_prefix=output_prefix_,
+                  resolution=resolution_,
+                  index_col=index_,
+                  split_tiles=False,
+                  diagnose=False,
+                  check_dir=extracts_dir_,
+                  region='global')
+
+    elif run_ncss_workflow:
+        extracts_dir_ = os.path.join(root_, 'soils', 'swapstress', 'extracts', f'ncss_extracts_{resolution_}m')
+        shapefile_ = os.path.join(root_, 'soils', 'soil_potential_obs', 'ncss_labdatasqlite', 'ncss_profiles.shp')
+        # out_shp = os.path.join(root_, 'soils', 'soil_potential_obs', 'ncss_labdatasqlite',  'ncss_profiles.shp')
+        index_ = 'profile_id'
+        output_prefix_ = f'swapstress/ncss_training_data_{resolution_}m'
         mgrs_shapefile_ = os.path.join(root_, 'boundaries', 'mgrs', 'mgrs_world_attr.shp')
 
         is_authorized()

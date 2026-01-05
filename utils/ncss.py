@@ -10,6 +10,7 @@ import os
 import subprocess
 import tempfile
 import pandas as pd
+import geopandas as gpd
 
 BAR_TO_CM = 1019.72
 WRC_MAP = {
@@ -26,6 +27,7 @@ WRC_MAP = {
 def ncss_to_standardized(df):
     id_cols = [
         'labsampnum', 'pedon_key', 'hzn_top', 'hzn_bot', 'hzn_mid_cm',
+        'latitude_std_decimal_degrees', 'longitude_std_decimal_degrees',
         'sand_total', 'silt_total', 'clay_total',
         'bulk_density_oven_dry',
     ]
@@ -60,6 +62,7 @@ def ncss_to_standardized(df):
 
     keep = [
         'profile_id', 'depth_cm', 'suction_cm', 'theta',
+        'latitude_std_decimal_degrees', 'longitude_std_decimal_degrees',
         'db_od', 'sand_tot_psa', 'silt_tot_psa', 'clay_tot_psa', 'source_db',
     ]
     out = m[keep].copy()
@@ -67,9 +70,9 @@ def ncss_to_standardized(df):
     # Derive SWCC coverage classes by profile
     sm = out.copy()
     sm['suction_m'] = sm['suction_cm'].astype(float) / 100.0
-    g = sm.groupby('profile_id')['suction_m']
-    has_wet = g.min() <= 0.01
-    has_dry = g.max() >= 150.0
+    g = sm.groupby('profile_id')['suction_cm']
+    has_wet = g.min() <= 150
+    has_dry = g.max() >= 14000
     cls = pd.Series('NWND', index=has_wet.index)
     cls.loc[has_wet & has_dry] = 'YWYD'
     cls.loc[has_wet & ~has_dry] = 'YWND'
@@ -89,6 +92,53 @@ def load_ncss_parquet(parquet_path):
 def write_standardized(df, out_csv):
     os.makedirs(os.path.dirname(out_csv), exist_ok=True)
     df.to_csv(out_csv, index=False)
+
+
+def write_profile_shapefile(out_csv, out_shp):
+    df = pd.read_csv(out_csv)
+    df['profile_id'] = df['profile_id'].astype(str)
+    profiles = df.dropna(subset=['latitude_std_decimal_degrees', 'longitude_std_decimal_degrees'])
+    profiles = profiles.groupby('profile_id', as_index=False).first()
+    points = gpd.GeoDataFrame(
+        profiles[['profile_id']].copy(),
+        geometry=gpd.points_from_xy(
+            profiles['longitude_std_decimal_degrees'].astype(float),
+            profiles['latitude_std_decimal_degrees'].astype(float),
+        ),
+        crs='EPSG:4326',
+    )
+    os.makedirs(os.path.dirname(out_shp), exist_ok=True)
+    points.to_file(out_shp)
+
+
+def write_profile_mgrs_shapefile(out_csv, out_shp, mgrs_shp):
+    df = pd.read_csv(out_csv)
+    df['profile_id'] = df['profile_id'].astype(str)
+    profiles = df.dropna(subset=['latitude_std_decimal_degrees', 'longitude_std_decimal_degrees'])
+    profiles = profiles.groupby('profile_id', as_index=False).first()
+
+    points = gpd.GeoDataFrame(
+        profiles[['profile_id']].copy(),
+        geometry=gpd.points_from_xy(
+            profiles['longitude_std_decimal_degrees'].astype(float),
+            profiles['latitude_std_decimal_degrees'].astype(float),
+        ),
+        crs='EPSG:4326',
+    )
+
+    mgrs = gpd.read_file(mgrs_shp)[['MGRS_TILE', 'geometry']]
+    if mgrs.crs != points.crs:
+        mgrs = mgrs.to_crs(points.crs)
+
+    joined = gpd.sjoin(points, mgrs, how='left', predicate='within')
+    if 'index_right' in joined.columns:
+        joined = joined.drop(columns=['index_right'])
+    joined = joined.dropna(subset=['MGRS_TILE'])
+    joined = joined[['profile_id', 'MGRS_TILE', 'geometry']].copy()
+
+    os.makedirs(os.path.dirname(out_shp), exist_ok=True)
+    joined.to_file(out_shp)
+    print(f'wrote {out_shp}')
 
 
 def standardized_to_rfit(df_std, min_obs_per_profile=4):
@@ -132,7 +182,7 @@ def write_rfit_csv(df_rfit, out_csv):
 
 def run_fit_new_samples(samples_csv, ptf_rds, out_dir,
                         rscript_path=os.path.expanduser(
-                            '~/PycharmProjects/GSHP-database/rwrap/fit_new_samples.R'
+                            '~/code/GSHP-database/rwrap/fit_new_samples.R'
                         ),
                         min_obs_per_profile=4):
     """
@@ -183,10 +233,14 @@ if __name__ == '__main__':
     in_parquet = os.path.join(base_dir, 'ncss_selection.parquet')
     out_csv = os.path.join(base_dir, 'standardized_ncss.csv')
     out_csv_rfit = os.path.join(base_dir, 'ncss_for_fit_new.csv')
+    out_shp = os.path.join(base_dir, 'ncss_profiles.shp')
+    run_rfit = False
+    mgrs_shp = os.path.expanduser('~/data/IrrigationGIS/boundaries/mgrs/mgrs_world_attr.shp')
 
     df_ = load_ncss_parquet(in_parquet)
     std_ = ncss_to_standardized(df_)
     write_standardized(std_, out_csv)
+    write_profile_mgrs_shapefile(out_csv, out_shp, mgrs_shp)
 
     rfit_df = standardized_to_rfit(std_)
     write_rfit_csv(rfit_df, out_csv_rfit)
@@ -194,9 +248,9 @@ if __name__ == '__main__':
     gshp_fit = os.path.expanduser('~/data/IrrigationGIS/soils/soil_potential_obs/curve_fits/gshp/rfit')
     ptf_rds = os.path.join(gshp_fit, 'ptf_model.rds')
     fit_out_dir = os.path.join(base_dir, 'ncss_fit_new_out')
-    rscript_path = os.path.expanduser('~/PycharmProjects/GSHP-database/rwrap/fit_new_samples.R')
+    rscript_path = os.path.expanduser('~/code/GSHP-database/rwrap/fit_new_samples.R')
 
-    if ptf_rds:
+    if run_rfit and ptf_rds:
         if not os.path.exists(ptf_rds):
             print(f"PTF model RDS not found at {ptf_rds}; skipping fit_new_samples.R call.")
         elif not os.path.exists(rscript_path):
