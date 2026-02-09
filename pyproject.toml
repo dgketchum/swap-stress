@@ -26,13 +26,6 @@ dependencies = [
     "scikit-learn",
     "lightning",
 
-    # Curve fitting / Bayesian
-    "lmfit",
-    "pymc",
-
-    # Visualization tools
-    "visualtorch",
-
     # Data access
     "ismn",
     "openet-ptjpl",
