@@ -24,27 +24,45 @@ Usage:
         if not src.has_vg_params:
             print(f"{name} requires VG fitting")
 """
+
 import os
 from dataclasses import dataclass, field
-from typing import Optional, List, Callable
+from typing import Optional, List
 
-
-# Standard VG parameter names
-VG_PARAMS_NATURAL = ['theta_r', 'theta_s', 'alpha', 'n']
-VG_PARAMS_LOG10 = ['theta_r', 'theta_s', 'log10_alpha', 'log10_n', 'log10_Ks']
 
 # Columns to drop when preparing features (identifiers, metadata)
 STANDARD_DROP_COLS = [
-    'MGRS_TILE', 'station', 'rosetta_level', 'profile_id', 'sample_id',
-    'nwsli_id', 'network', 'mesowest_i', 'data_flag', 'obs_ct', 'SWCC_class',
-    'source', 'depth', 'depth_cm', 'lat', 'lon', 'latitude', 'longitude',
+    "MGRS_TILE",
+    "station",
+    "rosetta_level",
+    "profile_id",
+    "sample_id",
+    "nwsli_id",
+    "network",
+    "mesowest_i",
+    "data_flag",
+    "obs_ct",
+    "SWCC_class",
+    "source",
+    "depth",
+    "depth_cm",
+    "lat",
+    "lon",
+    "latitude",
+    "longitude",
 ]
 
 # Extra metadata columns to drop from training table (shapefile attributes, duplicates)
 TRAINING_TABLE_DROP_COLS = [
-    'station', 'site_id', 'profile_id',  # Index cols (already in sample_id)
-    'Latitude', 'Longitude', 'latitude', 'longitude',  # Duplicates of lat/lon
-    'date_insta', 'sub_networ',  # Shapefile metadata
+    "station",
+    "site_id",
+    "profile_id",  # Index cols (already in sample_id)
+    "Latitude",
+    "Longitude",
+    "latitude",
+    "longitude",  # Duplicates of lat/lon
+    "date_insta",
+    "sub_networ",  # Shapefile metadata
 ]
 
 
@@ -77,7 +95,7 @@ class DataSource:
     preprocessed_subdir: Optional[str] = None  # Subdir in preprocessed/
 
     # Depth handling
-    depth_col: str = 'depth_cm'  # Standard depth column after standardization
+    depth_col: str = "depth_cm"  # Standard depth column after standardization
     depth_from_horizon: bool = False  # True if depth = (hzn_top + hzn_bot) / 2
 
     # Optional embeddings directory name
@@ -90,15 +108,9 @@ class DataSource:
     # Extra columns to drop (source-specific)
     extra_drop_cols: List[str] = field(default_factory=list)
 
-    def get_vg_param_cols(self) -> List[str]:
-        """Return the VG parameter column names for this source."""
-        if self.vg_param_format == 'log10':
-            return VG_PARAMS_LOG10
-        return VG_PARAMS_NATURAL
-
     def get_drop_cols(self) -> List[str]:
         """Return all columns to drop when preparing features."""
-        return STANDARD_DROP_COLS + self.extra_drop_cols + self.get_vg_param_cols()
+        return STANDARD_DROP_COLS + self.extra_drop_cols
 
 
 # =============================================================================
@@ -106,87 +118,83 @@ class DataSource:
 # =============================================================================
 
 SOURCES = {
-    'gshp': DataSource(
-        name='gshp',
-        description='Global Soil Hydraulic Properties - lab water retention curves',
-        index_col='profile_id',
-        group_col='profile_id',
+    "gshp": DataSource(
+        name="gshp",
+        description="Global Soil Hydraulic Properties - lab water retention curves",
+        index_col="profile_id",
+        group_col="profile_id",
         has_vg_params=True,
-        vg_param_format='natural',
-        vg_source='labels_csv',
-        ee_extracts_subdir='gshp_extracts_250m',
-        ee_table_filename='gshp_ee_data_250m.parquet',
-        labels_subpath='soil_potential_obs/gshp/WRC_dataset_surya_et_al_2021_final_clean.csv',
-        preprocessed_subdir='gshp',
-        fit_results_subdir='gshp',
-        depth_col='depth_cm',
+        vg_param_format="natural",
+        vg_source="labels_csv",
+        ee_extracts_subdir="gshp_extracts_250m",
+        ee_table_filename="gshp_ee_data_250m.parquet",
+        labels_subpath="soil_potential_obs/gshp/WRC_dataset_surya_et_al_2021_final_clean.csv",
+        preprocessed_subdir="gshp",
+        fit_results_subdir="gshp",
+        depth_col="depth_cm",
         depth_from_horizon=True,  # Uses (hzn_top + hzn_bot) / 2
-        embeddings_subdir='gshp',
-        quality_filter_col='data_flag',
-        quality_filter_value='good quality estimate',
-        extra_drop_cols=['hzn_top', 'hzn_bot', 'SWCC_classes', 'climate_classes'],
+        embeddings_subdir="gshp",
+        quality_filter_col="data_flag",
+        quality_filter_value="good quality estimate",
+        extra_drop_cols=["hzn_top", "hzn_bot", "SWCC_classes", "climate_classes"],
     ),
-
-    'ncss': DataSource(
-        name='ncss',
-        description='National Cooperative Soil Survey - lab water retention data',
-        index_col='profile_id',
-        group_col='profile_id',
+    "ncss": DataSource(
+        name="ncss",
+        description="National Cooperative Soil Survey - lab water retention data",
+        index_col="profile_id",
+        group_col="profile_id",
         has_vg_params=False,
-        vg_param_format='natural',
-        vg_source='fitted_json',
-        ee_extracts_subdir='ncss_extracts_250m',
-        ee_table_filename='ncss_ee_data_250m.parquet',
-        preprocessed_subdir='ncss',
-        fit_results_subdir='ncss',
-        depth_col='depth_cm',
-        embeddings_subdir='ncss',
-        extra_drop_cols=['SWCC_classes', 'source_db'],
+        vg_param_format="natural",
+        vg_source="fitted_json",
+        ee_extracts_subdir="ncss_extracts_250m",
+        ee_table_filename="ncss_ee_data_250m.parquet",
+        preprocessed_subdir="ncss",
+        fit_results_subdir="ncss",
+        depth_col="depth_cm",
+        embeddings_subdir="ncss",
+        extra_drop_cols=["SWCC_classes", "source_db"],
     ),
-
-    'mt_mesonet': DataSource(
-        name='mt_mesonet',
-        description='Montana Mesonet - field soil water potential stations',
-        index_col='station',
-        group_col='station',
+    "mt_mesonet": DataSource(
+        name="mt_mesonet",
+        description="Montana Mesonet - field soil water potential stations",
+        index_col="station",
+        group_col="station",
         has_vg_params=False,
-        vg_param_format='natural',
-        vg_source='fitted_json',
-        ee_extracts_subdir='mt_mesonet_extracts_250m',
-        ee_table_filename='mt_ee_data_250m.parquet',
-        preprocessed_subdir='mt_mesonet',
-        fit_results_subdir='mt_mesonet',
-        depth_col='depth_cm',
-        embeddings_subdir='mt_mesonet',
+        vg_param_format="natural",
+        vg_source="fitted_json",
+        ee_extracts_subdir="mt_mesonet_extracts_250m",
+        ee_table_filename="mt_ee_data_250m.parquet",
+        preprocessed_subdir="mt_mesonet",
+        fit_results_subdir="mt_mesonet",
+        depth_col="depth_cm",
+        embeddings_subdir="mt_mesonet",
     ),
-
-    'reesh': DataSource(
-        name='reesh',
-        description='ReESH - Ameriflux ecosystem sites with soil WRC',
-        index_col='site_id',
-        group_col='site_id',
+    "reesh": DataSource(
+        name="reesh",
+        description="ReESH - Ameriflux ecosystem sites with soil WRC",
+        index_col="site_id",
+        group_col="site_id",
         has_vg_params=False,
-        vg_param_format='natural',
-        vg_source='fitted_json',
-        ee_extracts_subdir='reesh_extracts_250m',
-        ee_table_filename='reesh_ee_data_250m.parquet',
-        preprocessed_subdir='reesh',
-        fit_results_subdir='reesh',
-        depth_col='depth_cm',
-        embeddings_subdir='reesh',
+        vg_param_format="natural",
+        vg_source="fitted_json",
+        ee_extracts_subdir="reesh_extracts_250m",
+        ee_table_filename="reesh_ee_data_250m.parquet",
+        preprocessed_subdir="reesh",
+        fit_results_subdir="reesh",
+        depth_col="depth_cm",
+        embeddings_subdir="reesh",
     ),
-
-    'rosetta': DataSource(
-        name='rosetta',
-        description='Rosetta gridded pedotransfer predictions (7 depth levels)',
-        index_col='site_id',
-        group_col='site_id',
+    "rosetta": DataSource(
+        name="rosetta",
+        description="Rosetta gridded pedotransfer predictions (7 depth levels)",
+        index_col="site_id",
+        group_col="site_id",
         has_vg_params=True,
-        vg_param_format='log10',
-        vg_source='rosetta_join',  # Joined during ee_tables.py processing
-        ee_extracts_subdir='rosetta_extracts_250m',
-        ee_table_filename='training_data.parquet',
-        depth_col='rosetta_level',  # Uses level (1-7) not depth_cm
+        vg_param_format="log10",
+        vg_source="rosetta_join",  # Joined during ee_tables.py processing
+        ee_extracts_subdir="rosetta_extracts_250m",
+        ee_table_filename="training_data.parquet",
+        depth_col="rosetta_level",  # Uses level (1-7) not depth_cm
         extra_drop_cols=[
             # Rosetta columns are named US_R3H3_L{level}_VG_{param}
             # These get handled specially in training
@@ -216,28 +224,22 @@ def get_source(name: str) -> DataSource:
     """
     key = name.lower()
     if key not in SOURCES:
-        available = ', '.join(SOURCES.keys())
+        available = ", ".join(SOURCES.keys())
         raise KeyError(f"Unknown source '{name}'. Available: {available}")
     return SOURCES[key]
 
 
-def get_sources_requiring_fitting() -> List[DataSource]:
-    """Return list of sources that require VG parameter fitting."""
-    return [src for src in SOURCES.values() if not src.has_vg_params]
-
-
-def get_sources_with_params() -> List[DataSource]:
-    """Return list of sources that come with VG parameters."""
-    return [src for src in SOURCES.values() if src.has_vg_params]
-
-
 def list_sources() -> None:
     """Print summary of all registered sources."""
-    print(f"{'Name':<12} {'Has VG':<8} {'VG Format':<10} {'Index Col':<12} {'Description'}")
+    print(
+        f"{'Name':<12} {'Has VG':<8} {'VG Format':<10} {'Index Col':<12} {'Description'}"
+    )
     print("-" * 80)
     for name, src in SOURCES.items():
-        has_vg = 'Yes' if src.has_vg_params else 'No'
-        print(f"{name:<12} {has_vg:<8} {src.vg_param_format:<10} {src.index_col:<12} {src.description}")
+        has_vg = "Yes" if src.has_vg_params else "No"
+        print(
+            f"{name:<12} {has_vg:<8} {src.vg_param_format:<10} {src.index_col:<12} {src.description}"
+        )
 
 
 class DataPaths:
@@ -264,12 +266,16 @@ class DataPaths:
     @property
     def ee_extracts_dir(self) -> str:
         """Directory containing raw EE CSV extracts."""
-        return os.path.join(self.data_root, 'swapstress', 'extracts', self.source.ee_extracts_subdir)
+        return os.path.join(
+            self.data_root, "swapstress", "extracts", self.source.ee_extracts_subdir
+        )
 
     @property
     def ee_table(self) -> str:
         """Path to concatenated EE features parquet."""
-        return os.path.join(self.data_root, 'swapstress', 'training', self.source.ee_table_filename)
+        return os.path.join(
+            self.data_root, "swapstress", "training", self.source.ee_table_filename
+        )
 
     @property
     def labels_file(self) -> Optional[str]:
@@ -282,16 +288,24 @@ class DataPaths:
     def preprocessed_dir(self) -> Optional[str]:
         """Directory containing standardized observation CSVs."""
         if self.source.preprocessed_subdir:
-            return os.path.join(self.data_root, 'soil_potential_obs', 'preprocessed',
-                                self.source.preprocessed_subdir)
+            return os.path.join(
+                self.data_root,
+                "soil_potential_obs",
+                "preprocessed",
+                self.source.preprocessed_subdir,
+            )
         return None
 
     @property
     def fit_results_dir(self) -> Optional[str]:
         """Directory containing fitted VG parameter JSONs."""
         if self.source.fit_results_subdir:
-            return os.path.join(self.data_root, 'soil_potential_obs', 'curve_fits',
-                                self.source.fit_results_subdir)
+            return os.path.join(
+                self.data_root,
+                "soil_potential_obs",
+                "curve_fits",
+                self.source.fit_results_subdir,
+            )
         return None
 
     @property
@@ -299,17 +313,19 @@ class DataPaths:
         """Directory containing embedding parquet files."""
         if self.source.embeddings_subdir:
             # Embeddings are on a different mount
-            return os.path.join('/data/ssd2/swapstress/vwc/embeddings', self.source.embeddings_subdir)
+            return os.path.join(
+                "/data/ssd2/swapstress/vwc/embeddings", self.source.embeddings_subdir
+            )
         return None
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     list_sources()
     print()
 
     # Example usage
-    gshp = get_source('gshp')
-    paths = DataPaths('~/data/IrrigationGIS/soils', gshp)
+    gshp = get_source("gshp")
+    paths = DataPaths("~/data/IrrigationGIS/soils", gshp)
     print(f"GSHP EE table: {paths.ee_table}")
     print(f"GSHP labels: {paths.labels_file}")
     print(f"GSHP fit results: {paths.fit_results_dir}")

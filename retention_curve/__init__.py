@@ -1,12 +1,4 @@
-import os
 import re
-
-PARAM_SYMBOLS = {
-    'theta_r': r'$\theta_r$',
-    'theta_s': r'$\theta_s$',
-    'alpha': r'$\alpha$',
-    'n': 'n'
-}
 
 ROSETTA_LEVEL_DEPTHS = {
     1: (0, 2.5),
@@ -15,18 +7,10 @@ ROSETTA_LEVEL_DEPTHS = {
     4: (22.5, 45),
     5: (45, 80),
     6: (80, 150),
-    7: (150, 250)
+    7: (150, 250),
 }
 
-ROSETTA_NOMINAL_DEPTHS = {
-    1: 0,
-    2: 5,
-    3: 15,
-    4: 30,
-    5: 60,
-    6: 100,
-    7: 200
-}
+ROSETTA_NOMINAL_DEPTHS = {1: 0, 2: 5, 3: 15, 4: 30, 5: 60, 6: 100, 7: 200}
 
 EMPIRICAL_TO_ROSETTA_LEVEL_MAP = {
     5: 2,
@@ -36,7 +20,7 @@ EMPIRICAL_TO_ROSETTA_LEVEL_MAP = {
     50: 5,
     70: 5,
     91: 6,
-    100: 6
+    100: 6,
 }
 
 
@@ -80,7 +64,9 @@ def map_polaris_depth_range_to_rosetta_level(dmin_cm, dmax_cm):
     for lvl, (lo, hi) in ROSETTA_LEVEL_DEPTHS.items():
         if lo <= mid < hi:
             return int(lvl)
-    centers = {lvl: (rng[0] + rng[1]) / 2.0 for lvl, rng in ROSETTA_LEVEL_DEPTHS.items()}
+    centers = {
+        lvl: (rng[0] + rng[1]) / 2.0 for lvl, rng in ROSETTA_LEVEL_DEPTHS.items()
+    }
     levels = list(centers.keys())
     vals = list(centers.values())
     idx = int(min(range(len(vals)), key=lambda i: abs(vals[i] - mid)))
@@ -98,6 +84,6 @@ def parse_polaris_depth_from_asset(asset_path):
     return float(m.group(1)), float(m.group(2))
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     pass
 # ========================= EOF ====================================================================
