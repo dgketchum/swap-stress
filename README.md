@@ -44,7 +44,8 @@ R environment note
 
 Notes
 - The README previously referenced `retention_curve/mt_mesonet.py`; Mesonet-specific time-series code now lives under `vwc_series/mt_mesonet.py`.
-- Bayesian fitting in `swrc.py` is scaffolded but currently disabled (imports and `fit_bayesian` are commented out). Use deterministic optimizers supported by `lmfit` (e.g., `nelder`, `least_squares`, `slsqp`).
+- Bayesian fitting in `swrc.py` is fully implemented using PyMC. Use `method='bayes'` in `SWRC.fit()` for Bayesian parameter estimation with MCMC. Deterministic optimizers (`nelder`, `leastsq`, `powell`, etc.) remain available via lmfit.
+- **Unified training table**: Use `map/data/build_training_table.py` to combine multiple data sources (GSHP, NCSS, MT Mesonet, ReESH) with Earth Engine features into a single training table. This supersedes the older `station_training_table.py` and `gshp_training_table.py` for new workflows.
 
 ## Core Workflows
 
@@ -62,7 +63,7 @@ Notes
 - Standardize raw observations to SWRC tables: `retention_curve/standardize_swp.py`
   - Helpers for Mesonet, GSHP, ReESH; outputs standardized CSVs with `suction`, `theta`, `depth` (+ optional metadata).
 - Batch-fit van Genuchten parameters per station/depth: `retention_curve/fit_swrc.py`
-  - Runs `SWRC`/`GshpSWRC` fits using `lmfit` methods (e.g., `nelder`, `least_squares`, `slsqp`, `lbfgsb`); saves one JSON per station.
+  - Runs `SWRC`/`GshpSWRC` fits using `lmfit` methods (e.g., `nelder`, `leastsq`, `powell`) or Bayesian MCMC (`method='bayes'`); saves one JSON per station.
 - Build training tables joining EE features with empirical labels:
   - Stations (Mesonet/ReESH): `map/data/station_training_table.py`
   - GSHP: `map/data/gshp_training_table.py`
@@ -153,7 +154,7 @@ Optional sequence model from VWC time series:
 
 - Build raw station inputs as needed (e.g., Mesonet time series): `vwc_series/mt_mesonet.py`.
 - Standardize to SWRC tables: `retention_curve/standardize_swp.py` helpers produce CSVs with `suction`, `theta`, `depth`.
-- Fit per-depth per-station and write JSON summaries: `retention_curve/fit_swrc.py` (choose `method`: `nelder`, `least_squares`, `slsqp`, `lbfgsb`).
+- Fit per-depth per-station and write JSON summaries: `retention_curve/fit_swrc.py` (choose `method`: `nelder`, `leastsq`, `powell`, `cobyla`, `bfgs`, or `bayes` for Bayesian MCMC).
 
 ### 7) Compare empirical vs Rosetta vs ML predictions
 
@@ -176,7 +177,13 @@ Optional sequence model from VWC time series:
 
 - Earth Engine exports: Requires authentication and quotas apply. Exports are asynchronous; `ee_export.py` supports tile-wise runs and a `check_dir` to skip completed tiles. Use `split_tiles=True` for large MGRS tiles.
 - Path assumptions: Many scripts assume a base directory like `~/data/IrrigationGIS/...` and toggle workflows via booleans in `__main__`. Edit paths and flags before running.
-- SWRC fitting: Bayesian path in `swrc.py` is scaffolded but disabled. Use `lmfit` optimizers such as `nelder`, `least_squares`, `slsqp`, or `lbfgsb`. Ensure inputs are in centimeters: suction (cm), depth (cm), theta (fraction).
+- SWRC fitting: Bayesian fitting via PyMC is now active—use `method='bayes'` for MCMC sampling. Deterministic optimizers via lmfit (`nelder`, `leastsq`, `powell`, `cobyla`, `bfgs`) remain available. Ensure inputs are in centimeters: suction (cm), depth (cm), theta (fraction).
+- Data filtering thresholds: Preprocessing applies physical sanity filters:
+  - Suction: must be in (0, 10⁶] cm (max ~100 MPa)
+  - Theta (VWC): must be in [0, 1]
+  - GSHP: `lab_head_m` capped at 10⁴ m to exclude extreme outliers
+  - MT Mesonet: KPA capped at 200 kPa, negative VWC rejected
+  - NCSS: Bulk density must be in [0.5, 2.5] g/cm³ for valid gravimetric→volumetric conversion
 - Checkpoint naming: `inference_nn.py` auto-selects best checkpoints by `val_r2` embedded in filenames. If you change filename patterns, update the selection logic.
 - Categorical mappings: For embedding models, keep the `categorical_mappings.json` consistent between training and inference. One-hot paths (`MLP`) must align column sets between train and inference.
 - Sentinel handling: Some data-prep code treats values `<= -9999` as missing. Review these filters before large runs to avoid unintended row drops.

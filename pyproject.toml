@@ -1,0 +1,71 @@
+[project]
+name = "swap-stress"
+version = "0.1.0"
+description = "Soil Water Retention Curve modeling and stress analysis"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+dependencies = [
+    # Core scientific
+    "numpy",
+    "pandas",
+    "scipy",
+
+    # Geospatial
+    "geopandas",
+    "shapely",
+    "earthengine-api",
+
+    # Visualization
+    "matplotlib",
+    "seaborn",
+    "pillow",
+
+    # Machine learning
+    "torch",
+    "scikit-learn",
+    "lightning",
+
+    # Curve fitting / Bayesian
+    "lmfit",
+    "pymc",
+
+    # Visualization tools
+    "visualtorch",
+
+    # Data access
+    "ismn",
+    "openet-ptjpl",
+
+    # Utilities
+    "tqdm",
+    "pyarrow",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "ruff",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = [
+    "pytest",
+    "ruff",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = [
+    "et",
+    "map",
+    "poster",
+    "retention_curve",
+    "site_modeling",
+    "utils",
+    "viz",
+    "vwc_series",
+]

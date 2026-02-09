@@ -4,16 +4,37 @@ Unified training table builder for soil hydraulic parameter estimation.
 This module combines Earth Engine features with VG parameters from multiple
 sources into a single training table with consistent schema.
 
-Output schema:
-    - sample_id: Unique identifier ({source}_{original_id}_{depth})
-    - source: Data source name
-    - rosetta_level: Depth mapped to Rosetta levels 1-7
-    - theta_r, theta_s, alpha, n: VG parameters (natural scale)
-    - [EE features]: All extracted geospatial features
+Two output modes are supported:
+
+1. VG Parameter Mode (default):
+    Output schema:
+        - sample_id: Unique identifier ({source}_{original_id}_{depth})
+        - source: Data source name
+        - rosetta_level: Depth mapped to Rosetta levels 1-7
+        - theta_r, theta_s, alpha, n: VG parameters (natural scale)
+        - [EE features]: All extracted geospatial features
+
+2. Observation-Level Mode (observation_level=True):
+    Output schema:
+        - obs_id: Unique observation ID ({source}_{original_id}_{depth}_{obs_idx})
+        - sample_id: Sample identifier for grouping
+        - source: Data source name
+        - rosetta_level: Depth mapped to Rosetta levels 1-7
+        - theta: Volumetric water content (0-1) - INPUT FEATURE
+        - log10_suction_cm: log10(suction in cm H2O) - TARGET
+        - [EE features]: All extracted geospatial features
 
 Usage:
+    # VG parameter mode (default)
     from map.data.build_training_table import build_unified_table
     df = build_unified_table(['gshp', 'ncss'], output_path='training.parquet')
+
+    # Observation-level mode (for direct theta -> suction prediction)
+    df = build_unified_table(
+        ['gshp', 'ncss'],
+        output_path='obs_training.parquet',
+        observation_level=True,
+    )
 """
 import os
 import json
@@ -29,6 +50,178 @@ from map.data.source_registry import (
     VG_PARAMS_NATURAL, VG_PARAMS_LOG10, TRAINING_TABLE_DROP_COLS,
 )
 from retention_curve.depth_utils import depth_to_rosetta_level
+
+# Physical limits for data validation
+# These are applied during training table construction as a final safety check
+SUCTION_CM_MAX = 1e6  # cm - max ~10^6 cm = 100 MPa, beyond any realistic soil measurement
+SUCTION_CM_MIN = 1e-3  # cm - minimum positive value for log transform safety
+THETA_MIN = 0.0
+THETA_MAX = 1.0
+
+
+def standardize_observation_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Standardize column names for observation data.
+
+    Handles variations in column naming across different preprocessed sources.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        DataFrame with observation data.
+
+    Returns
+    -------
+    pd.DataFrame
+        DataFrame with standardized column names.
+    """
+    rename_map = {
+        'suction': 'suction_cm',
+        'depth': 'depth_cm',
+    }
+    return df.rename(columns={k: v for k, v in rename_map.items() if k in df.columns})
+
+
+def load_observations_from_csv(
+        csv_path: str,
+        source: DataSource,
+) -> pd.DataFrame:
+    """
+    Load raw (theta, suction_cm) observations from a preprocessed CSV file.
+
+    Parameters
+    ----------
+    csv_path : str
+        Path to preprocessed CSV file.
+    source : DataSource
+        Source configuration.
+
+    Returns
+    -------
+    pd.DataFrame
+        DataFrame with columns: [index_col, depth_cm, rosetta_level, theta, suction_cm]
+        One row per observation.
+    """
+    try:
+        df = pd.read_csv(csv_path)
+    except Exception:
+        return pd.DataFrame()
+
+    if df.empty:
+        return pd.DataFrame()
+
+    # Standardize column names
+    df = standardize_observation_columns(df)
+
+    # Required columns
+    if 'theta' not in df.columns or 'suction_cm' not in df.columns:
+        return pd.DataFrame()
+
+    # Extract identifier from filename
+    identifier = os.path.splitext(os.path.basename(csv_path))[0]
+
+    # Add index column
+    df[source.index_col] = str(identifier)
+
+    # Ensure depth_cm exists
+    if 'depth_cm' not in df.columns:
+        df['depth_cm'] = 0.0
+
+    # Add rosetta_level
+    df['rosetta_level'] = df['depth_cm'].apply(depth_to_rosetta_level)
+
+    # Filter valid observations with explicit bounds
+    df = df[df['theta'].notna() & df['suction_cm'].notna()]
+    # Theta must be in [0, 1]
+    df = df[(df['theta'] >= THETA_MIN) & (df['theta'] <= THETA_MAX)]
+    # Suction must be positive and within physical bounds for log transform
+    df = df[(df['suction_cm'] >= SUCTION_CM_MIN) & (df['suction_cm'] <= SUCTION_CM_MAX)]
+
+    # Keep only needed columns
+    keep_cols = [source.index_col, 'depth_cm', 'rosetta_level', 'theta', 'suction_cm']
+    extra_cols = [c for c in df.columns if c not in keep_cols and c in ['sand_tot_psa', 'silt_tot_psa', 'clay_tot_psa', 'db_od']]
+    keep_cols = keep_cols + extra_cols
+
+    return df[[c for c in keep_cols if c in df.columns]].copy()
+
+
+def load_observations_from_json(
+        json_path: str,
+        source: DataSource,
+) -> pd.DataFrame:
+    """
+    Load raw (theta, suction_cm) observations from a fitted JSON file.
+
+    Extracts data from res['data']['theta'] and res['data']['suction'] arrays.
+
+    Parameters
+    ----------
+    json_path : str
+        Path to fitted JSON file.
+    source : DataSource
+        Source configuration.
+
+    Returns
+    -------
+    pd.DataFrame
+        DataFrame with columns: [index_col, depth_cm, rosetta_level, theta, suction_cm]
+        One row per observation.
+    """
+    try:
+        with open(json_path, 'r') as f:
+            data = json.load(f)
+            meta = data.pop('metadata', {})
+    except Exception:
+        return pd.DataFrame()
+
+    rows = []
+    for depth_str, res in data.items():
+        if not isinstance(res, dict):
+            continue
+        if res.get('status') != 'Success':
+            continue
+
+        try:
+            depth_cm = float(depth_str)
+        except (TypeError, ValueError):
+            continue
+
+        # Get raw observation arrays
+        obs_data = res.get('data', {})
+        theta_arr = obs_data.get('theta', [])
+        suction_arr = obs_data.get('suction', obs_data.get('suction_cm', []))
+
+        if not theta_arr or not suction_arr or len(theta_arr) != len(suction_arr):
+            continue
+
+        # Get identifier
+        depth_meta = meta.get(depth_str, {})
+        identifier = (
+            depth_meta.get(source.index_col) or
+            depth_meta.get('station') or
+            depth_meta.get('profile_id') or
+            os.path.splitext(os.path.basename(json_path))[0]
+        )
+
+        rosetta_level = depth_to_rosetta_level(depth_cm)
+
+        for theta, suction in zip(theta_arr, suction_arr):
+            # Filter valid observations with explicit bounds
+            if (theta is not None and suction is not None and
+                THETA_MIN <= float(theta) <= THETA_MAX and
+                SUCTION_CM_MIN <= float(suction) <= SUCTION_CM_MAX):
+                rows.append({
+                    source.index_col: str(identifier),
+                    'depth_cm': depth_cm,
+                    'rosetta_level': rosetta_level,
+                    'theta': float(theta),
+                    'suction_cm': float(suction),
+                })
+
+    if not rows:
+        return pd.DataFrame()
+
+    return pd.DataFrame(rows)
 
 
 def _count_obs_from_preprocessed(preprocessed_dir: str, profile_id: str, depth_cm: float) -> int:
@@ -291,6 +484,191 @@ def load_embeddings(
     return emb_df
 
 
+def load_observations_for_source(
+        source: DataSource,
+        data_root: str,
+        fit_method: str = 'bayes',
+        prefer_preprocessed: bool = True,
+) -> pd.DataFrame:
+    """
+    Load all raw observations for a source from preprocessed CSVs or fitted JSONs.
+
+    Parameters
+    ----------
+    source : DataSource
+        Source configuration.
+    data_root : str
+        Root data directory.
+    fit_method : str
+        Fitting method subdirectory for JSON files.
+    prefer_preprocessed : bool
+        If True, prefer preprocessed CSVs over JSON data arrays.
+
+    Returns
+    -------
+    pd.DataFrame
+        DataFrame with all observations for the source.
+        Columns: [index_col, depth_cm, rosetta_level, theta, suction_cm]
+    """
+    paths = DataPaths(data_root, source)
+    frames = []
+    loaded_ids = set()
+
+    # Try preprocessed CSVs first if preferred
+    if prefer_preprocessed and paths.preprocessed_dir and os.path.isdir(paths.preprocessed_dir):
+        csv_files = glob(os.path.join(paths.preprocessed_dir, '*.csv'))
+        for csv_path in tqdm(csv_files, desc=f'Loading {source.name} CSVs', leave=False):
+            df = load_observations_from_csv(csv_path, source)
+            if not df.empty:
+                frames.append(df)
+                identifier = os.path.splitext(os.path.basename(csv_path))[0]
+                loaded_ids.add(str(identifier))
+
+    # Fall back to JSON for any missing profiles
+    if paths.fit_results_dir and os.path.isdir(paths.fit_results_dir):
+        json_subdir = os.path.join(paths.fit_results_dir, fit_method)
+        if os.path.isdir(json_subdir):
+            json_files = glob(os.path.join(json_subdir, '*.json'))
+            for json_path in tqdm(json_files, desc=f'Loading {source.name} JSONs', leave=False):
+                identifier = os.path.splitext(os.path.basename(json_path))[0]
+                # Skip if already loaded from CSV
+                if str(identifier) in loaded_ids:
+                    continue
+                df = load_observations_from_json(json_path, source)
+                if not df.empty:
+                    frames.append(df)
+
+    if not frames:
+        return pd.DataFrame()
+
+    combined = pd.concat(frames, ignore_index=True)
+    return combined
+
+
+def load_source_observations(
+        source: DataSource,
+        data_root: str,
+        fit_method: str = 'bayes',
+        prefer_preprocessed: bool = True,
+        include_embeddings: bool = False,
+) -> pd.DataFrame:
+    """
+    Load and join EE features with raw observations for a single source.
+
+    This is the observation-level equivalent of load_source_data().
+
+    Parameters
+    ----------
+    source : DataSource
+        Source configuration.
+    data_root : str
+        Root data directory.
+    fit_method : str
+        Fitting method for JSON files.
+    prefer_preprocessed : bool
+        Prefer preprocessed CSVs over JSON data.
+    include_embeddings : bool
+        Whether to include embeddings.
+
+    Returns
+    -------
+    pd.DataFrame
+        Combined features and observations with standardized columns.
+        Each row is a single (theta, suction) observation with all EE features.
+    """
+    paths = DataPaths(data_root, source)
+
+    # Load EE features
+    ee_table = paths.ee_table
+    if not os.path.exists(ee_table):
+        raise FileNotFoundError(f"EE features not found: {ee_table}")
+
+    ee_df = pd.read_parquet(ee_table)
+
+    # Reset index if needed
+    if ee_df.index.name is not None:
+        ee_df = ee_df.reset_index()
+
+    ee_df[source.index_col] = ee_df[source.index_col].astype(str)
+
+    # Normalize station names for station-based sources
+    if source.index_col == 'station':
+        ee_df[source.index_col] = ee_df[source.index_col].str.lower().str.replace('_', '-')
+
+    # Note: ReESH site_id normalization happens below when processing observations
+    # EE table already uses underscores (e.g., 'US_CDM'), observations will be normalized to match
+
+    # Drop VG columns from EE data (not needed for observation-level)
+    vg_cols_to_drop = [c for c in VG_PARAMS_NATURAL + VG_PARAMS_LOG10 if c in ee_df.columns]
+    if vg_cols_to_drop:
+        ee_df = ee_df.drop(columns=vg_cols_to_drop)
+
+    # Load observations
+    obs_df = load_observations_for_source(
+        source,
+        data_root,
+        fit_method=fit_method,
+        prefer_preprocessed=prefer_preprocessed,
+    )
+
+    if obs_df.empty:
+        raise ValueError(f"No observations found for source {source.name}")
+
+    # Normalize station names in observations
+    if source.index_col == 'station' and source.index_col in obs_df.columns:
+        obs_df[source.index_col] = obs_df[source.index_col].str.lower().str.replace('_', '-')
+
+    # Handle ReESH: extract site portion from full identifier for EE join
+    # CSV identifiers are like 'US-CDM_1', 'IN-Martell_ControlDH'
+    # EE table has site-only like 'US_CDM', 'IN_Martell'
+    if source.name == 'reesh' and source.index_col == 'site_id':
+        # Extract site portion: take first part before underscore, normalize hyphens
+        def extract_reesh_site(identifier):
+            # Split on underscore and take first part (the site code)
+            parts = str(identifier).split('_')
+            site = parts[0]
+            # Normalize hyphen to underscore to match EE table format
+            return site.replace('-', '_')
+
+        obs_df[source.index_col] = obs_df[source.index_col].apply(extract_reesh_site)
+
+    # Merge observations with EE features (replicates features for each observation)
+    merged = obs_df.merge(
+        ee_df.drop_duplicates(subset=source.index_col),
+        on=source.index_col,
+        how='left',
+    )
+
+    # Add log10_suction_cm target
+    merged['log10_suction_cm'] = np.log10(merged['suction_cm'].clip(lower=1e-6))
+
+    # Add embeddings if requested
+    if include_embeddings:
+        emb_dir = paths.embeddings_dir
+        if emb_dir and os.path.isdir(emb_dir):
+            emb_df = load_embeddings(emb_dir, source.index_col)
+            if not emb_df.empty:
+                emb_df = emb_df.reset_index()
+                merged = merged.merge(emb_df, on=source.index_col, how='left')
+
+    # Add source identifier
+    merged['source'] = source.name
+
+    # Create unique sample_id (profile+depth) and obs_id (profile+depth+idx)
+    merged['sample_id'] = (
+        source.name + '_' +
+        merged[source.index_col].astype(str) + '_' +
+        merged['depth_cm'].astype(str)
+    )
+
+    # Add observation index within each sample
+    merged['obs_idx'] = merged.groupby('sample_id').cumcount()
+    merged['obs_id'] = merged['sample_id'] + '_' + merged['obs_idx'].astype(str)
+    merged = merged.drop(columns=['obs_idx'])
+
+    return merged
+
+
 def load_source_data(
         source: DataSource,
         data_root: str,
@@ -337,6 +715,8 @@ def load_source_data(
     if source.index_col == 'station':
         ee_df[source.index_col] = ee_df[source.index_col].str.lower().str.replace('_', '-')
 
+    # Note: For ReESH, params will be normalized to match EE table (underscores) below
+
     # Load VG parameters based on source type
     if source.vg_source == 'labels_csv':
         labels_path = paths.labels_file
@@ -362,6 +742,11 @@ def load_source_data(
     # Normalize station names in params_df
     if source.index_col in ['station'] and source.index_col in params_df.columns:
         params_df[source.index_col] = params_df[source.index_col].str.lower().str.replace('_', '-')
+
+    # Handle ReESH: normalize site_id to match EE table format (hyphens -> underscores)
+    # JSON files have 'US-CDM', EE table has 'US_CDM'
+    if source.name == 'reesh' and source.index_col == 'site_id':
+        params_df[source.index_col] = params_df[source.index_col].str.replace('-', '_')
 
     # Normalize VG params to natural scale
     params_df = normalize_vg_params(params_df, source.vg_param_format, 'natural')
@@ -414,6 +799,8 @@ def build_unified_table(
         fit_method: str = 'bayes',
         include_embeddings: bool = False,
         vg_format: str = 'natural',
+        observation_level: bool = False,
+        prefer_preprocessed: bool = True,
 ) -> pd.DataFrame:
     """
     Build a unified training table from multiple data sources.
@@ -431,12 +818,19 @@ def build_unified_table(
     include_embeddings : bool
         Whether to include embeddings.
     vg_format : str
-        Output VG parameter format: 'natural' or 'log10'.
+        Output VG parameter format: 'natural' or 'log10'. Only used when observation_level=False.
+    observation_level : bool
+        If True, output observation-level data with (theta, log10_suction_cm) pairs
+        instead of VG parameters. Each row is a single observation.
+    prefer_preprocessed : bool
+        When observation_level=True, prefer preprocessed CSVs over JSON data arrays.
 
     Returns
     -------
     pd.DataFrame
         Unified training table with consistent schema.
+        When observation_level=False: VG parameters as targets (one row per profile/depth).
+        When observation_level=True: theta as input, log10_suction_cm as target (one row per observation).
     """
     frames = []
 
@@ -445,21 +839,30 @@ def build_unified_table(
         print(f"Loading {source_name}...")
 
         try:
-            df = load_source_data(
-                source,
-                data_root,
-                fit_method=fit_method,
-                include_embeddings=include_embeddings,
-            )
-
-            # Convert VG format if needed
-            if vg_format != 'natural':
-                df = normalize_vg_params(df, 'natural', vg_format)
+            if observation_level:
+                df = load_source_observations(
+                    source,
+                    data_root,
+                    fit_method=fit_method,
+                    prefer_preprocessed=prefer_preprocessed,
+                    include_embeddings=include_embeddings,
+                )
+                print(f"  Loaded {len(df)} observations from {source_name}")
+            else:
+                df = load_source_data(
+                    source,
+                    data_root,
+                    fit_method=fit_method,
+                    include_embeddings=include_embeddings,
+                )
+                # Convert VG format if needed
+                if vg_format != 'natural':
+                    df = normalize_vg_params(df, 'natural', vg_format)
+                print(f"  Loaded {len(df)} samples from {source_name}")
 
             frames.append(df)
-            print(f"  Loaded {len(df)} samples from {source_name}")
 
-        except FileNotFoundError as e:
+        except (FileNotFoundError, ValueError) as e:
             print(f"  Warning: Skipping {source_name} - {e}")
             continue
 
@@ -469,37 +872,67 @@ def build_unified_table(
     # Combine all sources
     combined = pd.concat(frames, ignore_index=True)
 
-    # Set sample_id as index
-    combined = combined.set_index('sample_id')
+    if observation_level:
+        # Set obs_id as index for observation-level data
+        combined = combined.set_index('obs_id')
 
-    # Drop rows with missing VG params
-    vg_cols = VG_PARAMS_NATURAL[:4] if vg_format == 'natural' else ['theta_r', 'theta_s', 'log10_alpha', 'log10_n']
-    vg_cols = [c for c in vg_cols if c in combined.columns]
-    combined = combined.dropna(subset=vg_cols)
+        # Drop rows with missing observations
+        combined = combined.dropna(subset=['theta', 'log10_suction_cm'])
 
-    # Ensure depth columns are present and valid
-    if 'depth_cm' not in combined.columns:
-        print("  Warning: depth_cm column missing")
-    if 'rosetta_level' not in combined.columns:
-        print("  Warning: rosetta_level column missing")
-    elif combined['rosetta_level'].isna().all():
-        print("  Warning: rosetta_level is all NaN")
+        # Validate theta range
+        invalid_theta = (combined['theta'] < 0) | (combined['theta'] > 1)
+        if invalid_theta.any():
+            print(f"  Warning: {invalid_theta.sum()} observations with invalid theta (outside 0-1)")
+            combined = combined[~invalid_theta]
 
-    print(f"\nCombined table: {len(combined)} samples, {combined.shape[1]} columns")
-    print(f"Sources: {combined['source'].value_counts().to_dict()}")
-    if 'rosetta_level' in combined.columns:
-        level_counts = combined['rosetta_level'].value_counts().sort_index().to_dict()
-        print(f"Rosetta levels: {level_counts}")
-    if 'depth_cm' in combined.columns:
-        print(f"Depth range: {combined['depth_cm'].min():.1f} - {combined['depth_cm'].max():.1f} cm")
+        # Report statistics
+        print(f"\nCombined table: {len(combined)} observations, {combined.shape[1]} columns")
+        print(f"Sources: {combined['source'].value_counts().to_dict()}")
+        print(f"Theta range: {combined['theta'].min():.3f} - {combined['theta'].max():.3f}")
+        print(f"log10(suction_cm) range: {combined['log10_suction_cm'].min():.2f} - {combined['log10_suction_cm'].max():.2f}")
+        if 'rosetta_level' in combined.columns:
+            level_counts = combined['rosetta_level'].value_counts().sort_index().to_dict()
+            print(f"Rosetta levels: {level_counts}")
 
-    # Drop metadata/duplicate columns before saving
-    drop_cols = [c for c in TRAINING_TABLE_DROP_COLS if c in combined.columns]
-    combined = combined.drop(columns=drop_cols)
+        # Drop metadata columns
+        drop_cols = [c for c in TRAINING_TABLE_DROP_COLS + ['suction_cm'] if c in combined.columns]
+        combined = combined.drop(columns=drop_cols)
 
-    # Reorder columns with important ones first
-    priority_cols = ['source', 'rosetta_level', 'depth_cm', 'data_ct', 'theta_r', 'theta_s', 'alpha', 'n']
-    priority_cols = [c for c in priority_cols if c in combined.columns]
+        # Reorder columns with important ones first
+        priority_cols = ['source', 'sample_id', 'rosetta_level', 'depth_cm', 'theta', 'log10_suction_cm']
+        priority_cols = [c for c in priority_cols if c in combined.columns]
+    else:
+        # Set sample_id as index
+        combined = combined.set_index('sample_id')
+
+        # Drop rows with missing VG params
+        vg_cols = VG_PARAMS_NATURAL[:4] if vg_format == 'natural' else ['theta_r', 'theta_s', 'log10_alpha', 'log10_n']
+        vg_cols = [c for c in vg_cols if c in combined.columns]
+        combined = combined.dropna(subset=vg_cols)
+
+        # Ensure depth columns are present and valid
+        if 'depth_cm' not in combined.columns:
+            print("  Warning: depth_cm column missing")
+        if 'rosetta_level' not in combined.columns:
+            print("  Warning: rosetta_level column missing")
+        elif combined['rosetta_level'].isna().all():
+            print("  Warning: rosetta_level is all NaN")
+
+        print(f"\nCombined table: {len(combined)} samples, {combined.shape[1]} columns")
+        print(f"Sources: {combined['source'].value_counts().to_dict()}")
+        if 'rosetta_level' in combined.columns:
+            level_counts = combined['rosetta_level'].value_counts().sort_index().to_dict()
+            print(f"Rosetta levels: {level_counts}")
+        if 'depth_cm' in combined.columns:
+            print(f"Depth range: {combined['depth_cm'].min():.1f} - {combined['depth_cm'].max():.1f} cm")
+
+        # Drop metadata/duplicate columns before saving
+        drop_cols = [c for c in TRAINING_TABLE_DROP_COLS if c in combined.columns]
+        combined = combined.drop(columns=drop_cols)
+
+        # Reorder columns with important ones first
+        priority_cols = ['source', 'rosetta_level', 'depth_cm', 'data_ct', 'theta_r', 'theta_s', 'alpha', 'n']
+        priority_cols = [c for c in priority_cols if c in combined.columns]
     other_cols = [c for c in combined.columns if c not in priority_cols]
     combined = combined[priority_cols + other_cols]
 
@@ -522,7 +955,8 @@ if __name__ == '__main__':
     # Workflow flags
     build_gshp_ncss = False
     build_stations = False
-    build_all_sources = True
+    build_all_sources = False
+    build_observation_level = True
     include_embeddings_ = True
 
     if build_gshp_ncss:
@@ -561,6 +995,24 @@ if __name__ == '__main__':
             fit_method='bayes',
             include_embeddings=include_embeddings_,
             vg_format='natural',
+        )
+
+    if build_observation_level:
+        # Build observation-level training table
+        # Each row is a (theta, suction) observation with EE features
+        # Target: log10_suction_cm, Input feature: theta + EE features
+        sources_ = ['gshp', 'ncss', 'mt_mesonet', 'reesh']
+        output_path_ = os.path.join(output_dir_, 'obs_level_training_250m.parquet')
+        if include_embeddings_:
+            output_path_ = os.path.join(output_dir_, 'obs_level_training_emb_250m.parquet')
+        build_unified_table(
+            sources=sources_,
+            data_root=data_root_,
+            output_path=output_path_,
+            fit_method='bayes',
+            include_embeddings=include_embeddings_,
+            observation_level=True,
+            prefer_preprocessed=True,
         )
 
 # ========================= EOF ====================================================================

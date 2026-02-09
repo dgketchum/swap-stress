@@ -23,6 +23,13 @@ WRC_MAP = {
     'water_retention_15_bar': 15.0,
 }
 
+# Physical limits for NCSS data sanity filtering
+BULK_DENSITY_MIN = 0.5  # g/cm³ - lower bound for soils
+BULK_DENSITY_MAX = 2.5  # g/cm³ - upper bound for mineral soils
+THETA_MIN = 0.0
+THETA_MAX = 1.0
+SUCTION_CM_MAX = 1e6  # cm - max realistic suction
+
 
 def ncss_to_standardized(df):
     id_cols = [
@@ -36,6 +43,8 @@ def ncss_to_standardized(df):
     d0 = df[id_cols + wr_cols].copy()
     m = d0.melt(id_vars=id_cols, value_vars=wr_cols, var_name='wr_col', value_name='wr_val')
     m = m.dropna(subset=['wr_val'])
+    n_initial = len(m)
+    dropped_reasons = []
 
     if 'pedon_key' in m.columns:
         m['profile_id'] = m['pedon_key'].astype(str)
@@ -50,9 +59,36 @@ def ncss_to_standardized(df):
         m['depth_cm'] = (m['hzn_top'].astype(float) + m['hzn_bot'].astype(float)) / 2.0
     m['suction_cm'] = m['wr_col'].map(WRC_MAP).astype(float) * BAR_TO_CM
 
+    # Filter invalid bulk densities before gravimetric->volumetric conversion
+    bd = m['bulk_density_oven_dry'].astype(float)
+    mask_bd_invalid = (bd < BULK_DENSITY_MIN) | (bd > BULK_DENSITY_MAX) | bd.isna()
+    n_bd_invalid = mask_bd_invalid.sum()
+    if n_bd_invalid > 0:
+        dropped_reasons.append(f"invalid_bulk_density: {n_bd_invalid}")
+        m = m[~mask_bd_invalid]
+
     # NCSS water retention typically reported as gravimetric percent
     grav = m['wr_val'].astype(float) / 100.0
     m['theta'] = grav * m['bulk_density_oven_dry'].astype(float)  # uses oven-dry bulk density
+
+    # Filter theta outside physical bounds [0, 1]
+    mask_theta_invalid = (m['theta'] < THETA_MIN) | (m['theta'] > THETA_MAX)
+    n_theta_invalid = mask_theta_invalid.sum()
+    if n_theta_invalid > 0:
+        dropped_reasons.append(f"theta_outside_0-1: {n_theta_invalid}")
+        m = m[~mask_theta_invalid]
+
+    # Filter extreme suction values
+    mask_suction_invalid = (m['suction_cm'] <= 0) | (m['suction_cm'] > SUCTION_CM_MAX)
+    n_suction_invalid = mask_suction_invalid.sum()
+    if n_suction_invalid > 0:
+        dropped_reasons.append(f"suction_invalid: {n_suction_invalid}")
+        m = m[~mask_suction_invalid]
+
+    n_final = len(m)
+    n_dropped = n_initial - n_final
+    if n_dropped > 0:
+        print(f"  [NCSS] Dropped {n_dropped}/{n_initial} rows: {', '.join(dropped_reasons)}")
 
     m['db_od'] = m['bulk_density_oven_dry']
     m['sand_tot_psa'] = m['sand_total']

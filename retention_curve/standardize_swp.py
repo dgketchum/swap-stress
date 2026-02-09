@@ -8,6 +8,73 @@ from tqdm import tqdm
 
 MPA_TO_CM = 10197.16
 
+# Physical limits for data sanity filtering
+# Suction: max ~1e6 cm (100 MPa) is beyond any realistic soil measurement
+SUCTION_CM_MAX = 1e6
+# Theta (VWC): must be in [0, 1] by definition
+THETA_MIN = 0.0
+THETA_MAX = 1.0
+# KPA for MT Mesonet: 200 kPa (~2000 cm) is a reasonable upper bound for field sensors
+KPA_MAX = 200.0
+# Bulk density bounds for gravimetric->volumetric conversion (g/cm³)
+BULK_DENSITY_MIN = 0.5
+BULK_DENSITY_MAX = 2.5
+
+
+def apply_physical_filters(df, suction_col='suction_cm', theta_col='theta', source_name=''):
+    """
+    Apply physical sanity filters to remove non-physical values.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        DataFrame with suction and theta columns.
+    suction_col : str
+        Name of suction column (in cm).
+    theta_col : str
+        Name of theta (VWC) column.
+    source_name : str
+        Name of data source for logging.
+
+    Returns
+    -------
+    pd.DataFrame
+        Filtered DataFrame with summary printed.
+    """
+    n_initial = len(df)
+    dropped_reasons = []
+
+    # Filter suction: must be positive and <= max
+    if suction_col in df.columns:
+        mask_suction_neg = df[suction_col] <= 0
+        mask_suction_high = df[suction_col] > SUCTION_CM_MAX
+        n_neg = mask_suction_neg.sum()
+        n_high = mask_suction_high.sum()
+        if n_neg > 0:
+            dropped_reasons.append(f"suction<=0: {n_neg}")
+        if n_high > 0:
+            dropped_reasons.append(f"suction>{SUCTION_CM_MAX:.0e}: {n_high}")
+        df = df[~mask_suction_neg & ~mask_suction_high]
+
+    # Filter theta: must be in [0, 1]
+    if theta_col in df.columns:
+        mask_theta_low = df[theta_col] < THETA_MIN
+        mask_theta_high = df[theta_col] > THETA_MAX
+        n_low = mask_theta_low.sum()
+        n_high = mask_theta_high.sum()
+        if n_low > 0:
+            dropped_reasons.append(f"theta<0: {n_low}")
+        if n_high > 0:
+            dropped_reasons.append(f"theta>1: {n_high}")
+        df = df[~mask_theta_low & ~mask_theta_high]
+
+    n_final = len(df)
+    n_dropped = n_initial - n_final
+    if n_dropped > 0 and source_name:
+        print(f"  [{source_name}] Dropped {n_dropped}/{n_initial} rows: {', '.join(dropped_reasons)}")
+
+    return df
+
 
 def _standardize_depth(d, depth_col=None):
     if depth_col and depth_col in d.columns:
@@ -36,12 +103,30 @@ def standardize_reesh(df, depth_col=None):
         d['name'] = d['Site']
     keep_extra = [c for c in ('Sample_ID', 'Site', 'Plot') if c in d.columns]
     d = d.rename(columns={'suction': 'suction_cm', 'depth': 'depth_cm'})
-    return d[['suction_cm', 'theta', 'depth_cm'] + keep_extra]
+    d = d[['suction_cm', 'theta', 'depth_cm'] + keep_extra]
+    # Apply physical sanity filters
+    d = apply_physical_filters(d, source_name='ReESH')
+    return d
 
 
 def standardize_mt_mesonet(df, depth_col=None):
     d = df.copy()
+    n_initial = len(d)
+    dropped_reasons = []
+
     if 'KPA' in d.columns and 'VWC' in d.columns:
+        # Filter negative VWC before conversion
+        mask_neg_vwc = d['VWC'].astype(float) < 0
+        if mask_neg_vwc.sum() > 0:
+            dropped_reasons.append(f"VWC<0: {mask_neg_vwc.sum()}")
+            d = d[~mask_neg_vwc]
+
+        # Filter extreme KPA values (>200 kPa is beyond field sensor range)
+        mask_high_kpa = d['KPA'].astype(float).abs() > KPA_MAX
+        if mask_high_kpa.sum() > 0:
+            dropped_reasons.append(f"KPA>{KPA_MAX}: {mask_high_kpa.sum()}")
+            d = d[~mask_high_kpa]
+
         d['suction'] = np.abs(d['KPA'].astype(float).values * 10.19716)
         d['theta'] = d['VWC'].astype(float).values
     elif 'suction_cm' in d.columns and 'theta' in d.columns:
@@ -49,19 +134,47 @@ def standardize_mt_mesonet(df, depth_col=None):
         d['theta'] = d['theta'].astype(float).values
     else:
         raise ValueError("Expected ('KPA','VWC') or ('suction_cm','theta')")
+
     d = _standardize_depth(d, depth_col)
     if 'name' not in d.columns and 'station' in d.columns:
         d['name'] = d['station']
     d = d.rename(columns={'suction': 'suction_cm', 'depth': 'depth_cm'})
-    return d[['suction_cm', 'theta', 'depth_cm', 'name']]
+    d = d[['suction_cm', 'theta', 'depth_cm', 'name']]
+
+    # Log source-specific drops (before physical filters)
+    n_source_dropped = n_initial - len(d)
+    if n_source_dropped > 0 and dropped_reasons:
+        print(f"  [MT_Mesonet source-filter] Dropped {n_source_dropped}/{n_initial} rows: {', '.join(dropped_reasons)}")
+
+    # Apply physical sanity filters (logs its own drops)
+    d = apply_physical_filters(d, source_name='MT_Mesonet')
+
+    return d
 
 
 def standardize_gshp(df, depth_col=None):
     d = df.copy()
+    n_initial = len(d)
+    dropped_reasons = []
+
     # Prefer GSHP high quality data
     if 'data_flag' in d.columns:
+        n_before = len(d)
         d = d[d['data_flag'] == 'good quality estimate']
+        n_quality_filter = n_before - len(d)
+        if n_quality_filter > 0:
+            dropped_reasons.append(f"quality_filter: {n_quality_filter}")
+
     d = d.dropna(subset=['lab_head_m', 'lab_wrc'])
+
+    # Guard against extreme lab_head_m outliers (e.g., 1e19-1e31 m values in weynants_18)
+    # Max realistic: 1e4 m = 1e6 cm = 100 MPa
+    LAB_HEAD_M_MAX = 1e4
+    mask_extreme_head = d['lab_head_m'].astype(float).abs() > LAB_HEAD_M_MAX
+    if mask_extreme_head.sum() > 0:
+        dropped_reasons.append(f"lab_head_m>{LAB_HEAD_M_MAX:.0e}: {mask_extreme_head.sum()}")
+        d = d[~mask_extreme_head]
+
     d['suction'] = (d['lab_head_m'].astype(float) * 100.0).abs()  # m -> cm
     d['theta'] = d['lab_wrc'].astype(float)
     if 'hzn_bot' in d.columns and 'hzn_top' in d.columns:
@@ -77,7 +190,17 @@ def standardize_gshp(df, depth_col=None):
                          'clay_tot_psa',
                          'db_od',
                          'climate_classes') if c in d.columns]
-    return d[keep]
+    d = d[keep]
+
+    # Log source-specific drops (before physical filters)
+    n_source_dropped = n_initial - len(d)
+    if n_source_dropped > 0 and dropped_reasons:
+        print(f"  [GSHP source-filter] Dropped {n_source_dropped}/{n_initial} rows: {', '.join(dropped_reasons)}")
+
+    # Apply physical sanity filters (logs its own drops)
+    d = apply_physical_filters(d, source_name='GSHP')
+
+    return d
 
 
 def write_standardized_gshp(soil_csv_path, out_dir, minimum_points):
