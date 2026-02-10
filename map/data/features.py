@@ -47,6 +47,7 @@ FEATURE_GROUPS = {
     "soilgrids": list(ee_feature_list._SOILGRIDS.keys()),
     "fao": list(ee_feature_list._FAO_SOILS.keys()),
     "polaris": list(ee_feature_list._POLARIS.keys()),
+    "amsr_vod": list(ee_feature_list._AMSR_VOD.keys()),
     "terrain": [
         "elevation",
         "slope",
@@ -237,6 +238,7 @@ def classify_feature(feature_name: str) -> str:
         "soilgrids",
         "fao",
         "polaris",
+        "amsr_vod",
         "terrain",
         "coords",
     ]

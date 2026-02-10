@@ -483,6 +483,7 @@ def build_unified_table(
     fit_method: str = "bayes",
     include_embeddings: bool = False,
     prefer_preprocessed: bool = True,
+    amsr_vod_path: Optional[str] = None,
 ) -> pd.DataFrame:
     """
     Build a unified observation-level training table from multiple data sources.
@@ -503,6 +504,8 @@ def build_unified_table(
         Whether to include embeddings.
     prefer_preprocessed : bool
         Prefer preprocessed CSVs over JSON data arrays.
+    amsr_vod_path : str, optional
+        Path to AMSR VOD climatology parquet (from amsr_extract.py).
 
     Returns
     -------
@@ -548,6 +551,15 @@ def build_unified_table(
             f"  Warning: {invalid_theta.sum()} observations with invalid theta (outside 0-1)"
         )
         combined = combined[~invalid_theta]
+
+    # Merge AMSR VOD climatology if provided
+    if amsr_vod_path and os.path.exists(amsr_vod_path):
+        vod_df = pd.read_parquet(amsr_vod_path)
+        n_before = combined.shape[1]
+        combined = combined.reset_index().merge(vod_df, on="sample_id", how="left")
+        combined = combined.set_index("obs_id")
+        n_added = combined.shape[1] - n_before
+        print(f"  Merged {n_added} AMSR VOD columns from {amsr_vod_path}")
 
     # Report statistics
     print(
