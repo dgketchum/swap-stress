@@ -79,7 +79,7 @@ def run_permutation_importance(
         y_test,
         n_repeats=n_repeats,
         random_state=random_state,
-        n_jobs=8,
+        n_jobs=1,
     )
 
     rows = []
