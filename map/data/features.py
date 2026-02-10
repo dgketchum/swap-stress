@@ -32,6 +32,27 @@ _EMBEDDING_PATTERNS = [
     re.compile(r"^US_R3H3_"),
 ]
 
+# SoilGrids depth-resolved features (e.g., clay_30-60cm_mean)
+_SOILGRIDS_DEPTH_RE = re.compile(
+    r"^(bdod|cec|cfvo|clay|sand|silt|nitrogen|phh2o|soc|ocd|ocs)_\d+-\d+cm_"
+)
+
+_LANDCOVER_FEATURES = {
+    "c3s_lccs_class_mode",
+    "glc10_lc",
+    "gsw",
+    "nlcd",
+    "cdl_cultivated_mode",
+    "cdl_crop_mode",
+    "cdl_simple_crop_mode",
+    "us_lith",
+}
+
+# Meta-groups that expand to sub-groups for filtering
+_GROUP_ALIASES = {
+    "landsat": {"landsat_bands", "landsat_indices"},
+}
+
 # Landsat sub-groups for band vs index importance analysis
 LANDSAT_BANDS = ["B2", "B3", "B4", "B5", "B6", "B7", "B10"]
 LANDSAT_INDICES = ["nd", "nw", "evi", "gi"]
@@ -42,7 +63,7 @@ FEATURE_GROUPS = {
     "landsat_bands": LANDSAT_BANDS,
     "landsat_indices": LANDSAT_INDICES,
     "sentinel1": ["VV", "VH", "VH_VV"],
-    "smap": list(ee_feature_list._SMAP_L4.keys()),
+    "smap": list(ee_feature_list._SMAP_L4.keys()) + ["vegetation_water_content"],
     "gridmet": list(ee_feature_list._GRIDMET_VARS.keys()),
     "soilgrids": list(ee_feature_list._SOILGRIDS.keys()),
     "fao": list(ee_feature_list._FAO_SOILS.keys()),
@@ -59,6 +80,9 @@ FEATURE_GROUPS = {
     ],
     "coords": ["lat", "lon"],
     "embeddings": [],  # Handled by pattern matching
+    "worldclim": ["wc"],
+    "hihydrosoil": ["hhs"],
+    "landcover": list(_LANDCOVER_FEATURES),
 }
 
 # Columns that are NOT features
@@ -102,6 +126,11 @@ NON_FEATURE_COLS = {
     "rosetta_level",
     "depth_cm",
     "depth",
+    # NCSS lab measurements (not available at inference time)
+    "clay_tot_psa",
+    "sand_tot_psa",
+    "silt_tot_psa",
+    "db_od",
 }
 
 
@@ -127,39 +156,12 @@ def filter_feature_groups(
     if not exclude_groups:
         return feature_cols
 
-    exclude_prefixes = set()
-    exclude_exact = set()
+    exclude_set = set()
+    for g in exclude_groups:
+        exclude_set.add(g)
+        exclude_set.update(_GROUP_ALIASES.get(g, set()))
 
-    for group in exclude_groups:
-        if group not in FEATURE_GROUPS:
-            print(
-                f"Warning: Unknown feature group '{group}'. "
-                f"Available: {list(FEATURE_GROUPS.keys())}"
-            )
-            continue
-
-        for f in FEATURE_GROUPS[group]:
-            exclude_exact.add(f)
-            exclude_prefixes.add(f + "_")
-
-    filter_embeddings = "embeddings" in exclude_groups
-
-    filtered = []
-    for c in feature_cols:
-        name = str(c)
-
-        if name in exclude_exact:
-            continue
-
-        if any(name.startswith(p) for p in exclude_prefixes):
-            continue
-
-        if filter_embeddings and any(pat.match(name) for pat in _EMBEDDING_PATTERNS):
-            continue
-
-        filtered.append(c)
-
-    return filtered
+    return [c for c in feature_cols if classify_feature(c) not in exclude_set]
 
 
 def get_feature_columns(
@@ -228,7 +230,7 @@ def classify_feature(feature_name: str) -> str:
     if any(pat.match(name) for pat in _EMBEDDING_PATTERNS):
         return "embeddings"
 
-    # Check each group (skip meta-groups that are unions of sub-groups)
+    # Check each group via prefix/exact match (skip meta-groups)
     check_order = [
         "landsat_bands",
         "landsat_indices",
@@ -241,6 +243,9 @@ def classify_feature(feature_name: str) -> str:
         "amsr_vod",
         "terrain",
         "coords",
+        "worldclim",
+        "hihydrosoil",
+        "landcover",
     ]
 
     for group in check_order:
@@ -248,6 +253,10 @@ def classify_feature(feature_name: str) -> str:
         for f in group_features:
             if name == f or name.startswith(f + "_"):
                 return group
+
+    # SoilGrids depth-resolved (e.g., clay_30-60cm_mean)
+    if _SOILGRIDS_DEPTH_RE.match(name):
+        return "soilgrids"
 
     # Depth columns
     if name in ("depth_cm", "rosetta_level"):

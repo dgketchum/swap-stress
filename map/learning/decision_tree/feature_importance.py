@@ -149,6 +149,9 @@ def run_group_ablation(
             "terrain",
             "coords",
             "embeddings",
+            "worldclim",
+            "hihydrosoil",
+            "landcover",
         ]
 
     # Load data
@@ -315,20 +318,23 @@ def run_analysis(
     perm_df.to_csv(perm_path, index=False)
     print(f"  Saved to {perm_path}")
 
-    # Top features
-    print("\n  Top 20 features:")
-    for _, row in perm_df.head(20).iterrows():
+    # Top landscape features (exclude theta and depth — they're model inputs)
+    ee_perm_df = perm_df[~perm_df["group"].isin(["theta", "depth"])]
+    print("\n  Top 20 landscape features:")
+    for _, row in ee_perm_df.head(20).iterrows():
         print(
             f"    {row['feature']:<40s} {row['importance_mean']:.4f} ({row['group']})"
         )
 
-    # Aggregate by group
-    perm_importance_dict = dict(zip(perm_df["feature"], perm_df["importance_mean"]))
+    # Aggregate by group (landscape features only)
+    perm_importance_dict = dict(
+        zip(ee_perm_df["feature"], ee_perm_df["importance_mean"])
+    )
     group_importance = aggregate_importance_by_group(
         perm_importance_dict, normalize=True
     )
 
-    print("\n  Group importance (permutation):")
+    print("\n  Group importance (permutation, landscape features only):")
     for group, imp in group_importance.items():
         print(f"    {group:<25s} {imp:.4f}")
 
@@ -350,10 +356,11 @@ def run_analysis(
     ablation_df.to_csv(ablation_path, index=False)
     print(f"  Saved to {ablation_path}")
 
-    # MDI importance (from trained model)
+    # MDI importance (from trained model, landscape features only)
     mdi_dict = {
         all_features[i]: float(model.feature_importances_[i])
         for i in np.argsort(model.feature_importances_)[::-1]
+        if classify_feature(all_features[i]) not in ("theta", "depth")
     }
     group_mdi = aggregate_importance_by_group(mdi_dict, normalize=True)
 
