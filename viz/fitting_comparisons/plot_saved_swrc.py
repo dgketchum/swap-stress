@@ -7,7 +7,7 @@ from retention_curve.swrc import SWRC
 def _json_files(d: str) -> List[str]:
     if not os.path.exists(d):
         return []
-    return [os.path.join(d, f) for f in os.listdir(d) if f.lower().endswith('.json')]
+    return [os.path.join(d, f) for f in os.listdir(d) if f.lower().endswith(".json")]
 
 
 def plot_saved_curves_in_dir(fits_dir: str, out_dir: str, show: bool = False) -> int:
@@ -30,38 +30,38 @@ def plot_saved_curves_in_dir(fits_dir: str, out_dir: str, show: bool = False) ->
     return count
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     # Mirror the project style: set flags and paths here
-    home_ = os.path.expanduser('~')
-    root = os.path.join(home_, 'data', 'IrrigationGIS', 'soils', 'soil_potential_obs')
+    home_ = os.path.expanduser("~")
+    root = os.path.join(home_, "data", "IrrigationGIS", "soils", "soil_potential_obs")
 
     run_rosetta = False
     run_mt_mesonet = True
     run_reesh = True
 
-    method = 'bayes'  # or e.g., 'slsqp' depending on which fits you saved
+    method = "bayes"  # or e.g., 'slsqp' depending on which fits you saved
     show_plots = False
 
-    out_root = os.path.join(root, 'curve_fits')
+    out_root = os.path.join(root, "curve_fits")
 
     if run_rosetta:
-        fits_dir = os.path.join(out_root, 'rosetta', method)
+        fits_dir = os.path.join(out_root, "rosetta", method)
         if os.path.exists(fits_dir):
-            plots_dir = os.path.join(fits_dir, 'curve_fits', 'rosetta', 'plots')
+            plots_dir = os.path.join(fits_dir, "curve_fits", "rosetta", "plots")
             n = plot_saved_curves_in_dir(fits_dir, plots_dir, show=show_plots)
             print(f"rosetta: wrote {n} plot(s) to {plots_dir}")
 
     if run_mt_mesonet:
-        fits_dir = os.path.join(out_root, 'mt_mesonet', method)
+        fits_dir = os.path.join(out_root, "mt_mesonet", method)
         if os.path.exists(fits_dir):
-            plots_dir = os.path.join(fits_dir, 'curve_fits', 'mt_mesonet', 'plots')
+            plots_dir = os.path.join(fits_dir, "curve_fits", "mt_mesonet", "plots")
             n = plot_saved_curves_in_dir(fits_dir, plots_dir, show=show_plots)
             print(f"mt_mesonet: wrote {n} plot(s) to {plots_dir}")
 
     if run_reesh:
-        fits_dir = os.path.join(out_root, 'reesh', method)
+        fits_dir = os.path.join(out_root, "reesh", method)
         if os.path.exists(fits_dir):
-            plots_dir = os.path.join(fits_dir, 'curve_fits', 'reesh', 'plots')
+            plots_dir = os.path.join(fits_dir, "curve_fits", "reesh", "plots")
             n = plot_saved_curves_in_dir(fits_dir, plots_dir, show=show_plots)
             print(f"reesh: wrote {n} plot(s) to {plots_dir}")
 

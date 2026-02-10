@@ -15,10 +15,9 @@ from map.learning.mae.mae import VwcMAE
 
 
 def find_best_model_checkpoint(checkpoints_root):
-    import re
-    ckpts = glob(os.path.join(checkpoints_root, '*', '*.ckpt'))
+    ckpts = glob(os.path.join(checkpoints_root, "*", "*.ckpt"))
     if not ckpts:
-        ckpts = glob(os.path.join(checkpoints_root, '**', '*.ckpt'), recursive=True)
+        ckpts = glob(os.path.join(checkpoints_root, "**", "*.ckpt"), recursive=True)
     val_patterns = [
         re.compile(r"val_loss[=_]?(?P<val>-?\d+\.\d+)", re.IGNORECASE),
         re.compile(r"-(?P<val>\d+\.\d+)\.ckpt$"),
@@ -31,7 +30,7 @@ def find_best_model_checkpoint(checkpoints_root):
             m = pat.search(base)
             if m:
                 try:
-                    val = float(m.group('val'))
+                    val = float(m.group("val"))
                 except Exception:
                     val = None
                 break
@@ -60,14 +59,14 @@ def _dyn_worker_inf(params):
     gmp = os.path.join(gridmet_dir, os.path.basename(fp)) if gridmet_dir else None
     if gmp and not os.path.exists(gmp):
         return windows, ids, weights
-    vdf = pd.read_parquet(fp)[['shallow', 'middle']]
+    vdf = pd.read_parquet(fp)[["shallow", "middle"]]
     gdf = pd.read_parquet(gmp) if gmp else pd.DataFrame(index=vdf.index)
     idx = vdf.index.intersection(gdf.index) if not gdf.empty else vdf.index
     idx = pd.DatetimeIndex(idx)
     vdf = vdf.loc[idx]
     if len(idx) < window_len:
         return windows, ids, weights
-    sig = vdf[['shallow', 'middle']].mean(axis=1).values.astype('float32')
+    sig = vdf[["shallow", "middle"]].mean(axis=1).values.astype("float32")
     years = sorted(set(idx.year))
     for y in years:
         year_mask = idx.year == y
@@ -90,16 +89,31 @@ def _dyn_worker_inf(params):
         if not scored:
             continue
         scored.sort(key=lambda x: x[1], reverse=True)
-        for s0, sc in scored[:max(1, dyn_topk_per_year)]:
-            windows.append({'file': fp, 'gm_file': gmp, 'start': int(s0), 'stop': int(s0 + window_len)})
+        for s0, sc in scored[: max(1, dyn_topk_per_year)]:
+            windows.append(
+                {
+                    "file": fp,
+                    "gm_file": gmp,
+                    "start": int(s0),
+                    "stop": int(s0 + window_len),
+                }
+            )
             ids.append(os.path.splitext(os.path.basename(fp))[0])
             weights.append(float(sc))
     return windows, ids, weights
 
 
-def _build_windows(data_dir, gridmet_dir, window_len=730, stride=550, dynamic=False, dyn_stride_days=7,
-                   dyn_topk_per_year=1, num_workers=24):
-    files = sorted(glob(os.path.join(data_dir, '*.parquet')))
+def _build_windows(
+    data_dir,
+    gridmet_dir,
+    window_len=730,
+    stride=550,
+    dynamic=False,
+    dyn_stride_days=7,
+    dyn_topk_per_year=1,
+    num_workers=24,
+):
+    files = sorted(glob(os.path.join(data_dir, "*.parquet")))
     if not files:
         return [], [], []
 
@@ -110,26 +124,35 @@ def _build_windows(data_dir, gridmet_dir, window_len=730, stride=550, dynamic=Fa
     if not dynamic:
         f0 = files[0]
         gm0 = os.path.join(gridmet_dir, os.path.basename(f0)) if gridmet_dir else None
-        v0 = pd.read_parquet(f0)[['shallow', 'middle']]
+        v0 = pd.read_parquet(f0)[["shallow", "middle"]]
         g0 = pd.read_parquet(gm0) if gm0 else pd.DataFrame(index=v0.index)
         idx = v0.index.intersection(g0.index) if not g0.empty else v0.index
         T = len(idx)
         starts = list(range(0, max(T - window_len + 1, 0), stride))
 
         for fp in files:
-            gmp = os.path.join(gridmet_dir, os.path.basename(fp)) if gridmet_dir else None
+            gmp = (
+                os.path.join(gridmet_dir, os.path.basename(fp)) if gridmet_dir else None
+            )
             for s in starts:
-                windows.append({'file': fp, 'gm_file': gmp, 'start': s, 'stop': s + window_len})
+                windows.append(
+                    {"file": fp, "gm_file": gmp, "start": s, "stop": s + window_len}
+                )
                 ids.append(os.path.splitext(os.path.basename(fp))[0])
                 weights.append(1.0)
         return windows, ids, weights
 
     with ProcessPoolExecutor(max_workers=num_workers) as ex:
         futures = {
-            ex.submit(_dyn_worker_inf, (fp, gridmet_dir, window_len, dyn_stride_days, dyn_topk_per_year)): fp
+            ex.submit(
+                _dyn_worker_inf,
+                (fp, gridmet_dir, window_len, dyn_stride_days, dyn_topk_per_year),
+            ): fp
             for fp in files
         }
-        for fut in tqdm(as_completed(futures), total=len(futures), desc='Scoring dynamic windows'):
+        for fut in tqdm(
+            as_completed(futures), total=len(futures), desc="Scoring dynamic windows"
+        ):
             w, i, wt = fut.result()
             if w:
                 windows.extend(w)
@@ -156,18 +179,37 @@ def _aggregate_embeddings(ids, emb_array):
     return out
 
 
-def run_inference(ckpt_path, data_dir, gridmet_dir, out_dir, batch_size=256, num_workers=4,
-                  window_len=180, stride=550, dynamic=False, dyn_stride_days=7, dyn_topk_per_year=1):
+def run_inference(
+    ckpt_path,
+    data_dir,
+    gridmet_dir,
+    out_dir,
+    batch_size=256,
+    num_workers=4,
+    window_len=180,
+    stride=550,
+    dynamic=False,
+    dyn_stride_days=7,
+    dyn_topk_per_year=1,
+):
     os.makedirs(out_dir, exist_ok=True)
 
-    windows, ids, weights = _build_windows(data_dir, gridmet_dir, window_len=window_len, stride=stride,
-                                           dynamic=dynamic, dyn_stride_days=dyn_stride_days,
-                                           dyn_topk_per_year=dyn_topk_per_year)
+    windows, ids, weights = _build_windows(
+        data_dir,
+        gridmet_dir,
+        window_len=window_len,
+        stride=stride,
+        dynamic=dynamic,
+        dyn_stride_days=dyn_stride_days,
+        dyn_topk_per_year=dyn_topk_per_year,
+    )
     if not windows:
         return None
 
-    ds = CombinedVwcDataset(windows, zscore=True, mask_mode='mixed')
-    loader = DataLoader(ds, batch_size=batch_size, shuffle=False, num_workers=num_workers)
+    ds = CombinedVwcDataset(windows, zscore=True, mask_mode="mixed")
+    loader = DataLoader(
+        ds, batch_size=batch_size, shuffle=False, num_workers=num_workers
+    )
 
     model = VwcMAE.load_from_checkpoint(ckpt_path)
     model.eval()
@@ -189,6 +231,7 @@ def run_inference(ckpt_path, data_dir, gridmet_dir, out_dir, batch_size=256, num
     if weights:
         # normalize weights per id and aggregate weighted mean
         from collections import defaultdict
+
         wsum = defaultdict(float)
         vecsum = defaultdict(lambda: np.zeros(emb_array.shape[1], dtype=np.float32))
         for i, key in enumerate(ids):
@@ -199,49 +242,56 @@ def run_inference(ckpt_path, data_dir, gridmet_dir, out_dir, batch_size=256, num
     else:
         agg = _aggregate_embeddings(ids, emb_array)
 
-    cols = [f'e{i:02d}' for i in range(64)]
-    print(f'writing {len(agg)} embeddings to {out_dir}')
+    cols = [f"e{i:02d}" for i in range(64)]
+    print(f"writing {len(agg)} embeddings to {out_dir}")
     for key, vec in agg.items():
         df = pd.DataFrame([vec], columns=cols, index=[key])
-        out_fp = os.path.join(out_dir, f'{key}.parquet')
+        out_fp = os.path.join(out_dir, f"{key}.parquet")
         df.to_parquet(out_fp)
     return out_dir
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     run_mt_mesonet_workflow = False
     run_rosetta_workflow = False
     run_gshp_workflow = False
     run_reesh_workflow = True
 
-    vwc_root_ = '/data/ssd2/swapstress/vwc'
+    vwc_root_ = "/data/ssd2/swapstress/vwc"
 
     if run_mt_mesonet_workflow:
-        project_ = 'mt_mesonet'
+        project_ = "mt_mesonet"
     elif run_rosetta_workflow:
-        project_ = 'rosetta'
+        project_ = "rosetta"
     elif run_gshp_workflow:
-        project_ = 'gshp'
+        project_ = "gshp"
     elif run_reesh_workflow:
-        project_ = 'reesh'
+        project_ = "reesh"
     else:
         project_ = None
 
     if project_ is not None:
-        data_root_ = os.path.join(vwc_root_, 'hhp', project_)
-        gridmet_dir_ = os.path.join(vwc_root_, 'gridmet', project_)
+        data_root_ = os.path.join(vwc_root_, "hhp", project_)
+        gridmet_dir_ = os.path.join(vwc_root_, "gridmet", project_)
 
-        ckpt_root_ = os.path.join(vwc_root_, 'hhp', 'rosetta', 'checkpoints')
-        ckpt_path_ = os.path.join(ckpt_root_, 'both_20250917_170218/mae-both-20250917-epoch=99-val_loss=0.1314.ckpt')
+        ckpt_root_ = os.path.join(vwc_root_, "hhp", "rosetta", "checkpoints")
+        ckpt_path_ = os.path.join(
+            ckpt_root_,
+            "both_20250917_170218/mae-both-20250917-epoch=99-val_loss=0.1314.ckpt",
+        )
         # ckpt_path_ = os.path.join(ckpt_root_, 'both_20250916_173137',
         #                          'mae-both-20250916-epoch=57-val_loss=0.0011.ckpt')
 
         if ckpt_path_ is None:
             ckpt_path_ = find_best_model_checkpoint(ckpt_root_)
 
-        out_dir_ = os.path.join(vwc_root_, 'embeddings', project_)
-        run_inference(ckpt_path_, data_root_, gridmet_dir_, out_dir_,
-                      window_len=180,
-                      )
+        out_dir_ = os.path.join(vwc_root_, "embeddings", project_)
+        run_inference(
+            ckpt_path_,
+            data_root_,
+            gridmet_dir_,
+            out_dir_,
+            window_len=180,
+        )
 
 # ========================= EOF ====================================================================

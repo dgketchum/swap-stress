@@ -1,6 +1,4 @@
-import os
-
-ROSETTA_CRS = '''PROJCRS["unnamed",
+ROSETTA_CRS = """PROJCRS["unnamed",
 BASEGEOGCRS["NAD83",
     DATUM["North American Datum 1983",
         ELLIPSOID["GRS 1980",6378137,298.257222101004,
@@ -37,7 +35,7 @@ CS[Cartesian,2],
     AXIS["northing",north,
         ORDER[2],
         LENGTHUNIT["metre",1,
-            ID["EPSG",9001]]]]'''
-if __name__ == '__main__':
+            ID["EPSG",9001]]]]"""
+if __name__ == "__main__":
     pass
 # ========================= EOF ====================================================================

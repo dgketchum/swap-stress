@@ -16,6 +16,7 @@ Usage:
     from viz.emprical_summaries.composite_swrc import plot_composite_swrc
     plot_composite_swrc(site_id, reesh_json, rosetta_df, ml_pred_df, direct_pred_df, out_path)
 """
+
 import os
 import json
 import numpy as np
@@ -23,9 +24,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 
-from retention_curve import ROSETTA_LEVEL_DEPTHS, PARAM_SYMBOLS
 from retention_curve.depth_utils import depth_to_rosetta_level
-from retention_curve.swrc import SWRC
 
 
 def van_genuchten(theta, theta_r, theta_s, alpha, n):
@@ -53,16 +52,16 @@ def load_fitted_json(json_path):
     if not os.path.exists(json_path):
         return {}
 
-    with open(json_path, 'r') as f:
+    with open(json_path, "r") as f:
         data = json.load(f)
 
     results = {}
-    meta = data.pop('metadata', {})
+    data.pop("metadata", None)
 
     for depth_str, entry in data.items():
         if not isinstance(entry, dict):
             continue
-        if entry.get('status') != 'Success':
+        if entry.get("status") != "Success":
             continue
 
         try:
@@ -70,21 +69,21 @@ def load_fitted_json(json_path):
         except (TypeError, ValueError):
             continue
 
-        params = entry.get('parameters', {})
-        obs_data = entry.get('data', {})
+        params = entry.get("parameters", {})
+        obs_data = entry.get("data", {})
 
         try:
             results[depth_cm] = {
-                'params': {
-                    'theta_r': params['theta_r']['value'],
-                    'theta_s': params['theta_s']['value'],
-                    'alpha': params['alpha']['value'],
-                    'n': params['n']['value'],
+                "params": {
+                    "theta_r": params["theta_r"]["value"],
+                    "theta_s": params["theta_s"]["value"],
+                    "alpha": params["alpha"]["value"],
+                    "n": params["n"]["value"],
                 },
-                'obs': {
-                    'theta': np.array(obs_data.get('theta', [])),
-                    'suction_cm': np.array(obs_data.get('suction_cm', [])),
-                }
+                "obs": {
+                    "theta": np.array(obs_data.get("theta", [])),
+                    "suction_cm": np.array(obs_data.get("suction_cm", [])),
+                },
             }
         except (KeyError, TypeError):
             continue
@@ -115,7 +114,7 @@ def get_rosetta_params_for_level(rosetta_df, level, profile_id=None):
 
     # Filter by profile if specified
     if profile_id is not None:
-        for col in ['profile_id', 'station', 'Index']:
+        for col in ["profile_id", "station", "Index"]:
             if col in rosetta_df.columns:
                 mask = rosetta_df[col].astype(str) == str(profile_id)
                 if mask.any():
@@ -126,14 +125,18 @@ def get_rosetta_params_for_level(rosetta_df, level, profile_id=None):
         return None
 
     row = rosetta_df.iloc[0]
-    prefix = f'US_R3H3_L{level}_VG_'
+    prefix = f"US_R3H3_L{level}_VG_"
 
     try:
         return {
-            'theta_r': float(row.get(f'{prefix}theta_r', row.get(f'{prefix}thetar', np.nan))),
-            'theta_s': float(row.get(f'{prefix}theta_s', row.get(f'{prefix}thetas', np.nan))),
-            'alpha': 10 ** float(row.get(f'{prefix}log10_alpha', np.nan)),
-            'n': 10 ** float(row.get(f'{prefix}log10_n', np.nan)),
+            "theta_r": float(
+                row.get(f"{prefix}theta_r", row.get(f"{prefix}thetar", np.nan))
+            ),
+            "theta_s": float(
+                row.get(f"{prefix}theta_s", row.get(f"{prefix}thetas", np.nan))
+            ),
+            "alpha": 10 ** float(row.get(f"{prefix}log10_alpha", np.nan)),
+            "n": 10 ** float(row.get(f"{prefix}log10_n", np.nan)),
         }
     except (TypeError, ValueError):
         return None
@@ -162,7 +165,7 @@ def get_ml_params_for_level(ml_df, level, profile_id=None):
 
     # Filter by profile if specified
     if profile_id is not None:
-        for col in ['profile_id', 'station', 'sample_id']:
+        for col in ["profile_id", "station", "sample_id"]:
             if col in ml_df.columns:
                 mask = ml_df[col].astype(str).str.contains(str(profile_id), case=False)
                 if mask.any():
@@ -173,33 +176,33 @@ def get_ml_params_for_level(ml_df, level, profile_id=None):
         return None
 
     row = ml_df.iloc[0]
-    prefix = f'US_R3H3_L{level}_VG_'
+    prefix = f"US_R3H3_L{level}_VG_"
 
     # Try different column naming conventions
     try:
-        theta_r = float(row.get(f'{prefix}theta_r', row.get('theta_r', np.nan)))
-        theta_s = float(row.get(f'{prefix}theta_s', row.get('theta_s', np.nan)))
+        theta_r = float(row.get(f"{prefix}theta_r", row.get("theta_r", np.nan)))
+        theta_s = float(row.get(f"{prefix}theta_s", row.get("theta_s", np.nan)))
 
         # Alpha and n may be in log10 or natural scale
-        if f'{prefix}log10_alpha' in row.index:
-            alpha = 10 ** float(row[f'{prefix}log10_alpha'])
-        elif f'{prefix}alpha' in row.index:
-            alpha = float(row[f'{prefix}alpha'])
-        elif 'alpha' in row.index:
-            alpha = float(row['alpha'])
+        if f"{prefix}log10_alpha" in row.index:
+            alpha = 10 ** float(row[f"{prefix}log10_alpha"])
+        elif f"{prefix}alpha" in row.index:
+            alpha = float(row[f"{prefix}alpha"])
+        elif "alpha" in row.index:
+            alpha = float(row["alpha"])
         else:
             alpha = np.nan
 
-        if f'{prefix}log10_n' in row.index:
-            n = 10 ** float(row[f'{prefix}log10_n'])
-        elif f'{prefix}n' in row.index:
-            n = float(row[f'{prefix}n'])
-        elif 'n' in row.index:
-            n = float(row['n'])
+        if f"{prefix}log10_n" in row.index:
+            n = 10 ** float(row[f"{prefix}log10_n"])
+        elif f"{prefix}n" in row.index:
+            n = float(row[f"{prefix}n"])
+        elif "n" in row.index:
+            n = float(row["n"])
         else:
             n = np.nan
 
-        return {'theta_r': theta_r, 'theta_s': theta_s, 'alpha': alpha, 'n': n}
+        return {"theta_r": theta_r, "theta_s": theta_s, "alpha": alpha, "n": n}
     except (TypeError, ValueError):
         return None
 
@@ -230,7 +233,7 @@ def get_direct_predictions(direct_df, profile_id, depth_cm):
         return None, None
 
     # Filter by profile
-    for col in ['profile_id', 'station', 'sample_id']:
+    for col in ["profile_id", "station", "sample_id"]:
         if col in direct_df.columns:
             mask = direct_df[col].astype(str).str.contains(str(profile_id), case=False)
             if mask.any():
@@ -241,22 +244,22 @@ def get_direct_predictions(direct_df, profile_id, depth_cm):
         return None, None
 
     # Filter by depth (with tolerance)
-    if 'depth_cm' in direct_df.columns:
-        depth_mask = (direct_df['depth_cm'] - depth_cm).abs() <= 5
+    if "depth_cm" in direct_df.columns:
+        depth_mask = (direct_df["depth_cm"] - depth_cm).abs() <= 5
         direct_df = direct_df[depth_mask]
 
-    if direct_df.empty or 'theta' not in direct_df.columns:
+    if direct_df.empty or "theta" not in direct_df.columns:
         return None, None
 
-    theta = direct_df['theta'].values
+    theta = direct_df["theta"].values
 
     # Try different column names for predictions
-    if 'suction_cm_pred_direct' in direct_df.columns:
-        suction_cm = direct_df['suction_cm_pred_direct'].values
-    elif 'log10_suction_pred_direct' in direct_df.columns:
-        suction_cm = 10 ** direct_df['log10_suction_pred_direct'].values
-    elif 'log10_suction_cm' in direct_df.columns:
-        suction_cm = 10 ** direct_df['log10_suction_cm'].values
+    if "suction_cm_pred_direct" in direct_df.columns:
+        suction_cm = direct_df["suction_cm_pred_direct"].values
+    elif "log10_suction_pred_direct" in direct_df.columns:
+        suction_cm = 10 ** direct_df["log10_suction_pred_direct"].values
+    elif "log10_suction_cm" in direct_df.columns:
+        suction_cm = 10 ** direct_df["log10_suction_cm"].values
     else:
         return None, None
 
@@ -287,7 +290,7 @@ def get_vg_predictions(vg_pred_df, profile_id, depth_cm):
         return None, None
 
     # Filter by profile
-    for col in ['profile_id', 'station', 'sample_id']:
+    for col in ["profile_id", "station", "sample_id"]:
         if col in vg_pred_df.columns:
             mask = vg_pred_df[col].astype(str).str.contains(str(profile_id), case=False)
             if mask.any():
@@ -298,20 +301,20 @@ def get_vg_predictions(vg_pred_df, profile_id, depth_cm):
         return None, None
 
     # Filter by depth (with tolerance)
-    if 'depth_cm' in vg_pred_df.columns:
-        depth_mask = (vg_pred_df['depth_cm'] - depth_cm).abs() <= 5
+    if "depth_cm" in vg_pred_df.columns:
+        depth_mask = (vg_pred_df["depth_cm"] - depth_cm).abs() <= 5
         vg_pred_df = vg_pred_df[depth_mask]
 
-    if vg_pred_df.empty or 'theta' not in vg_pred_df.columns:
+    if vg_pred_df.empty or "theta" not in vg_pred_df.columns:
         return None, None
 
-    theta = vg_pred_df['theta'].values
+    theta = vg_pred_df["theta"].values
 
     # Try different column names for predictions
-    if 'suction_cm_pred_vg' in vg_pred_df.columns:
-        suction_cm = vg_pred_df['suction_cm_pred_vg'].values
-    elif 'log10_suction_pred_vg' in vg_pred_df.columns:
-        suction_cm = 10 ** vg_pred_df['log10_suction_pred_vg'].values
+    if "suction_cm_pred_vg" in vg_pred_df.columns:
+        suction_cm = vg_pred_df["suction_cm_pred_vg"].values
+    elif "log10_suction_pred_vg" in vg_pred_df.columns:
+        suction_cm = 10 ** vg_pred_df["log10_suction_pred_vg"].values
     else:
         return None, None
 
@@ -319,16 +322,16 @@ def get_vg_predictions(vg_pred_df, profile_id, depth_cm):
 
 
 def plot_composite_swrc(
-        site_id,
-        fitted_json_path=None,
-        rosetta_df=None,
-        ml_pred_df=None,
-        direct_pred_df=None,
-        vg_pred_df=None,
-        depths=None,
-        save_path=None,
-        show=False,
-        title=None,
+    site_id,
+    fitted_json_path=None,
+    rosetta_df=None,
+    ml_pred_df=None,
+    direct_pred_df=None,
+    vg_pred_df=None,
+    depths=None,
+    save_path=None,
+    show=False,
+    title=None,
 ):
     """
     Plot composite SWRC comparing multiple sources for a single site.
@@ -373,10 +376,10 @@ def plot_composite_swrc(
         return None
 
     # Setup figure
-    plt.style.use('seaborn-v0_8-whitegrid')
+    plt.style.use("seaborn-v0_8-whitegrid")
     fig, ax = plt.subplots(figsize=(10, 8))
-    fig.patch.set_facecolor('white')
-    ax.set_facecolor('white')
+    fig.patch.set_facecolor("white")
+    ax.set_facecolor("white")
 
     # Color map for depths
     n_depths = len(depths)
@@ -386,116 +389,219 @@ def plot_composite_swrc(
     theta_grid = np.linspace(0.02, 0.60, 200)
 
     # Track sources present for legend
-    sources_present = {'obs': False, 'fitted': False, 'rosetta': False, 'ml': False, 'direct': False, 'vg_pred': False}
+    sources_present = {
+        "obs": False,
+        "fitted": False,
+        "rosetta": False,
+        "ml": False,
+        "direct": False,
+        "vg_pred": False,
+    }
 
     for idx, depth_cm in enumerate(depths):
         color = colors[idx]
         level = depth_to_rosetta_level(depth_cm)
-        depth_label = f'{int(depth_cm)} cm (L{level})'
+        depth_label = f"{int(depth_cm)} cm (L{level})"
 
         # 1) Plot observed ReESH points
         if depth_cm in fitted_data:
-            obs = fitted_data[depth_cm].get('obs', {})
-            theta_obs = obs.get('theta', np.array([]))
-            suction_obs = obs.get('suction_cm', np.array([]))
+            obs = fitted_data[depth_cm].get("obs", {})
+            theta_obs = obs.get("theta", np.array([]))
+            suction_obs = obs.get("suction_cm", np.array([]))
             if len(theta_obs) > 0 and len(suction_obs) > 0:
-                ax.scatter(theta_obs, suction_obs, c=[color], s=30, alpha=0.7,
-                          marker='o', edgecolors='white', linewidth=0.5,
-                          label=f'Obs {depth_label}' if idx == 0 else None, zorder=5)
-                sources_present['obs'] = True
+                ax.scatter(
+                    theta_obs,
+                    suction_obs,
+                    c=[color],
+                    s=30,
+                    alpha=0.7,
+                    marker="o",
+                    edgecolors="white",
+                    linewidth=0.5,
+                    label=f"Obs {depth_label}" if idx == 0 else None,
+                    zorder=5,
+                )
+                sources_present["obs"] = True
 
             # 2) Plot fitted VG curve (dashed)
-            params = fitted_data[depth_cm].get('params', {})
-            if all(k in params for k in ['theta_r', 'theta_s', 'alpha', 'n']):
+            params = fitted_data[depth_cm].get("params", {})
+            if all(k in params for k in ["theta_r", "theta_s", "alpha", "n"]):
                 suction_fit = van_genuchten(theta_grid, **params)
                 valid = np.isfinite(suction_fit) & (suction_fit > 0)
-                ax.plot(theta_grid[valid], suction_fit[valid], '--', color=color, linewidth=2,
-                       label=f'Fitted {depth_label}' if idx == 0 else None, zorder=4)
-                sources_present['fitted'] = True
+                ax.plot(
+                    theta_grid[valid],
+                    suction_fit[valid],
+                    "--",
+                    color=color,
+                    linewidth=2,
+                    label=f"Fitted {depth_label}" if idx == 0 else None,
+                    zorder=4,
+                )
+                sources_present["fitted"] = True
 
         # 3) Plot Rosetta VG curve
         rosetta_params = get_rosetta_params_for_level(rosetta_df, level, site_id)
         if rosetta_params and all(np.isfinite(v) for v in rosetta_params.values()):
             suction_ros = van_genuchten(theta_grid, **rosetta_params)
             valid = np.isfinite(suction_ros) & (suction_ros > 0)
-            ax.plot(theta_grid[valid], suction_ros[valid], '--', color=color, linewidth=1.5,
-                   alpha=0.7, zorder=3)
-            sources_present['rosetta'] = True
+            ax.plot(
+                theta_grid[valid],
+                suction_ros[valid],
+                "--",
+                color=color,
+                linewidth=1.5,
+                alpha=0.7,
+                zorder=3,
+            )
+            sources_present["rosetta"] = True
 
         # 4) Plot ML-predicted VG curve
         ml_params = get_ml_params_for_level(ml_pred_df, level, site_id)
         if ml_params and all(np.isfinite(v) for v in ml_params.values()):
             suction_ml = van_genuchten(theta_grid, **ml_params)
             valid = np.isfinite(suction_ml) & (suction_ml > 0)
-            ax.plot(theta_grid[valid], suction_ml[valid], '-.', color=color, linewidth=1.5,
-                   alpha=0.8, zorder=3)
-            sources_present['ml'] = True
+            ax.plot(
+                theta_grid[valid],
+                suction_ml[valid],
+                "-.",
+                color=color,
+                linewidth=1.5,
+                alpha=0.8,
+                zorder=3,
+            )
+            sources_present["ml"] = True
 
         # 5) Plot direct model predictions
-        theta_direct, suction_direct = get_direct_predictions(direct_pred_df, site_id, depth_cm)
+        theta_direct, suction_direct = get_direct_predictions(
+            direct_pred_df, site_id, depth_cm
+        )
         if theta_direct is not None and len(theta_direct) > 0:
             # Sort by theta for line plot
             sort_idx = np.argsort(theta_direct)
-            ax.plot(theta_direct[sort_idx], suction_direct[sort_idx], ':',
-                   color=color, linewidth=2, alpha=0.9, zorder=3)
-            sources_present['direct'] = True
+            ax.plot(
+                theta_direct[sort_idx],
+                suction_direct[sort_idx],
+                ":",
+                color=color,
+                linewidth=2,
+                alpha=0.9,
+                zorder=3,
+            )
+            sources_present["direct"] = True
 
         # 6) Plot VG model predictions (from compare_approaches.py) - solid line
-        theta_vg_pred, suction_vg_pred = get_vg_predictions(vg_pred_df, site_id, depth_cm)
+        theta_vg_pred, suction_vg_pred = get_vg_predictions(
+            vg_pred_df, site_id, depth_cm
+        )
         if theta_vg_pred is not None and len(theta_vg_pred) > 0:
             sort_idx = np.argsort(theta_vg_pred)
-            ax.plot(theta_vg_pred[sort_idx], suction_vg_pred[sort_idx], '-',
-                   color=color, linewidth=2, alpha=0.9, zorder=3)
-            sources_present['vg_pred'] = True
+            ax.plot(
+                theta_vg_pred[sort_idx],
+                suction_vg_pred[sort_idx],
+                "-",
+                color=color,
+                linewidth=2,
+                alpha=0.9,
+                zorder=3,
+            )
+            sources_present["vg_pred"] = True
 
     # Configure axes
-    ax.set_yscale('log')
-    ax.set_xlabel(r'Volumetric Water Content ($\theta$, $cm^3/cm^3$)', fontsize=12)
-    ax.set_ylabel('Soil Water Potential (cm H₂O)', fontsize=12)
+    ax.set_yscale("log")
+    ax.set_xlabel(r"Volumetric Water Content ($\theta$, $cm^3/cm^3$)", fontsize=12)
+    ax.set_ylabel("Soil Water Potential (cm H₂O)", fontsize=12)
     ax.set_xlim(0, 0.65)
     ax.set_ylim(1, 1e7)
-    ax.grid(True, which='both', ls='--', c='0.75', alpha=0.5)
+    ax.grid(True, which="both", ls="--", c="0.75", alpha=0.5)
 
     # Build legend
     legend_elements = []
-    if sources_present['obs']:
-        legend_elements.append(Line2D([0], [0], marker='o', color='w', markerfacecolor='gray',
-                                      markersize=8, label='Observed'))
-    if sources_present['fitted']:
-        legend_elements.append(Line2D([0], [0], color='gray', linewidth=2, linestyle='--',
-                                      label='Fitted VG (Bayes)'))
-    if sources_present['rosetta']:
-        legend_elements.append(Line2D([0], [0], color='gray', linewidth=1.5, linestyle='--',
-                                      label='Rosetta'))
-    if sources_present['ml']:
-        legend_elements.append(Line2D([0], [0], color='gray', linewidth=1.5, linestyle='-.',
-                                      label='ML Predicted'))
-    if sources_present['direct']:
-        legend_elements.append(Line2D([0], [0], color='gray', linewidth=2, linestyle=':',
-                                      label='Direct Model'))
-    if sources_present['vg_pred']:
-        legend_elements.append(Line2D([0], [0], color='gray', linewidth=2, linestyle='-',
-                                      label='VG Pred (RF)'))
+    if sources_present["obs"]:
+        legend_elements.append(
+            Line2D(
+                [0],
+                [0],
+                marker="o",
+                color="w",
+                markerfacecolor="gray",
+                markersize=8,
+                label="Observed",
+            )
+        )
+    if sources_present["fitted"]:
+        legend_elements.append(
+            Line2D(
+                [0],
+                [0],
+                color="gray",
+                linewidth=2,
+                linestyle="--",
+                label="Fitted VG (Bayes)",
+            )
+        )
+    if sources_present["rosetta"]:
+        legend_elements.append(
+            Line2D(
+                [0], [0], color="gray", linewidth=1.5, linestyle="--", label="Rosetta"
+            )
+        )
+    if sources_present["ml"]:
+        legend_elements.append(
+            Line2D(
+                [0],
+                [0],
+                color="gray",
+                linewidth=1.5,
+                linestyle="-.",
+                label="ML Predicted",
+            )
+        )
+    if sources_present["direct"]:
+        legend_elements.append(
+            Line2D(
+                [0], [0], color="gray", linewidth=2, linestyle=":", label="Direct Model"
+            )
+        )
+    if sources_present["vg_pred"]:
+        legend_elements.append(
+            Line2D(
+                [0], [0], color="gray", linewidth=2, linestyle="-", label="VG Pred (RF)"
+            )
+        )
 
     # Add depth color legend
     for idx, depth_cm in enumerate(depths):
         level = depth_to_rosetta_level(depth_cm)
-        legend_elements.append(Line2D([0], [0], color=colors[idx], linewidth=3,
-                                      label=f'{int(depth_cm)} cm (L{level})'))
+        legend_elements.append(
+            Line2D(
+                [0],
+                [0],
+                color=colors[idx],
+                linewidth=3,
+                label=f"{int(depth_cm)} cm (L{level})",
+            )
+        )
 
-    ax.legend(handles=legend_elements, loc='upper right', fontsize=9, frameon=True,
-              fancybox=True, shadow=False, ncol=2)
+    ax.legend(
+        handles=legend_elements,
+        loc="upper right",
+        fontsize=9,
+        frameon=True,
+        fancybox=True,
+        shadow=False,
+        ncol=2,
+    )
 
     # Title
     if title is None:
-        title = f'Composite SWRC — {site_id}'
-    ax.set_title(title, fontsize=14, fontweight='bold')
+        title = f"Composite SWRC — {site_id}"
+    ax.set_title(title, fontsize=14, fontweight="bold")
 
     plt.tight_layout()
 
     if save_path:
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
-        plt.savefig(save_path, dpi=300, bbox_inches='tight', facecolor='white')
+        plt.savefig(save_path, dpi=300, bbox_inches="tight", facecolor="white")
         print(f"Saved: {save_path}")
 
     if show:
@@ -506,12 +612,12 @@ def plot_composite_swrc(
 
 
 def find_complete_sites(
-        fit_results_dir,
-        rosetta_parquet=None,
-        ml_predictions_parquet=None,
-        direct_predictions_parquet=None,
-        fit_method='bayes',
-        max_sites=5,
+    fit_results_dir,
+    rosetta_parquet=None,
+    ml_predictions_parquet=None,
+    direct_predictions_parquet=None,
+    fit_method="bayes",
+    max_sites=5,
 ):
     """
     Find sites that have all required data sources for composite plotting.
@@ -542,7 +648,7 @@ def find_complete_sites(
         print(f"Warning: Fit results directory not found: {json_dir}")
         return []
 
-    json_files = [f for f in os.listdir(json_dir) if f.endswith('.json')]
+    json_files = [f for f in os.listdir(json_dir) if f.endswith(".json")]
     fitted_sites = {os.path.splitext(f)[0] for f in json_files}
 
     # Load other data sources to find overlapping sites
@@ -550,7 +656,7 @@ def find_complete_sites(
     if rosetta_parquet and os.path.exists(rosetta_parquet):
         try:
             rdf = pd.read_parquet(rosetta_parquet)
-            for col in ['station', 'profile_id', 'Index']:
+            for col in ["station", "profile_id", "Index"]:
                 if col in rdf.columns:
                     rosetta_sites = set(rdf[col].astype(str).unique())
                     break
@@ -561,7 +667,7 @@ def find_complete_sites(
     if ml_predictions_parquet and os.path.exists(ml_predictions_parquet):
         try:
             mdf = pd.read_parquet(ml_predictions_parquet)
-            for col in ['station', 'profile_id', 'sample_id']:
+            for col in ["station", "profile_id", "sample_id"]:
                 if col in mdf.columns:
                     ml_sites = set(mdf[col].astype(str).unique())
                     break
@@ -572,7 +678,7 @@ def find_complete_sites(
     if direct_predictions_parquet and os.path.exists(direct_predictions_parquet):
         try:
             ddf = pd.read_parquet(direct_predictions_parquet)
-            for col in ['station', 'profile_id', 'sample_id']:
+            for col in ["station", "profile_id", "sample_id"]:
                 if col in ddf.columns:
                     direct_sites = set(ddf[col].astype(str).unique())
                     break
@@ -597,15 +703,15 @@ def find_complete_sites(
 
 
 def batch_plot_composite(
-        fit_results_dir,
-        out_dir,
-        rosetta_parquet=None,
-        ml_predictions_parquet=None,
-        direct_predictions_parquet=None,
-        vg_predictions_parquet=None,
-        fit_method='bayes',
-        max_sites=5,
-        show=False,
+    fit_results_dir,
+    out_dir,
+    rosetta_parquet=None,
+    ml_predictions_parquet=None,
+    direct_predictions_parquet=None,
+    vg_predictions_parquet=None,
+    fit_method="bayes",
+    max_sites=5,
+    show=False,
 ):
     """
     Generate composite SWRC plots for multiple sites.
@@ -679,16 +785,18 @@ def batch_plot_composite(
     print(f"Plotting {len(sites)} sites...")
 
     for site_id in sites:
-        json_path = os.path.join(fit_results_dir, fit_method, f'{site_id}.json')
+        json_path = os.path.join(fit_results_dir, fit_method, f"{site_id}.json")
         if not os.path.exists(json_path):
             # Try with _bayes_results or _fit_results suffix
-            for suffix in ['_bayes_results.json', '_fit_results.json', '.json']:
-                candidate = os.path.join(fit_results_dir, fit_method, f'{site_id}{suffix}')
+            for suffix in ["_bayes_results.json", "_fit_results.json", ".json"]:
+                candidate = os.path.join(
+                    fit_results_dir, fit_method, f"{site_id}{suffix}"
+                )
                 if os.path.exists(candidate):
                     json_path = candidate
                     break
 
-        out_path = os.path.join(out_dir, f'{site_id}_composite_swrc.png')
+        out_path = os.path.join(out_dir, f"{site_id}_composite_swrc.png")
 
         try:
             plot_composite_swrc(
@@ -708,59 +816,67 @@ def batch_plot_composite(
 def main():
     import argparse
 
-    home = os.path.expanduser('~')
-    data_root = os.path.join(home, 'data', 'IrrigationGIS', 'soils')
+    home = os.path.expanduser("~")
+    data_root = os.path.join(home, "data", "IrrigationGIS", "soils")
 
     parser = argparse.ArgumentParser(
-        description='Generate composite SWRC comparison plots from fitted data.',
+        description="Generate composite SWRC comparison plots from fitted data.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument(
-        '--fit-dir', '-f',
-        default=os.path.join(data_root, 'soil_potential_obs', 'curve_fits', 'mt_mesonet'),
-        help='Directory containing fitted JSON files (with method subdirs)',
+        "--fit-dir",
+        "-f",
+        default=os.path.join(
+            data_root, "soil_potential_obs", "curve_fits", "mt_mesonet"
+        ),
+        help="Directory containing fitted JSON files (with method subdirs)",
     )
     parser.add_argument(
-        '--out-dir', '-o',
-        default=os.path.join(data_root, 'soil_potential_obs', 'composite_swrc_plots', 'mt_mesonet'),
-        help='Output directory for PNG files',
+        "--out-dir",
+        "-o",
+        default=os.path.join(
+            data_root, "soil_potential_obs", "composite_swrc_plots", "mt_mesonet"
+        ),
+        help="Output directory for PNG files",
     )
     parser.add_argument(
-        '--method', '-m',
-        default='bayes',
-        choices=['bayes', 'nelder', 'leastsq', 'powell'],
-        help='Fitting method subdirectory to use',
+        "--method",
+        "-m",
+        default="bayes",
+        choices=["bayes", "nelder", "leastsq", "powell"],
+        help="Fitting method subdirectory to use",
     )
     parser.add_argument(
-        '--max-sites', '-n',
+        "--max-sites",
+        "-n",
         type=int,
         default=10,
-        help='Maximum number of sites to plot',
+        help="Maximum number of sites to plot",
     )
     parser.add_argument(
-        '--rosetta',
+        "--rosetta",
         default=None,
-        help='Path to Rosetta parameters parquet (optional)',
+        help="Path to Rosetta parameters parquet (optional)",
     )
     parser.add_argument(
-        '--ml-pred',
+        "--ml-pred",
         default=None,
-        help='Path to ML predictions parquet (optional)',
+        help="Path to ML predictions parquet (optional)",
     )
     parser.add_argument(
-        '--direct-pred',
+        "--direct-pred",
         default=None,
-        help='Path to direct model predictions parquet (from compare_approaches.py)',
+        help="Path to direct model predictions parquet (from compare_approaches.py)",
     )
     parser.add_argument(
-        '--vg-pred',
+        "--vg-pred",
         default=None,
-        help='Path to VG model predictions parquet (from compare_approaches.py)',
+        help="Path to VG model predictions parquet (from compare_approaches.py)",
     )
     parser.add_argument(
-        '--show',
-        action='store_true',
-        help='Display plots interactively',
+        "--show",
+        action="store_true",
+        help="Display plots interactively",
     )
 
     args = parser.parse_args()
@@ -778,6 +894,6 @@ def main():
     )
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
 # ========================= EOF ====================================================================

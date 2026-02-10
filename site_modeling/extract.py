@@ -1,6 +1,4 @@
 import os
-import time
-import warnings
 from datetime import date
 from typing import Optional
 
@@ -19,7 +17,7 @@ from map.data.cze_extract import (
 )
 
 
-def ee_init(project: str = 'ee-dgketchum') -> None:
+def ee_init(project: str = "ee-dgketchum") -> None:
     """Initialize the Earth Engine client using project credentials.
 
     Wraps map.data.cze_extract.ee_init to keep this module standalone.
@@ -28,15 +26,15 @@ def ee_init(project: str = 'ee-dgketchum') -> None:
 
 
 def export_landsat_for_sites(
-        shapefile: str,
-        bucket: str,
-        gcs_prefix: str,
-        id_col: str,
-        start_year: int = 2000,
-        end_year: int = date.today().year,
-        buffer_m: float = 250.0,
-        check_dir: Optional[str] = None,
-        debug: bool = False,
+    shapefile: str,
+    bucket: str,
+    gcs_prefix: str,
+    id_col: str,
+    start_year: int = 2000,
+    end_year: int = date.today().year,
+    buffer_m: float = 250.0,
+    check_dir: Optional[str] = None,
+    debug: bool = False,
 ) -> None:
     """Export per-scene Landsat (C2 SR) band time series over site buffers.
 
@@ -64,17 +62,17 @@ def export_landsat_for_sites(
 
 
 def export_openet_ptjpl_for_sites(
-        shapefile: str,
-        id_col: str,
-        start_date: str,
-        gcs_prefix: str,
-        end_date: str,
-        chunk: bool,
-        chunk_size: int,
-        bucket: str = 'wudr',
-        check_dir: Optional[str] = None,
-        mask_type: str = 'inv_irr',
-        **kwargs,
+    shapefile: str,
+    id_col: str,
+    start_date: str,
+    gcs_prefix: str,
+    end_date: str,
+    chunk: bool,
+    chunk_size: int,
+    bucket: str = "wudr",
+    check_dir: Optional[str] = None,
+    mask_type: str = "inv_irr",
+    **kwargs,
 ) -> None:
     """Export PT-JPL ET fraction zonal stats to Cloud Storage using local et.ptjpl.
 
@@ -92,7 +90,9 @@ def export_openet_ptjpl_for_sites(
         start_year = int(str(start_date)[:4])
         end_year = int(str(end_date)[:4])
     except Exception:
-        raise ValueError('start_date and end_date must be ISO-like strings (YYYY-MM-DD)')
+        raise ValueError(
+            "start_date and end_date must be ISO-like strings (YYYY-MM-DD)"
+        )
 
     # Ensure EE auth
     ee_init()
@@ -112,7 +112,7 @@ def export_openet_ptjpl_for_sites(
     )
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     """Example driver toggles for Landsat and PT-JPL exports.
 
     Edit paths/flags to your environment before running. Follows the
@@ -125,9 +125,9 @@ if __name__ == '__main__':
     run_ptjpl_flux = True
 
     # Common config
-    home_ = os.path.expanduser('~')
-    root_ = os.path.join(home_, 'data', 'IrrigationGIS')
-    bucket_ = 'wudr'
+    home_ = os.path.expanduser("~")
+    root_ = os.path.join(home_, "data", "IrrigationGIS")
+    bucket_ = "wudr"
     start_year_ = 2000
     end_year_ = date.today().year
 
@@ -137,8 +137,17 @@ if __name__ == '__main__':
 
     # ReESH/Flux sites: Landsat per-scene exports
     if run_reesh_flux_landsat:
-        reesh_shp_ = os.path.join(root_, 'soils', 'soil_potential_obs', 'reesh', 'shapefile', 'reesh_sites_mgrs_5070.shp')
-        reesh_check_dir_ = os.path.join(root_, 'soils', 'swapstress', 'cze', 'extracts', 'flux', 'landsat')
+        reesh_shp_ = os.path.join(
+            root_,
+            "soils",
+            "soil_potential_obs",
+            "reesh",
+            "shapefile",
+            "reesh_sites_mgrs_5070.shp",
+        )
+        reesh_check_dir_ = os.path.join(
+            root_, "soils", "swapstress", "cze", "extracts", "flux", "landsat"
+        )
         os.makedirs(reesh_check_dir_, exist_ok=True)
         # export_landsat_for_sites(
         #     shapefile=reesh_shp_,
@@ -154,21 +163,29 @@ if __name__ == '__main__':
 
     # OpenET PT-JPL: Landsat ET fraction zonal stats for flux sites
     if run_ptjpl_flux:
-        start_ = '2000-01-01'
-        end_ = '2024-12-31'
-        check_dir_ = os.path.join(root_, 'soils', 'swapstress', 'et', 'flux', 'ptjpl_tables')
+        start_ = "2000-01-01"
+        end_ = "2024-12-31"
+        check_dir_ = os.path.join(
+            root_, "soils", "swapstress", "et", "flux", "ptjpl_tables"
+        )
         os.makedirs(check_dir_, exist_ok=True)
-        flux_shp_ = os.path.join(root_, 'soils', 'soil_potential_obs', 'reesh', 'shapefile',
-                                 'reesh_sites_mgrs_5070.shp')
+        flux_shp_ = os.path.join(
+            root_,
+            "soils",
+            "soil_potential_obs",
+            "reesh",
+            "shapefile",
+            "reesh_sites_mgrs_5070.shp",
+        )
         export_openet_ptjpl_for_sites(
             shapefile=flux_shp_,
-            id_col='site_id',
+            id_col="site_id",
             start_date=start_,
             end_date=end_,
-            gcs_prefix='swap/et/ptjpl',
+            gcs_prefix="swap/et/ptjpl",
             bucket=bucket_,
             check_dir=check_dir_,
-            mask_type='inv_irr',
+            mask_type="inv_irr",
             buffer=250.0,
             chunk_size=10,
             chunk=True,

@@ -6,17 +6,16 @@ import geopandas as gpd
 import pandas as pd
 import rasterio
 from tqdm import tqdm
-import pandas as pd
 import random
 
 
 def _list_vwc_files(vwc_dir):
-    files = glob(os.path.join(vwc_dir, 'vwc_*.tif'))
+    files = glob(os.path.join(vwc_dir, "vwc_*.tif"))
     mapping = {}
     for fp in files:
         name = os.path.basename(fp)
         try:
-            date_str = name.split('vwc_')[1].split('.tif')[0]
+            date_str = name.split("vwc_")[1].split(".tif")[0]
         except Exception:
             continue  # likely error: unexpected filename pattern
         mapping[pd.to_datetime(date_str)] = fp
@@ -48,21 +47,32 @@ def _worker_point(args):
     for d in order:
         sp = shallow_map.get(d)
         mp = middle_map.get(d)
-        sv = float('nan') if sp is None else _sample_value(sp, x, y)
-        mv = float('nan') if mp is None else _sample_value(mp, x, y)
+        sv = float("nan") if sp is None else _sample_value(sp, x, y)
+        mv = float("nan") if mp is None else _sample_value(mp, x, y)
         s_vals.append(sv)
         m_vals.append(mv)
 
-    df = pd.DataFrame({'shallow': s_vals, 'middle': m_vals}, index=pd.DatetimeIndex(order, name='date'))
+    df = pd.DataFrame(
+        {"shallow": s_vals, "middle": m_vals},
+        index=pd.DatetimeIndex(order, name="date"),
+    )
     df = df.sort_index()
-    if df[['shallow', 'middle']].isna().any().any():
+    if df[["shallow", "middle"]].isna().any().any():
         return out_fp
     df.to_parquet(out_fp)
     return out_fp
 
 
-def extract_vwc_timeseries(points_shp, shallow_dir, middle_dir, out_dir, index_col,
-                           num_workers=4, overwrite=False, debug=False):
+def extract_vwc_timeseries(
+    points_shp,
+    shallow_dir,
+    middle_dir,
+    out_dir,
+    index_col,
+    num_workers=4,
+    overwrite=False,
+    debug=False,
+):
     print("Reading points and reprojecting to EPSG:4326...")
     gdf = gpd.read_file(points_shp)
     gdf = gdf.to_crs(4326)
@@ -81,7 +91,10 @@ def extract_vwc_timeseries(points_shp, shallow_dir, middle_dir, out_dir, index_c
     middle_map = _list_vwc_files(middle_dir)
     print(f"Found {len(shallow_map)} shallow and {len(middle_map)} middle rasters.")
 
-    tasks = [(pid, x, y, shallow_map, middle_map, out_dir, overwrite) for pid, x, y in zip(ids, xs, ys)]
+    tasks = [
+        (pid, x, y, shallow_map, middle_map, out_dir, overwrite)
+        for pid, x, y in zip(ids, xs, ys)
+    ]
 
     print(f"Extracting VWC rasters to points in {points_shp}")
 
@@ -100,73 +113,102 @@ def extract_vwc_timeseries(points_shp, shallow_dir, middle_dir, out_dir, index_c
     print("Done.")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     run_mt_mesonet_workflow = True
     run_rosetta_workflow = True
     run_gshp_workflow = True
     run_reesh_workflow = True
 
-    home = os.path.expanduser('~')
-    root_ = os.path.join(home, 'data', 'IrrigationGIS')
+    home = os.path.expanduser("~")
+    root_ = os.path.join(home, "data", "IrrigationGIS")
 
-    vwc_ = '/data/ssd2/swapstress/vwc'
-    out_dir_ = os.path.join(vwc_, 'hhp')
-    gridmet_dir = os.path.join(vwc_, 'gridmet')
+    vwc_ = "/data/ssd2/swapstress/vwc"
+    out_dir_ = os.path.join(vwc_, "hhp")
+    gridmet_dir = os.path.join(vwc_, "gridmet")
 
     clean_empty = True
 
-    shallow_dir_ = '/data/ssd4/soil-moisture-ml-inference/predictions-smoothed-daily-shallow/'
-    middle_dir_ = '/data/ssd4/soil-moisture-ml-inference/predictions-smoothed-daily-middle/'
+    shallow_dir_ = (
+        "/data/ssd4/soil-moisture-ml-inference/predictions-smoothed-daily-shallow/"
+    )
+    middle_dir_ = (
+        "/data/ssd4/soil-moisture-ml-inference/predictions-smoothed-daily-middle/"
+    )
 
-    gridmet_vars_ = ['pr', 'pet', 'vpd', 'srad', 'tmmx', 'tmmn']
-    gridmet_ = '/data/ssd2/gridmet/pr_raw/pr_2001.nc'
+    gridmet_vars_ = ["pr", "pet", "vpd", "srad", "tmmx", "tmmn"]
+    gridmet_ = "/data/ssd2/gridmet/pr_raw/pr_2001.nc"
 
     if run_mt_mesonet_workflow:
-        points_shp_ = os.path.join(root_, 'soils', 'soil_potential_obs', 'mt_mesonet', 'station_metadata_mgrs.shp')
-        vwc_out_ = os.path.join(out_dir_, 'mt_mesonet')
-        extract_vwc_timeseries(points_shp=points_shp_,
-                               shallow_dir=shallow_dir_,
-                               middle_dir=middle_dir_,
-                               out_dir=vwc_out_,
-                               index_col='station',
-                               num_workers=36,
-                               overwrite=False,
-                               debug=False)
+        points_shp_ = os.path.join(
+            root_,
+            "soils",
+            "soil_potential_obs",
+            "mt_mesonet",
+            "station_metadata_mgrs.shp",
+        )
+        vwc_out_ = os.path.join(out_dir_, "mt_mesonet")
+        extract_vwc_timeseries(
+            points_shp=points_shp_,
+            shallow_dir=shallow_dir_,
+            middle_dir=middle_dir_,
+            out_dir=vwc_out_,
+            index_col="station",
+            num_workers=36,
+            overwrite=False,
+            debug=False,
+        )
 
     if run_gshp_workflow:
-        points_shp_ = os.path.join(root_, 'soils', 'soil_potential_obs', 'gshp', 'wrc_aggregated_mgrs.shp')
-        vwc_out_ = os.path.join(out_dir_, 'gshp')
-        extract_vwc_timeseries(points_shp=points_shp_,
-                               shallow_dir=shallow_dir_,
-                               middle_dir=middle_dir_,
-                               out_dir=vwc_out_,
-                               index_col='profile_id',
-                               num_workers=36,
-                               overwrite=False,
-                               debug=False)
+        points_shp_ = os.path.join(
+            root_, "soils", "soil_potential_obs", "gshp", "wrc_aggregated_mgrs.shp"
+        )
+        vwc_out_ = os.path.join(out_dir_, "gshp")
+        extract_vwc_timeseries(
+            points_shp=points_shp_,
+            shallow_dir=shallow_dir_,
+            middle_dir=middle_dir_,
+            out_dir=vwc_out_,
+            index_col="profile_id",
+            num_workers=36,
+            overwrite=False,
+            debug=False,
+        )
 
     if run_reesh_workflow:
-        points_shp_ = os.path.join(root_, 'soils', 'soil_potential_obs', 'reesh', 'shapefile', 'reesh_sites_mgrs.shp')
-        vwc_out_ = os.path.join(out_dir_, 'reesh')
-        extract_vwc_timeseries(points_shp=points_shp_,
-                               shallow_dir=shallow_dir_,
-                               middle_dir=middle_dir_,
-                               out_dir=vwc_out_,
-                               index_col='site_id',
-                               num_workers=36,
-                               overwrite=False,
-                               debug=False)
+        points_shp_ = os.path.join(
+            root_,
+            "soils",
+            "soil_potential_obs",
+            "reesh",
+            "shapefile",
+            "reesh_sites_mgrs.shp",
+        )
+        vwc_out_ = os.path.join(out_dir_, "reesh")
+        extract_vwc_timeseries(
+            points_shp=points_shp_,
+            shallow_dir=shallow_dir_,
+            middle_dir=middle_dir_,
+            out_dir=vwc_out_,
+            index_col="site_id",
+            num_workers=36,
+            overwrite=False,
+            debug=False,
+        )
 
     if run_rosetta_workflow:
-        points_shp_ = os.path.join(root_, 'soils', 'gis', 'pretraining-roi-10000_mgrs.shp')
-        vwc_out_ = os.path.join(out_dir_, 'rosetta')
-        extract_vwc_timeseries(points_shp=points_shp_,
-                               shallow_dir=shallow_dir_,
-                               middle_dir=middle_dir_,
-                               out_dir=vwc_out_,
-                               index_col='site_id',
-                               num_workers=36,
-                               overwrite=False,
-                               debug=False)
+        points_shp_ = os.path.join(
+            root_, "soils", "gis", "pretraining-roi-10000_mgrs.shp"
+        )
+        vwc_out_ = os.path.join(out_dir_, "rosetta")
+        extract_vwc_timeseries(
+            points_shp=points_shp_,
+            shallow_dir=shallow_dir_,
+            middle_dir=middle_dir_,
+            out_dir=vwc_out_,
+            index_col="site_id",
+            num_workers=36,
+            overwrite=False,
+            debug=False,
+        )
 
 # ========================= EOF ====================================================================

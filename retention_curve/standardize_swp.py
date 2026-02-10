@@ -21,7 +21,9 @@ BULK_DENSITY_MIN = 0.5
 BULK_DENSITY_MAX = 2.5
 
 
-def apply_physical_filters(df, suction_col='suction_cm', theta_col='theta', source_name=''):
+def apply_physical_filters(
+    df, suction_col="suction_cm", theta_col="theta", source_name=""
+):
     """
     Apply physical sanity filters to remove non-physical values.
 
@@ -71,41 +73,43 @@ def apply_physical_filters(df, suction_col='suction_cm', theta_col='theta', sour
     n_final = len(df)
     n_dropped = n_initial - n_final
     if n_dropped > 0 and source_name:
-        print(f"  [{source_name}] Dropped {n_dropped}/{n_initial} rows: {', '.join(dropped_reasons)}")
+        print(
+            f"  [{source_name}] Dropped {n_dropped}/{n_initial} rows: {', '.join(dropped_reasons)}"
+        )
 
     return df
 
 
 def _standardize_depth(d, depth_col=None):
     if depth_col and depth_col in d.columns:
-        d = d.rename(columns={depth_col: 'depth'})
+        d = d.rename(columns={depth_col: "depth"})
         return d
-    for c in ('depth', 'Depth [cm]', 'Depth_cm', 'stationDepth [cm]'):
+    for c in ("depth", "Depth [cm]", "Depth_cm", "stationDepth [cm]"):
         if c in d.columns:
-            d = d.rename(columns={c: 'depth'}) if c != 'depth' else d
+            d = d.rename(columns={c: "depth"}) if c != "depth" else d
             return d
-    d['depth'] = 0
+    d["depth"] = 0
     return d
 
 
 def standardize_reesh(df, depth_col=None):
     d = df.copy()
-    if 'MPa_Abs' not in d.columns or 'Vol_Water' not in d.columns:
+    if "MPa_Abs" not in d.columns or "Vol_Water" not in d.columns:
         raise ValueError("Expected columns 'MPa_Abs' and 'Vol_Water'")
     # MPa -> cm of water; Vol_Water is percent -> fraction
-    d['suction'] = np.abs(d['MPa_Abs'].astype(float).values) * MPA_TO_CM
-    d['theta'] = d['Vol_Water'].astype(float).values / 100.0
+    d["suction"] = np.abs(d["MPa_Abs"].astype(float).values) * MPA_TO_CM
+    d["theta"] = d["Vol_Water"].astype(float).values / 100.0
     d = _standardize_depth(d, depth_col)
     # Prefer Sample_ID as primary identifier if present, otherwise fall back to Site
-    if 'Sample_ID' in d.columns:
-        d['name'] = d['Sample_ID']
-    elif 'Site' in d.columns:
-        d['name'] = d['Site']
-    keep_extra = [c for c in ('Sample_ID', 'Site', 'Plot') if c in d.columns]
-    d = d.rename(columns={'suction': 'suction_cm', 'depth': 'depth_cm'})
-    d = d[['suction_cm', 'theta', 'depth_cm'] + keep_extra]
+    if "Sample_ID" in d.columns:
+        d["name"] = d["Sample_ID"]
+    elif "Site" in d.columns:
+        d["name"] = d["Site"]
+    keep_extra = [c for c in ("Sample_ID", "Site", "Plot") if c in d.columns]
+    d = d.rename(columns={"suction": "suction_cm", "depth": "depth_cm"})
+    d = d[["suction_cm", "theta", "depth_cm"] + keep_extra]
     # Apply physical sanity filters
-    d = apply_physical_filters(d, source_name='ReESH')
+    d = apply_physical_filters(d, source_name="ReESH")
     return d
 
 
@@ -114,40 +118,42 @@ def standardize_mt_mesonet(df, depth_col=None):
     n_initial = len(d)
     dropped_reasons = []
 
-    if 'KPA' in d.columns and 'VWC' in d.columns:
+    if "KPA" in d.columns and "VWC" in d.columns:
         # Filter negative VWC before conversion
-        mask_neg_vwc = d['VWC'].astype(float) < 0
+        mask_neg_vwc = d["VWC"].astype(float) < 0
         if mask_neg_vwc.sum() > 0:
             dropped_reasons.append(f"VWC<0: {mask_neg_vwc.sum()}")
             d = d[~mask_neg_vwc]
 
         # Filter extreme KPA values (>200 kPa is beyond field sensor range)
-        mask_high_kpa = d['KPA'].astype(float).abs() > KPA_MAX
+        mask_high_kpa = d["KPA"].astype(float).abs() > KPA_MAX
         if mask_high_kpa.sum() > 0:
             dropped_reasons.append(f"KPA>{KPA_MAX}: {mask_high_kpa.sum()}")
             d = d[~mask_high_kpa]
 
-        d['suction'] = np.abs(d['KPA'].astype(float).values * 10.19716)
-        d['theta'] = d['VWC'].astype(float).values
-    elif 'suction_cm' in d.columns and 'theta' in d.columns:
-        d['suction'] = np.abs(d['suction_cm'].astype(float).values)
-        d['theta'] = d['theta'].astype(float).values
+        d["suction"] = np.abs(d["KPA"].astype(float).values * 10.19716)
+        d["theta"] = d["VWC"].astype(float).values
+    elif "suction_cm" in d.columns and "theta" in d.columns:
+        d["suction"] = np.abs(d["suction_cm"].astype(float).values)
+        d["theta"] = d["theta"].astype(float).values
     else:
         raise ValueError("Expected ('KPA','VWC') or ('suction_cm','theta')")
 
     d = _standardize_depth(d, depth_col)
-    if 'name' not in d.columns and 'station' in d.columns:
-        d['name'] = d['station']
-    d = d.rename(columns={'suction': 'suction_cm', 'depth': 'depth_cm'})
-    d = d[['suction_cm', 'theta', 'depth_cm', 'name']]
+    if "name" not in d.columns and "station" in d.columns:
+        d["name"] = d["station"]
+    d = d.rename(columns={"suction": "suction_cm", "depth": "depth_cm"})
+    d = d[["suction_cm", "theta", "depth_cm", "name"]]
 
     # Log source-specific drops (before physical filters)
     n_source_dropped = n_initial - len(d)
     if n_source_dropped > 0 and dropped_reasons:
-        print(f"  [MT_Mesonet source-filter] Dropped {n_source_dropped}/{n_initial} rows: {', '.join(dropped_reasons)}")
+        print(
+            f"  [MT_Mesonet source-filter] Dropped {n_source_dropped}/{n_initial} rows: {', '.join(dropped_reasons)}"
+        )
 
     # Apply physical sanity filters (logs its own drops)
-    d = apply_physical_filters(d, source_name='MT_Mesonet')
+    d = apply_physical_filters(d, source_name="MT_Mesonet")
 
     return d
 
@@ -158,92 +164,112 @@ def standardize_gshp(df, depth_col=None):
     dropped_reasons = []
 
     # Prefer GSHP high quality data
-    if 'data_flag' in d.columns:
+    if "data_flag" in d.columns:
         n_before = len(d)
-        d = d[d['data_flag'] == 'good quality estimate']
+        d = d[d["data_flag"] == "good quality estimate"]
         n_quality_filter = n_before - len(d)
         if n_quality_filter > 0:
             dropped_reasons.append(f"quality_filter: {n_quality_filter}")
 
-    d = d.dropna(subset=['lab_head_m', 'lab_wrc'])
+    d = d.dropna(subset=["lab_head_m", "lab_wrc"])
 
     # Guard against extreme lab_head_m outliers (e.g., 1e19-1e31 m values in weynants_18)
     # Max realistic: 1e4 m = 1e6 cm = 100 MPa
     LAB_HEAD_M_MAX = 1e4
-    mask_extreme_head = d['lab_head_m'].astype(float).abs() > LAB_HEAD_M_MAX
+    mask_extreme_head = d["lab_head_m"].astype(float).abs() > LAB_HEAD_M_MAX
     if mask_extreme_head.sum() > 0:
-        dropped_reasons.append(f"lab_head_m>{LAB_HEAD_M_MAX:.0e}: {mask_extreme_head.sum()}")
+        dropped_reasons.append(
+            f"lab_head_m>{LAB_HEAD_M_MAX:.0e}: {mask_extreme_head.sum()}"
+        )
         d = d[~mask_extreme_head]
 
-    d['suction'] = (d['lab_head_m'].astype(float) * 100.0).abs()  # m -> cm
-    d['theta'] = d['lab_wrc'].astype(float)
-    if 'hzn_bot' in d.columns and 'hzn_top' in d.columns:
-        d['depth'] = (d['hzn_bot'].astype(float) + d['hzn_top'].astype(float)) / 2.0
+    d["suction"] = (d["lab_head_m"].astype(float) * 100.0).abs()  # m -> cm
+    d["theta"] = d["lab_wrc"].astype(float)
+    if "hzn_bot" in d.columns and "hzn_top" in d.columns:
+        d["depth"] = (d["hzn_bot"].astype(float) + d["hzn_top"].astype(float)) / 2.0
     else:
         d = _standardize_depth(d, depth_col)
-    d = d.rename(columns={'suction': 'suction_cm', 'depth': 'depth_cm'})
-    keep = ['suction_cm', 'theta', 'depth_cm']
+    d = d.rename(columns={"suction": "suction_cm", "depth": "depth_cm"})
+    keep = ["suction_cm", "theta", "depth_cm"]
     # GSHP needs these extra data to be fit according to their approach
-    keep += [c for c in ('profile_id', 'SWCC_classes',
-                         'sand_tot_psa',
-                         'silt_tot_psa',
-                         'clay_tot_psa',
-                         'db_od',
-                         'climate_classes') if c in d.columns]
+    keep += [
+        c
+        for c in (
+            "profile_id",
+            "SWCC_classes",
+            "sand_tot_psa",
+            "silt_tot_psa",
+            "clay_tot_psa",
+            "db_od",
+            "climate_classes",
+        )
+        if c in d.columns
+    ]
     d = d[keep]
 
     # Log source-specific drops (before physical filters)
     n_source_dropped = n_initial - len(d)
     if n_source_dropped > 0 and dropped_reasons:
-        print(f"  [GSHP source-filter] Dropped {n_source_dropped}/{n_initial} rows: {', '.join(dropped_reasons)}")
+        print(
+            f"  [GSHP source-filter] Dropped {n_source_dropped}/{n_initial} rows: {', '.join(dropped_reasons)}"
+        )
 
     # Apply physical sanity filters (logs its own drops)
-    d = apply_physical_filters(d, source_name='GSHP')
+    d = apply_physical_filters(d, source_name="GSHP")
 
     return d
 
 
 def write_standardized_gshp(soil_csv_path, out_dir, minimum_points):
     os.makedirs(out_dir, exist_ok=True)
-    df = pd.read_csv(soil_csv_path, encoding='latin1')
-    if 'profile_id' in df.columns:
-        df['profile_id'] = df['profile_id'].astype(str).apply(sanitize_profile_id)
+    df = pd.read_csv(soil_csv_path, encoding="latin1")
+    if "profile_id" in df.columns:
+        df["profile_id"] = df["profile_id"].astype(str).apply(sanitize_profile_id)
     std = standardize_gshp(df)
     stations = 0
     s_min, s_max = np.inf, -np.inf
     t_min, t_max = np.inf, -np.inf
-    print(f'writing gshp obs to {out_dir}')
-    for pid, r in tqdm(std.groupby('profile_id'), total=len(std.groupby('profile_id'))):
-        depth_counts = r.groupby('depth_cm').size()
+    print(f"writing gshp obs to {out_dir}")
+    for pid, r in tqdm(std.groupby("profile_id"), total=len(std.groupby("profile_id"))):
+        depth_counts = r.groupby("depth_cm").size()
         keep_depths = depth_counts[depth_counts >= minimum_points].index
-        r = r[r['depth_cm'].isin(keep_depths)]
+        r = r[r["depth_cm"].isin(keep_depths)]
         if r.empty:
             continue
-        out_path = os.path.join(out_dir, f'{pid}.csv')
-        r[['suction_cm', 'theta', 'depth_cm', 'SWCC_classes',
-           'sand_tot_psa',
-           'silt_tot_psa',
-           'clay_tot_psa',
-           'db_od',
-           'climate_classes']].to_csv(out_path, index=False)
+        out_path = os.path.join(out_dir, f"{pid}.csv")
+        r[
+            [
+                "suction_cm",
+                "theta",
+                "depth_cm",
+                "SWCC_classes",
+                "sand_tot_psa",
+                "silt_tot_psa",
+                "clay_tot_psa",
+                "db_od",
+                "climate_classes",
+            ]
+        ].to_csv(out_path, index=False)
         stations += 1
-        s_min = min(s_min, float(np.nanmin(r['suction_cm'].values)))
-        s_max = max(s_max, float(np.nanmax(r['suction_cm'].values)))
-        t_min = min(t_min, float(np.nanmin(r['theta'].values)))
-        t_max = max(t_max, float(np.nanmax(r['theta'].values)))
+        s_min = min(s_min, float(np.nanmin(r["suction_cm"].values)))
+        s_max = max(s_max, float(np.nanmax(r["suction_cm"].values)))
+        t_min = min(t_min, float(np.nanmin(r["theta"].values)))
+        t_max = max(t_max, float(np.nanmax(r["theta"].values)))
 
-    print(f"GSHP standardized: stations={stations}, suction_cm=[{s_min:.3g}, {s_max:.3g}], theta=[{t_min:.3f}, {t_max:.3f}]")
+    print(
+        f"GSHP standardized: stations={stations}, suction_cm=[{s_min:.3g}, {s_max:.3g}], theta=[{t_min:.3f}, {t_max:.3f}]"
+    )
 
 
 def write_standardized_rosetta(curves_wide_csv, out_dir, profile_key):
     os.makedirs(out_dir, exist_ok=True)
     dfw = pd.read_csv(curves_wide_csv)
-    if 'Index' not in dfw.columns:
+    if "Index" not in dfw.columns:
         return
     s_min, s_max = np.inf, -np.inf
     t_min, t_max = np.inf, -np.inf
     stations = 0
-    for idx, row_df in tqdm(dfw.groupby('Index'), total=dfw['Index'].nunique()):
+    for idx, row_df in tqdm(dfw.groupby("Index"), total=dfw["Index"].nunique()):
         cols = row_df.columns[2:]
         h_cols = cols[0::2]
         t_cols = cols[1::2]
@@ -253,22 +279,33 @@ def write_standardized_rosetta(curves_wide_csv, out_dir, profile_key):
             h = r[hc]
             t = r[tc]
             if pd.notna(h) and pd.notna(t):
-                recs.append({'suction_cm': abs(float(h)), 'theta': float(t), 'depth_cm': 0, 'Index': int(idx)})
+                recs.append(
+                    {
+                        "suction_cm": abs(float(h)),
+                        "theta": float(t),
+                        "depth_cm": 0,
+                        "Index": int(idx),
+                    }
+                )
         d = pd.DataFrame(recs)
-        d['profile_id'] = d[profile_key]
-        out_path = os.path.join(out_dir, f'{int(idx)}.csv')
+        d["profile_id"] = d[profile_key]
+        out_path = os.path.join(out_dir, f"{int(idx)}.csv")
         d.to_csv(out_path, index=False)
         if not d.empty:
             stations += 1
-            s_min = min(s_min, float(np.nanmin(d['suction_cm'].values)))
-            s_max = max(s_max, float(np.nanmax(d['suction_cm'].values)))
-            t_min = min(t_min, float(np.nanmin(d['theta'].values)))
-            t_max = max(t_max, float(np.nanmax(d['theta'].values)))
+            s_min = min(s_min, float(np.nanmin(d["suction_cm"].values)))
+            s_max = max(s_max, float(np.nanmax(d["suction_cm"].values)))
+            t_min = min(t_min, float(np.nanmin(d["theta"].values)))
+            t_max = max(t_max, float(np.nanmax(d["theta"].values)))
     if stations:
-        print(f"Rosetta standardized: stations={stations}, suction_cm=[{s_min:.3g}, {s_max:.3g}], theta=[{t_min:.3f}, {t_max:.3f}]")
+        print(
+            f"Rosetta standardized: stations={stations}, suction_cm=[{s_min:.3g}, {s_max:.3g}], theta=[{t_min:.3f}, {t_max:.3f}]"
+        )
 
 
-def write_standardized_mt_mesonet(swp_csv_path, metadata_csv_path, out_dir, profile_key):
+def write_standardized_mt_mesonet(
+    swp_csv_path, metadata_csv_path, out_dir, profile_key
+):
     os.makedirs(out_dir, exist_ok=True)
     for p in [swp_csv_path, metadata_csv_path]:
         if not os.path.exists(p):
@@ -276,27 +313,31 @@ def write_standardized_mt_mesonet(swp_csv_path, metadata_csv_path, out_dir, prof
             return
     obs_df = pd.read_csv(swp_csv_path)
     meta_df = pd.read_csv(metadata_csv_path)
-    station_col = 'station'
+    station_col = "station"
     if station_col not in obs_df.columns or station_col not in meta_df.columns:
         print(f"Error: Join column '{station_col}' not found in one or both files.")
         return
-    merged = pd.merge(obs_df, meta_df, on=station_col, how='left')
+    merged = pd.merge(obs_df, meta_df, on=station_col, how="left")
     s_min, s_max = np.inf, -np.inf
     t_min, t_max = np.inf, -np.inf
     stations = 0
-    for profile_id, r in tqdm(merged.groupby(profile_key), total=merged['station'].nunique()):
-        d = standardize_mt_mesonet(r, depth_col='Depth [cm]')
-        d['profile_id'] = profile_id
-        d['station'] = profile_id
-        out_path = os.path.join(out_dir, f'{profile_id}.csv')
+    for profile_id, r in tqdm(
+        merged.groupby(profile_key), total=merged["station"].nunique()
+    ):
+        d = standardize_mt_mesonet(r, depth_col="Depth [cm]")
+        d["profile_id"] = profile_id
+        d["station"] = profile_id
+        out_path = os.path.join(out_dir, f"{profile_id}.csv")
         d.to_csv(out_path, index=False)
         stations += 1
-        s_min = min(s_min, float(np.nanmin(d['suction_cm'].values)))
-        s_max = max(s_max, float(np.nanmax(d['suction_cm'].values)))
-        t_min = min(t_min, float(np.nanmin(d['theta'].values)))
-        t_max = max(t_max, float(np.nanmax(d['theta'].values)))
+        s_min = min(s_min, float(np.nanmin(d["suction_cm"].values)))
+        s_max = max(s_max, float(np.nanmax(d["suction_cm"].values)))
+        t_min = min(t_min, float(np.nanmin(d["theta"].values)))
+        t_max = max(t_max, float(np.nanmax(d["theta"].values)))
     if stations:
-        print(f"MT Mesonet standardized: stations={stations}, suction_cm=[{s_min:.3g}, {s_max:.3g}], theta=[{t_min:.3f}, {t_max:.3f}]")
+        print(
+            f"MT Mesonet standardized: stations={stations}, suction_cm=[{s_min:.3g}, {s_max:.3g}], theta=[{t_min:.3f}, {t_max:.3f}]"
+        )
 
 
 def write_standardized_reesh(in_dir, out_dir, profile_key):
@@ -304,72 +345,93 @@ def write_standardized_reesh(in_dir, out_dir, profile_key):
     s_min, s_max = np.inf, -np.inf
     t_min, t_max = np.inf, -np.inf
     stations = 0
-    files = [os.path.join(in_dir, f) for f in os.listdir(in_dir) if '_SoilWaterRetentionCurves.csv' in f]
+    files = [
+        os.path.join(in_dir, f)
+        for f in os.listdir(in_dir)
+        if "_SoilWaterRetentionCurves.csv" in f
+    ]
     for f in files:
-        if not f.endswith('.csv'):
+        if not f.endswith(".csv"):
             continue
         p = os.path.join(in_dir, f)
         df = pd.read_csv(p)
 
-        station = df.iloc[0]['Site']
+        station = df.iloc[0]["Site"]
 
-        if 'Sample_ID' not in df.columns:
+        if "Sample_ID" not in df.columns:
             continue
 
-        if df['Site'].nunique() > 1:
+        if df["Site"].nunique() > 1:
             raise ValueError
 
-        for profile_id, r in tqdm(df.groupby(profile_key), total=df['Plot'].nunique()):
-            d = standardize_reesh(r, depth_col='Depth_cm')
-            d['profile_id'] = profile_id
-            d['station'] = station
-            out_path = os.path.join(out_dir, f'{station}_{profile_id}.csv')
+        for profile_id, r in tqdm(df.groupby(profile_key), total=df["Plot"].nunique()):
+            d = standardize_reesh(r, depth_col="Depth_cm")
+            d["profile_id"] = profile_id
+            d["station"] = station
+            out_path = os.path.join(out_dir, f"{station}_{profile_id}.csv")
             d.to_csv(out_path, index=False)
             stations += 1
-            s_min = min(s_min, float(np.nanmin(d['suction_cm'].values)))
-            s_max = max(s_max, float(np.nanmax(d['suction_cm'].values)))
-            t_min = min(t_min, float(np.nanmin(d['theta'].values)))
-            t_max = max(t_max, float(np.nanmax(d['theta'].values)))
+            s_min = min(s_min, float(np.nanmin(d["suction_cm"].values)))
+            s_max = max(s_max, float(np.nanmax(d["suction_cm"].values)))
+            t_min = min(t_min, float(np.nanmin(d["theta"].values)))
+            t_max = max(t_max, float(np.nanmax(d["theta"].values)))
 
     if stations:
-        print(f"ReESH standardized: stations={stations}, suction_cm=[{s_min:.3g}, {s_max:.3g}], theta=[{t_min:.3f}, {t_max:.3f}]")
+        print(
+            f"ReESH standardized: stations={stations}, suction_cm=[{s_min:.3g}, {s_max:.3g}], theta=[{t_min:.3f}, {t_max:.3f}]"
+        )
 
 
 def write_standardized_ncss(parquet_path, out_dir, minimum_points):
     os.makedirs(out_dir, exist_ok=True)
     df = load_ncss_parquet(parquet_path)
     std = ncss_to_standardized(df)
-    if 'profile_id' in std.columns:
-        std['profile_id'] = std['profile_id'].astype(str).apply(sanitize_profile_id)
+    if "profile_id" in std.columns:
+        std["profile_id"] = std["profile_id"].astype(str).apply(sanitize_profile_id)
 
     s_min, s_max = np.inf, -np.inf
     t_min, t_max = np.inf, -np.inf
     stations = 0
-    print(f'writing ncss obs to {out_dir}')
-    for pid, r in tqdm(std.groupby('profile_id'), total=len(std.groupby('profile_id')), desc='Processing NCSS data'):
-        out_path = os.path.join(out_dir, f'{pid}.csv')
-        cols = ['suction_cm', 'theta', 'depth_cm']
-        extras = [c for c in (
-            'SWCC_classes', 'sand_tot_psa', 'silt_tot_psa', 'clay_tot_psa', 'db_od', 'source_db'
-        ) if c in r.columns]
-        depth_counts = r.groupby('depth_cm').size()
+    print(f"writing ncss obs to {out_dir}")
+    for pid, r in tqdm(
+        std.groupby("profile_id"),
+        total=len(std.groupby("profile_id")),
+        desc="Processing NCSS data",
+    ):
+        out_path = os.path.join(out_dir, f"{pid}.csv")
+        cols = ["suction_cm", "theta", "depth_cm"]
+        extras = [
+            c
+            for c in (
+                "SWCC_classes",
+                "sand_tot_psa",
+                "silt_tot_psa",
+                "clay_tot_psa",
+                "db_od",
+                "source_db",
+            )
+            if c in r.columns
+        ]
+        depth_counts = r.groupby("depth_cm").size()
         keep_depths = depth_counts[depth_counts >= minimum_points].index
-        r = r[r['depth_cm'].isin(keep_depths)]
+        r = r[r["depth_cm"].isin(keep_depths)]
         if r.empty:
             continue
         out_df = r[cols + extras]
         out_df.to_csv(out_path, index=False)
         stations += 1
-        s_min = min(s_min, float(np.nanmin(r['suction_cm'].values)))
-        s_max = max(s_max, float(np.nanmax(r['suction_cm'].values)))
-        t_min = min(t_min, float(np.nanmin(r['theta'].values)))
-        t_max = max(t_max, float(np.nanmax(r['theta'].values)))
+        s_min = min(s_min, float(np.nanmin(r["suction_cm"].values)))
+        s_max = max(s_max, float(np.nanmax(r["suction_cm"].values)))
+        t_min = min(t_min, float(np.nanmin(r["theta"].values)))
+        t_max = max(t_max, float(np.nanmax(r["theta"].values)))
     if stations:
-        print(f"NCSS standardized: stations={stations}, suction_cm=[{s_min:.3g}, {s_max:.3g}], theta=[{t_min:.3f}, {t_max:.3f}]")
+        print(
+            f"NCSS standardized: stations={stations}, suction_cm=[{s_min:.3g}, {s_max:.3g}], theta=[{t_min:.3f}, {t_max:.3f}]"
+        )
 
 
-if __name__ == '__main__':
-    home_ = os.path.expanduser('~')
+if __name__ == "__main__":
+    home_ = os.path.expanduser("~")
 
     run_gshp = False
     run_rosetta = False
@@ -378,34 +440,93 @@ if __name__ == '__main__':
     run_ncss = True
 
     if run_gshp:
-        gshp_dir_ = os.path.join(home_, 'data', 'IrrigationGIS', 'soils', 'soil_potential_obs', 'gshp')
-        soil_csv_path_ = os.path.join(gshp_dir_, 'WRC_dataset_surya_et_al_2021_final.csv')
-        out_dir_ = os.path.join(home_, 'data', 'IrrigationGIS', 'soils', 'soil_potential_obs', 'preprocessed', 'gshp')
+        gshp_dir_ = os.path.join(
+            home_, "data", "IrrigationGIS", "soils", "soil_potential_obs", "gshp"
+        )
+        soil_csv_path_ = os.path.join(
+            gshp_dir_, "WRC_dataset_surya_et_al_2021_final.csv"
+        )
+        out_dir_ = os.path.join(
+            home_,
+            "data",
+            "IrrigationGIS",
+            "soils",
+            "soil_potential_obs",
+            "preprocessed",
+            "gshp",
+        )
         write_standardized_gshp(soil_csv_path_, out_dir_, minimum_points=4)
 
     if run_rosetta:
-        root_ = os.path.join(home_, 'data', 'IrrigationGIS', 'soils', 'rosetta', 'training_data')
-        props_csv_ = os.path.join(root_, 'rosetta_properties.csv')
-        curves_wide_csv_ = os.path.join(root_, 'rosetta_curves_wide.csv')
-        out_dir_ = os.path.join(home_, 'data', 'IrrigationGIS', 'soils', 'soil_potential_obs', 'preprocessed', 'rosetta')
-        write_standardized_rosetta(curves_wide_csv_, out_dir_, profile_key='Index')
+        root_ = os.path.join(
+            home_, "data", "IrrigationGIS", "soils", "rosetta", "training_data"
+        )
+        props_csv_ = os.path.join(root_, "rosetta_properties.csv")
+        curves_wide_csv_ = os.path.join(root_, "rosetta_curves_wide.csv")
+        out_dir_ = os.path.join(
+            home_,
+            "data",
+            "IrrigationGIS",
+            "soils",
+            "soil_potential_obs",
+            "preprocessed",
+            "rosetta",
+        )
+        write_standardized_rosetta(curves_wide_csv_, out_dir_, profile_key="Index")
 
     if run_mt_mesonet:
-        root_ = os.path.join(home_, 'data', 'IrrigationGIS', 'soils', 'soil_potential_obs', 'mt_mesonet')
-        swp_csv_ = os.path.join(root_, 'swp.csv')
-        metadata_csv_ = os.path.join(root_, 'station_metadata.csv')
-        out_dir_ = os.path.join(home_, 'data', 'IrrigationGIS', 'soils', 'soil_potential_obs', 'preprocessed', 'mt_mesonet')
-        write_standardized_mt_mesonet(swp_csv_, metadata_csv_, out_dir_, profile_key='station')
+        root_ = os.path.join(
+            home_, "data", "IrrigationGIS", "soils", "soil_potential_obs", "mt_mesonet"
+        )
+        swp_csv_ = os.path.join(root_, "swp.csv")
+        metadata_csv_ = os.path.join(root_, "station_metadata.csv")
+        out_dir_ = os.path.join(
+            home_,
+            "data",
+            "IrrigationGIS",
+            "soils",
+            "soil_potential_obs",
+            "preprocessed",
+            "mt_mesonet",
+        )
+        write_standardized_mt_mesonet(
+            swp_csv_, metadata_csv_, out_dir_, profile_key="station"
+        )
 
     if run_reesh:
-        in_dir_ = os.path.join(home_, 'data', 'IrrigationGIS', 'soils', 'soil_potential_obs', 'reesh')
-        out_dir_ = os.path.join(home_, 'data', 'IrrigationGIS', 'soils', 'soil_potential_obs', 'preprocessed', 'reesh')
-        write_standardized_reesh(in_dir_, out_dir_, profile_key='Plot')
+        in_dir_ = os.path.join(
+            home_, "data", "IrrigationGIS", "soils", "soil_potential_obs", "reesh"
+        )
+        out_dir_ = os.path.join(
+            home_,
+            "data",
+            "IrrigationGIS",
+            "soils",
+            "soil_potential_obs",
+            "preprocessed",
+            "reesh",
+        )
+        write_standardized_reesh(in_dir_, out_dir_, profile_key="Plot")
 
     if run_ncss:
-        base_dir_ = os.path.join(home_, 'data', 'IrrigationGIS', 'soils', 'soil_potential_obs', 'ncss_labdatasqlite')
-        parquet_path_ = os.path.join(base_dir_, 'ncss_selection.parquet')
-        out_dir_ = os.path.join(home_, 'data', 'IrrigationGIS', 'soils', 'soil_potential_obs', 'preprocessed', 'ncss')
+        base_dir_ = os.path.join(
+            home_,
+            "data",
+            "IrrigationGIS",
+            "soils",
+            "soil_potential_obs",
+            "ncss_labdatasqlite",
+        )
+        parquet_path_ = os.path.join(base_dir_, "ncss_selection.parquet")
+        out_dir_ = os.path.join(
+            home_,
+            "data",
+            "IrrigationGIS",
+            "soils",
+            "soil_potential_obs",
+            "preprocessed",
+            "ncss",
+        )
         write_standardized_ncss(parquet_path_, out_dir_, minimum_points=4)
 
 # ========================= EOF ====================================================================

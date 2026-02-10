@@ -7,8 +7,18 @@ from torch.utils.data import Dataset
 
 
 class CombinedVwcDataset(Dataset):
-    def __init__(self, windows, zscore=True, mask_mode='mixed', mask_ratio=0.3, patch_len=30, n_patches=3,
-                 end_chunk_len=180, seed=None, static_map=None):
+    def __init__(
+        self,
+        windows,
+        zscore=True,
+        mask_mode="mixed",
+        mask_ratio=0.3,
+        patch_len=30,
+        n_patches=3,
+        end_chunk_len=180,
+        seed=None,
+        static_map=None,
+    ):
         self.windows = list(windows)
         self.zscore = zscore
         self.mask_mode = mask_mode
@@ -25,11 +35,11 @@ class CombinedVwcDataset(Dataset):
 
     def _make_mask(self, T):
         mode = self.mask_mode
-        if mode == 'mixed':
-            mode = self.rng.choice(['speckled', 'patch', 'end'])
-        if mode == 'speckled':
+        if mode == "mixed":
+            mode = self.rng.choice(["speckled", "patch", "end"])
+        if mode == "speckled":
             m = self.rng.rand(T) < self.mask_ratio
-        elif mode == 'patch':
+        elif mode == "patch":
             m = np.zeros(T, dtype=bool)
             L = min(self.patch_len, T)
             for _ in range(max(1, self.n_patches)):
@@ -37,23 +47,23 @@ class CombinedVwcDataset(Dataset):
                     m[:] = True
                     break
                 s = int(self.rng.randint(0, T - L + 1))
-                m[s:s + L] = True
-        elif mode == 'end':
+                m[s : s + L] = True
+        elif mode == "end":
             m = np.zeros(T, dtype=bool)
             L = min(self.end_chunk_len, T)
-            m[T - L:] = True
+            m[T - L :] = True
         else:
             m = np.zeros(T, dtype=bool)
         return m
 
     def __getitem__(self, idx):
         w = self.windows[idx]
-        f = w['file']
-        gmf = w['gm_file']
-        s = w['start']
-        e = w['stop']
+        f = w["file"]
+        gmf = w["gm_file"]
+        s = w["start"]
+        e = w["stop"]
 
-        vdf = pd.read_parquet(f)[['shallow', 'middle']]
+        vdf = pd.read_parquet(f)[["shallow", "middle"]]
         gdf = pd.read_parquet(gmf)
         common_idx = vdf.index.intersection(gdf.index)
         vdf = vdf.loc[common_idx]
@@ -95,7 +105,7 @@ class CombinedVwcDataset(Dataset):
                 torch.tensor(x, dtype=torch.float32),
                 torch.tensor(gm_vals, dtype=torch.float32),
                 torch.tensor(mask, dtype=torch.bool),
-                torch.tensor(sid, dtype=torch.long)
+                torch.tensor(sid, dtype=torch.long),
             )
 
 
@@ -104,15 +114,17 @@ class PositionalEncoding(nn.Module):
         super().__init__()
         pe = torch.zeros(max_len, d_model)
         position = torch.arange(0, max_len, dtype=torch.float32).unsqueeze(1)
-        div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-np.log(10000.0) / d_model))
+        div_term = torch.exp(
+            torch.arange(0, d_model, 2).float() * (-np.log(10000.0) / d_model)
+        )
         pe[:, 0::2] = torch.sin(position * div_term)
         pe[:, 1::2] = torch.cos(position * div_term)
-        self.register_buffer('pe', pe.unsqueeze(0))
+        self.register_buffer("pe", pe.unsqueeze(0))
 
     def forward(self, x):
         return x + self.pe[:, : x.size(1)]
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     pass
 # ========================= EOF ====================================================================

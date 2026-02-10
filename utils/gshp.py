@@ -2,12 +2,11 @@ import os
 import pandas as pd
 import geopandas as gpd
 from pathlib import Path
-import os
 
 
 def sanitize_profile_id(val):
     s = str(val)
-    return s.replace('/', '_').replace('\\', '_')
+    return s.replace("/", "_").replace("\\", "_")
 
 
 def process_soil_data(csv_path, shp_path, output_dir):
@@ -30,17 +29,28 @@ def process_soil_data(csv_path, shp_path, output_dir):
         print(f"Output will be saved to: {output_dir}")
 
         print(f"Loading soil data from: {csv_path}")
-        df = pd.read_csv(csv_path, encoding='latin1')
+        df = pd.read_csv(csv_path, encoding="latin1")
 
         # Sanitize profile_id to avoid path delimiters in identifiers
-        if 'profile_id' in df.columns:
-            df['profile_id'] = df['profile_id'].astype(str).apply(sanitize_profile_id)
+        if "profile_id" in df.columns:
+            df["profile_id"] = df["profile_id"].astype(str).apply(sanitize_profile_id)
 
         # Prepare a cleaned metadata CSV with a stable UID and normalized coords
         print("Preparing cleaned metadata CSV (uid, classes, coords, flags)...")
-        required_cols = ['profile_id', 'layer_id', 'SWCC_classes', 'latitude_decimal_degrees',
-                         'longitude_decimal_degrees', 'data_flag',
-                         'thetar', 'thetas', 'alpha', 'n', 'hzn_top', 'hzn_bot']
+        required_cols = [
+            "profile_id",
+            "layer_id",
+            "SWCC_classes",
+            "latitude_decimal_degrees",
+            "longitude_decimal_degrees",
+            "data_flag",
+            "thetar",
+            "thetas",
+            "alpha",
+            "n",
+            "hzn_top",
+            "hzn_bot",
+        ]
 
         missing = [c for c in required_cols if c not in df.columns]
         if missing:
@@ -50,44 +60,52 @@ def process_soil_data(csv_path, shp_path, output_dir):
         cols_present = [c for c in required_cols if c in df.columns]
         base = df[cols_present].copy()
 
-        agg_cols = [c for c in cols_present if c != 'profile_id']
-        agg_spec = {c: 'first' for c in agg_cols}
+        agg_cols = [c for c in cols_present if c != "profile_id"]
+        agg_spec = {c: "first" for c in agg_cols}
 
-        grouped_clean = base.groupby('profile_id', dropna=False).agg(agg_spec).reset_index()
-        obs_counts = base.groupby('profile_id', dropna=False).size().reset_index(name='obs_ct')
-        grouped_clean = grouped_clean.merge(obs_counts, on='profile_id', how='left')
+        grouped_clean = (
+            base.groupby("profile_id", dropna=False).agg(agg_spec).reset_index()
+        )
+        obs_counts = (
+            base.groupby("profile_id", dropna=False).size().reset_index(name="obs_ct")
+        )
+        grouped_clean = grouped_clean.merge(obs_counts, on="profile_id", how="left")
 
         # Ensure a single identifier column: profile_id
         clean_df = grouped_clean.copy()
-        if 'profile_id' not in clean_df.columns:
-            if 'layer_id' in clean_df.columns:
-                clean_df['profile_id'] = clean_df['layer_id']  # likely error if layer_id not unique
+        if "profile_id" not in clean_df.columns:
+            if "layer_id" in clean_df.columns:
+                clean_df["profile_id"] = clean_df[
+                    "layer_id"
+                ]  # likely error if layer_id not unique
             else:
                 pass
-        if 'layer_id' in clean_df.columns:
-            clean_df = clean_df.drop(columns=['layer_id'])
+        if "layer_id" in clean_df.columns:
+            clean_df = clean_df.drop(columns=["layer_id"])
 
         # Rename coordinates
         rename_map = {}
-        if 'latitude_decimal_degrees' in clean_df.columns:
-            rename_map['latitude_decimal_degrees'] = 'latitude'
-        if 'longitude_decimal_degrees' in clean_df.columns:
-            rename_map['longitude_decimal_degrees'] = 'longitude'
+        if "latitude_decimal_degrees" in clean_df.columns:
+            rename_map["latitude_decimal_degrees"] = "latitude"
+        if "longitude_decimal_degrees" in clean_df.columns:
+            rename_map["longitude_decimal_degrees"] = "longitude"
         clean_df.rename(columns=rename_map, inplace=True)
-        clean_df['depth_cm'] = (clean_df['hzn_top'] + clean_df['hzn_bot']) * 0.5
+        clean_df["depth_cm"] = (clean_df["hzn_top"] + clean_df["hzn_bot"]) * 0.5
 
         # Enforce unique profile_id if present
-        if 'profile_id' in clean_df.columns:
-            dup_mask = clean_df['profile_id'].duplicated(keep=False)
+        if "profile_id" in clean_df.columns:
+            dup_mask = clean_df["profile_id"].duplicated(keep=False)
             if dup_mask.any():
-                dup_vals = sorted(set(clean_df.loc[dup_mask, 'profile_id']))
+                dup_vals = sorted(set(clean_df.loc[dup_mask, "profile_id"]))
                 example_vals = ", ".join(map(str, dup_vals[:10]))
-                raise ValueError(f"Duplicate profile_id values found ({len(dup_vals)} unique duplicates). Examples: {example_vals}")
+                raise ValueError(
+                    f"Duplicate profile_id values found ({len(dup_vals)} unique duplicates). Examples: {example_vals}"
+                )
 
-        rename_map = {'thetar': 'theta_r', 'thetas': 'theta_s'}
+        rename_map = {"thetar": "theta_r", "thetas": "theta_s"}
         clean_df = clean_df.rename(columns=rename_map)
 
-        clean_name = Path(csv_path).stem + '_clean.csv'
+        clean_name = Path(csv_path).stem + "_clean.csv"
         clean_path = output_dir / clean_name
         clean_df.to_csv(clean_path, index=False)
         print(f"Wrote cleaned metadata CSV: {clean_path}")
@@ -96,12 +114,14 @@ def process_soil_data(csv_path, shp_path, output_dir):
         mgrs_gdf = gpd.read_file(shp_path)
 
         # Use cleaned metadata for spatial processing
-        if not {'latitude', 'longitude'}.issubset(clean_df.columns):
-            raise ValueError("Cleaned metadata missing 'latitude' and/or 'longitude' columns")
+        if not {"latitude", "longitude"}.issubset(clean_df.columns):
+            raise ValueError(
+                "Cleaned metadata missing 'latitude' and/or 'longitude' columns"
+            )
 
         print("Creating GeoDataFrame from cleaned metadata...")
-        geometry = gpd.points_from_xy(clean_df['longitude'], clean_df['latitude'])
-        soil_gdf = gpd.GeoDataFrame(clean_df.copy(), geometry=geometry, crs='EPSG:4326')
+        geometry = gpd.points_from_xy(clean_df["longitude"], clean_df["latitude"])
+        soil_gdf = gpd.GeoDataFrame(clean_df.copy(), geometry=geometry, crs="EPSG:4326")
         print(f"Created GeoDataFrame with {len(soil_gdf)} features.")
 
         print("Performing spatial join with MGRS grid...")
@@ -112,19 +132,19 @@ def process_soil_data(csv_path, shp_path, output_dir):
 
         joined_gdf = gpd.sjoin(
             soil_gdf,
-            mgrs_gdf[['MGRS_TILE', 'geometry']],
-            how='inner',
-            predicate='intersects'
+            mgrs_gdf[["MGRS_TILE", "geometry"]],
+            how="inner",
+            predicate="intersects",
         )
 
-        joined_gdf = joined_gdf.drop(columns=['index_right'])
+        joined_gdf = joined_gdf.drop(columns=["index_right"])
         print("Spatial join complete.")
 
-        output_csv_path = output_dir / 'wrc_aggregated_mgrs.csv'
-        output_shp_path = output_dir / 'wrc_aggregated_mgrs.shp'
+        output_csv_path = output_dir / "wrc_aggregated_mgrs.csv"
+        output_shp_path = output_dir / "wrc_aggregated_mgrs.shp"
 
         print(f"Exporting CSV to: {output_csv_path}")
-        joined_gdf.drop(columns='geometry').to_csv(output_csv_path, index=False)
+        joined_gdf.drop(columns="geometry").to_csv(output_csv_path, index=False)
 
         print(f"Exporting Shapefile to: {output_shp_path}")
         joined_gdf.to_file(output_shp_path)
@@ -137,14 +157,16 @@ def process_soil_data(csv_path, shp_path, output_dir):
         print(f"An unexpected error occurred: {e}")
 
 
-if __name__ == '__main__':
-    home_dir = os.path.expanduser('~')
-    root_ = os.path.join(home_dir, 'data', 'IrrigationGIS')
+if __name__ == "__main__":
+    home_dir = os.path.expanduser("~")
+    root_ = os.path.join(home_dir, "data", "IrrigationGIS")
 
-    gshp_directory_ = os.path.join(root_, 'soils', 'soil_potential_obs', 'gshp')
-    soil_csv_path_ = os.path.join(gshp_directory_, 'WRC_dataset_surya_et_al_2021_final.csv')
+    gshp_directory_ = os.path.join(root_, "soils", "soil_potential_obs", "gshp")
+    soil_csv_path_ = os.path.join(
+        gshp_directory_, "WRC_dataset_surya_et_al_2021_final.csv"
+    )
 
-    mgrs_shp_path_ = os.path.join(root_, 'boundaries', 'mgrs', 'mgrs_world_attr.shp')
+    mgrs_shp_path_ = os.path.join(root_, "boundaries", "mgrs", "mgrs_world_attr.shp")
 
     process_soil_data(soil_csv_path_, mgrs_shp_path_, gshp_directory_)
 

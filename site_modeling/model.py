@@ -10,7 +10,9 @@ from sklearn.metrics import mean_squared_error, r2_score
 from sklearn.model_selection import TimeSeriesSplit
 
 
-def _timeseries_cv_indices(n: int, n_splits: int = 5, min_test: int = 30) -> Iterable[tuple]:
+def _timeseries_cv_indices(
+    n: int, n_splits: int = 5, min_test: int = 30
+) -> Iterable[tuple]:
     """Yield (train_idx, test_idx) for simple chronological splits.
 
     Uses sklearn TimeSeriesSplit when possible; falls back to a single 70/30 split.
@@ -27,7 +29,9 @@ def _timeseries_cv_indices(n: int, n_splits: int = 5, min_test: int = 30) -> Ite
             yield (tr, te)
 
 
-def _fit_eval_single(x: np.ndarray, y: np.ndarray, n_splits: int = 5) -> Dict[str, float]:
+def _fit_eval_single(
+    x: np.ndarray, y: np.ndarray, n_splits: int = 5
+) -> Dict[str, float]:
     """CV evaluate a single-feature linear regression for y ~ x.
 
     Returns dict with mean R2, RMSE across folds.
@@ -47,13 +51,15 @@ def _fit_eval_single(x: np.ndarray, y: np.ndarray, n_splits: int = 5) -> Dict[st
         rmses.append(float(np.sqrt(mean_squared_error(y[te], yp))))
 
     return {
-        'r2_mean': float(np.nanmean(r2s)) if r2s else np.nan,
-        'rmse_mean': float(np.nanmean(rmses)) if rmses else np.nan,
-        'folds': int(len(r2s)),
+        "r2_mean": float(np.nanmean(r2s)) if r2s else np.nan,
+        "rmse_mean": float(np.nanmean(rmses)) if rmses else np.nan,
+        "folds": int(len(r2s)),
     }
 
 
-def _fit_eval_multi(X: np.ndarray, y: np.ndarray, n_splits: int = 5) -> Dict[str, float]:
+def _fit_eval_multi(
+    X: np.ndarray, y: np.ndarray, n_splits: int = 5
+) -> Dict[str, float]:
     """CV evaluate a multi-feature linear regression for y ~ X.
 
     Returns dict with mean R2, RMSE across folds.
@@ -72,15 +78,15 @@ def _fit_eval_multi(X: np.ndarray, y: np.ndarray, n_splits: int = 5) -> Dict[str
         rmses.append(float(np.sqrt(mean_squared_error(y[te], yp))))
 
     return {
-        'r2_mean': float(np.nanmean(r2s)) if r2s else np.nan,
-        'rmse_mean': float(np.nanmean(rmses)) if rmses else np.nan,
-        'folds': int(len(r2s)),
+        "r2_mean": float(np.nanmean(r2s)) if r2s else np.nan,
+        "rmse_mean": float(np.nanmean(rmses)) if rmses else np.nan,
+        "folds": int(len(r2s)),
     }
 
 
 def evaluate_theta_vs_psi(
     df: pd.DataFrame,
-    targets: Iterable[str] = ('GPP', 'ET'),
+    targets: Iterable[str] = ("GPP", "ET"),
     mask: Optional[pd.Series] = None,
     n_splits: int = 5,
 ) -> Dict[str, Dict[str, Dict[str, float]]]:
@@ -97,15 +103,21 @@ def evaluate_theta_vs_psi(
     for tgt in targets:
         if tgt not in data.columns:
             continue
-        d = data[['theta', 'psi_cm', tgt]].dropna()
+        d = data[["theta", "psi_cm", tgt]].dropna()
         if d.empty:
-            out[tgt] = {'theta': {'r2_mean': np.nan, 'rmse_mean': np.nan, 'folds': 0},
-                        'psi_cm': {'r2_mean': np.nan, 'rmse_mean': np.nan, 'folds': 0}}
+            out[tgt] = {
+                "theta": {"r2_mean": np.nan, "rmse_mean": np.nan, "folds": 0},
+                "psi_cm": {"r2_mean": np.nan, "rmse_mean": np.nan, "folds": 0},
+            }
             continue
         y = d[tgt].to_numpy(dtype=float)
-        met_theta = _fit_eval_single(d['theta'].to_numpy(dtype=float), y, n_splits=n_splits)
-        met_psi = _fit_eval_single(d['psi_cm'].to_numpy(dtype=float), y, n_splits=n_splits)
-        out[tgt] = {'theta': met_theta, 'psi_cm': met_psi}
+        met_theta = _fit_eval_single(
+            d["theta"].to_numpy(dtype=float), y, n_splits=n_splits
+        )
+        met_psi = _fit_eval_single(
+            d["psi_cm"].to_numpy(dtype=float), y, n_splits=n_splits
+        )
+        out[tgt] = {"theta": met_theta, "psi_cm": met_psi}
     return out
 
 
@@ -126,7 +138,7 @@ def evaluate_multivariate(
     cols = [c for c in predictors] + [target]
     d = data[cols].dropna()
     if d.empty:
-        return {'r2_mean': np.nan, 'rmse_mean': np.nan, 'folds': 0}
+        return {"r2_mean": np.nan, "rmse_mean": np.nan, "folds": 0}
     X = d[list(predictors)].to_numpy(dtype=float)
     y = d[target].to_numpy(dtype=float)
     return _fit_eval_multi(X, y, n_splits=n_splits)
@@ -148,8 +160,8 @@ def evaluate_lagged(
     results: Dict[int, Dict[str, float]] = {}
     for lag in lags:
         tmp = df.copy()
-        tmp[f'{base_predictor}__lag{lag}'] = tmp[base_predictor].shift(lag)
-        preds = [f'{base_predictor}__lag{lag}'] + list(covariates)
+        tmp[f"{base_predictor}__lag{lag}"] = tmp[base_predictor].shift(lag)
+        preds = [f"{base_predictor}__lag{lag}"] + list(covariates)
         results[int(lag)] = evaluate_multivariate(
             tmp, target=target, predictors=preds, mask=mask, n_splits=n_splits
         )
@@ -158,14 +170,14 @@ def evaluate_lagged(
 
 def save_metrics(metrics: Dict, out_file: str) -> None:
     os.makedirs(os.path.dirname(out_file), exist_ok=True)
-    with open(out_file, 'w') as f:
+    with open(out_file, "w") as f:
         json.dump(metrics, f, indent=2)
 
 
 def correlation_matrix(
     df: pd.DataFrame,
     cols: Optional[List[str]] = None,
-    method: str = 'pearson',
+    method: str = "pearson",
 ) -> pd.DataFrame:
     """Compute and return correlation matrix for specified columns, or all numeric columns if cols is None."""
     if cols is None:
@@ -179,27 +191,28 @@ def calculate_ccf(df: pd.DataFrame, target: str, lags: Iterable[int]) -> pd.Data
     records = []
     for lag in lags:
         shifted = df[target].shift(lag)
-        corr_vwc = shifted.corr(df['theta'])
-        corr_psi = shifted.corr(df['psi_cm'])
-        records.append({'lag': int(lag), 'corr_vwc': corr_vwc, 'corr_psi': corr_psi})
-    out = pd.DataFrame(records, columns=['lag', 'corr_vwc', 'corr_psi'])
+        corr_vwc = shifted.corr(df["theta"])
+        corr_psi = shifted.corr(df["psi_cm"])
+        records.append({"lag": int(lag), "corr_vwc": corr_vwc, "corr_psi": corr_psi})
+    out = pd.DataFrame(records, columns=["lag", "corr_vwc", "corr_psi"])
     return out
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     """Example modeling driver: load prepared datasets and evaluate linear models.
 
     Edit flags and paths to your environment before running.
     """
     run_eval_for_sites = False
 
-    prep_dir_ = os.path.join('site_modeling', 'outputs', 'prep')
-    metrics_dir_ = os.path.join('site_modeling', 'outputs', 'metrics')
-    corr_dir_ = os.path.join('site_modeling', 'outputs', 'correlations')
+    prep_dir_ = os.path.join("site_modeling", "outputs", "prep")
+    metrics_dir_ = os.path.join("site_modeling", "outputs", "metrics")
+    corr_dir_ = os.path.join("site_modeling", "outputs", "correlations")
     os.makedirs(metrics_dir_, exist_ok=True)
     os.makedirs(corr_dir_, exist_ok=True)
 
     # Example site list (filenames in prep_dir_)
-    site_files_ = sorted(glob(os.path.join(prep_dir_, '*.parquet')))
+    site_files_ = sorted(glob(os.path.join(prep_dir_, "*.parquet")))
 
     if run_eval_for_sites:
         for fp in site_files_:
@@ -207,16 +220,24 @@ if __name__ == '__main__':
                 sid = os.path.splitext(os.path.basename(fp))[0]
                 df = pd.read_parquet(fp)
                 # Optional: supply a drydown mask if saved alongside the dataset
-                metrics = evaluate_theta_vs_psi(df, targets=('GPP', 'ET'), mask=None, n_splits=5)
-                save_metrics(metrics, os.path.join(metrics_dir_, f'{sid}.json'))
+                metrics = evaluate_theta_vs_psi(
+                    df, targets=("GPP", "ET"), mask=None, n_splits=5
+                )
+                save_metrics(metrics, os.path.join(metrics_dir_, f"{sid}.json"))
 
                 # Correlations: if RS proxies present, include; otherwise just core variables
-                core_cols = [c for c in ['theta', 'psi_cm', 'GPP', 'ET'] if c in df.columns]
-                rs_cols = [c for c in df.columns if c.startswith('landsat_') or c.startswith('ptjpl_')]
+                core_cols = [
+                    c for c in ["theta", "psi_cm", "GPP", "ET"] if c in df.columns
+                ]
+                rs_cols = [
+                    c
+                    for c in df.columns
+                    if c.startswith("landsat_") or c.startswith("ptjpl_")
+                ]
                 corr = correlation_matrix(df, cols=core_cols + rs_cols)
-                corr.to_csv(os.path.join(corr_dir_, f'{sid}.csv'))
-                print(f'{sid}: saved metrics and correlations')
+                corr.to_csv(os.path.join(corr_dir_, f"{sid}.csv"))
+                print(f"{sid}: saved metrics and correlations")
             except Exception as e:
-                print(f'Failed {fp}: {e}')
+                print(f"Failed {fp}: {e}")
 
 # ========================= EOF ====================================================================

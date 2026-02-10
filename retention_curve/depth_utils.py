@@ -13,6 +13,7 @@ Rosetta uses 7 standard depth layers:
 This module provides functions to map arbitrary depth measurements
 to these standard levels for consistent training data preparation.
 """
+
 import numpy as np
 from retention_curve import ROSETTA_LEVEL_DEPTHS
 
@@ -51,7 +52,9 @@ def depth_to_rosetta_level(depth_cm):
             return int(lvl)
 
     # For depths outside defined ranges, find nearest level center
-    centers = {lvl: (rng[0] + rng[1]) / 2.0 for lvl, rng in ROSETTA_LEVEL_DEPTHS.items()}
+    centers = {
+        lvl: (rng[0] + rng[1]) / 2.0 for lvl, rng in ROSETTA_LEVEL_DEPTHS.items()
+    }
     levels = np.array(list(centers.keys()), dtype=int)
     vals = np.array(list(centers.values()), dtype=float)
     idx = int(np.argmin(np.abs(vals - d)))
@@ -112,7 +115,7 @@ def horizon_to_rosetta_level(hzn_top, hzn_bot):
     return depth_range_to_rosetta_level(hzn_top, hzn_bot)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     # Quick validation
     test_depths = [0, 1, 5, 15, 30, 50, 100, 200, 300]
     for d in test_depths:

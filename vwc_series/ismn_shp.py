@@ -25,8 +25,8 @@ def _collect_meta_for_dataset(idx, min_depth_m=None, max_depth_m=None):
     global _DS_GLOBAL
     ts, meta = _DS_GLOBAL.read_ts(idx, return_meta=True)
 
-    station = meta['station']['val']
-    network = meta['network']['val']
+    station = meta["station"]["val"]
+    network = meta["network"]["val"]
     station_uid = f"{network}:{station}"
 
     # Mid-depth in meters using shared helper
@@ -42,10 +42,10 @@ def _collect_meta_for_dataset(idx, min_depth_m=None, max_depth_m=None):
     flat_vals = {}
     for key, sub in meta.items():
         try:
-            if key == 'instrument':
+            if key == "instrument":
                 continue
-            if isinstance(sub, dict) and 'val' in sub:
-                flat_vals[key] = sub.get('val')
+            if isinstance(sub, dict) and "val" in sub:
+                flat_vals[key] = sub.get("val")
         except Exception:
             continue
 
@@ -53,29 +53,37 @@ def _collect_meta_for_dataset(idx, min_depth_m=None, max_depth_m=None):
     lat = None
     lon = None
     try:
-        lat = float(meta['latitude']['val']) if meta['latitude']['val'] is not None else None
-        lon = float(meta['longitude']['val']) if meta['longitude']['val'] is not None else None
+        lat = (
+            float(meta["latitude"]["val"])
+            if meta["latitude"]["val"] is not None
+            else None
+        )
+        lon = (
+            float(meta["longitude"]["val"])
+            if meta["longitude"]["val"] is not None
+            else None
+        )
     except Exception:
         pass
 
     return {
-        'station_uid': station_uid,
-        'lat': lat,
-        'lon': lon,
-        'meta_vals': flat_vals,
-        'depth_m': dmid_m,
+        "station_uid": station_uid,
+        "lat": lat,
+        "lon": lon,
+        "meta_vals": flat_vals,
+        "depth_m": dmid_m,
     }
 
 
 def build_ismn_station_metadata_shapefile(
-        ismn_path,
-        out_shp,
-        out_csv=None,
-        networks=None,
-        min_depth_m=None,
-        max_depth_m=None,
-        num_workers=None,
-        show_progress=True,
+    ismn_path,
+    out_shp,
+    out_csv=None,
+    networks=None,
+    min_depth_m=None,
+    max_depth_m=None,
+    num_workers=None,
+    show_progress=True,
 ):
     """
     Build a per-station shapefile aggregating ISMN metadata, with a simplified
@@ -93,7 +101,9 @@ def build_ismn_station_metadata_shapefile(
 
     # Discover dataset ids (optionally with depth filtering)
     ds = ISMN_Interface(ismn_path, network=networks, parallel=True)
-    ids = ds.get_dataset_ids(variable='soil_moisture', min_depth=min_depth_m, max_depth=max_depth_m)
+    ids = ds.get_dataset_ids(
+        variable="soil_moisture", min_depth=min_depth_m, max_depth=max_depth_m
+    )
     workers = num_workers or 1
 
     # Accumulate station-level records
@@ -101,13 +111,21 @@ def build_ismn_station_metadata_shapefile(
     station_depths = defaultdict(set)
 
     iterator = []
-    with ProcessPoolExecutor(max_workers=workers, initializer=_init_worker, initargs=(ismn_path, networks)) as ex:
-        futures = [ex.submit(_collect_meta_for_dataset, idx, min_depth_m, max_depth_m) for idx in ids]
+    with ProcessPoolExecutor(
+        max_workers=workers, initializer=_init_worker, initargs=(ismn_path, networks)
+    ) as ex:
+        futures = [
+            ex.submit(_collect_meta_for_dataset, idx, min_depth_m, max_depth_m)
+            for idx in ids
+        ]
         iterator = as_completed(futures)
         if show_progress:
             try:
                 from tqdm import tqdm  # lazy import
-                iterator = tqdm(iterator, total=len(futures), desc='Collecting ISMN metadata')
+
+                iterator = tqdm(
+                    iterator, total=len(futures), desc="Collecting ISMN metadata"
+                )
             except Exception:
                 pass
 
@@ -119,49 +137,51 @@ def build_ismn_station_metadata_shapefile(
             if not item:
                 continue
 
-            uid = item['station_uid']
+            uid = item["station_uid"]
             # Merge meta values (first wins; assume station-level consistency)
             if uid not in station_meta:
                 station_meta[uid] = {
-                    **item['meta_vals'],
-                    'station_uid': uid,
-                    'latitude': item['lat'],
-                    'longitude': item['lon'],
+                    **item["meta_vals"],
+                    "station_uid": uid,
+                    "latitude": item["lat"],
+                    "longitude": item["lon"],
                 }
             else:
                 # Backfill missing fields if any
                 rec = station_meta[uid]
-                for k, v in item['meta_vals'].items():
-                    if k not in rec or rec[k] in (None, ''):
+                for k, v in item["meta_vals"].items():
+                    if k not in rec or rec[k] in (None, ""):
                         rec[k] = v
-                if rec.get('latitude') is None and item['lat'] is not None:
-                    rec['latitude'] = item['lat']
-                if rec.get('longitude') is None and item['lon'] is not None:
-                    rec['longitude'] = item['lon']
+                if rec.get("latitude") is None and item["lat"] is not None:
+                    rec["latitude"] = item["lat"]
+                if rec.get("longitude") is None and item["lon"] is not None:
+                    rec["longitude"] = item["lon"]
 
             # Collect depth for counting
-            if item['depth_m'] is not None:
-                station_depths[uid].add(round(float(item['depth_m']), 4))
+            if item["depth_m"] is not None:
+                station_depths[uid].add(round(float(item["depth_m"]), 4))
 
     # Normalize to records with depth_ct and geometry
     records = []
     for uid, meta_vals in station_meta.items():
         rec = dict(meta_vals)
-        rec['depth_ct'] = int(len(station_depths.get(uid, set())))
+        rec["depth_ct"] = int(len(station_depths.get(uid, set())))
         records.append(rec)
 
     if not records:
-        raise RuntimeError('No station metadata collected; check inputs and filters.')
+        raise RuntimeError("No station metadata collected; check inputs and filters.")
 
     # Build GeoDataFrame
     df = pd.DataFrame.from_records(records)
-    if 'longitude' not in df.columns or 'latitude' not in df.columns:
-        raise RuntimeError('Missing latitude/longitude in collected metadata; cannot build geometry.')
+    if "longitude" not in df.columns or "latitude" not in df.columns:
+        raise RuntimeError(
+            "Missing latitude/longitude in collected metadata; cannot build geometry."
+        )
 
     gdf = gpd.GeoDataFrame(
         df,
-        geometry=gpd.points_from_xy(df['longitude'], df['latitude']),
-        crs='EPSG:4326',
+        geometry=gpd.points_from_xy(df["longitude"], df["latitude"]),
+        crs="EPSG:4326",
     )
 
     # Ensure output directory exists
@@ -175,24 +195,34 @@ def build_ismn_station_metadata_shapefile(
     # Write CSV (drop geometry). Derive default path if not provided.
     if out_csv is None:
         root, _ = os.path.splitext(out_shp)
-        out_csv = root + '.csv'
+        out_csv = root + ".csv"
     if os.path.dirname(os.path.abspath(out_csv)):
         os.makedirs(os.path.dirname(os.path.abspath(out_csv)), exist_ok=True)
-    gdf.drop(columns='geometry').to_csv(out_csv, index=False)
+    gdf.drop(columns="geometry").to_csv(out_csv, index=False)
 
     return {
-        'n_stations': len(gdf),
-        'out_shp': out_shp,
-        'out_csv': out_csv,
-        'columns': list(gdf.columns),
+        "n_stations": len(gdf),
+        "out_shp": out_shp,
+        "out_csv": out_csv,
+        "columns": list(gdf.columns),
     }
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     # Example usage; adjust paths as needed.
-    home = os.path.expanduser('~')
-    in_ = os.path.join(home, 'data', 'IrrigationGIS', 'soils', 'vwc_timeseries', 'ismn', 'ismn_db')
-    out_shp_ = os.path.join(home, 'data', 'IrrigationGIS', 'soils', 'vwc_timeseries', 'ismn', 'ismn_stations.shp')
+    home = os.path.expanduser("~")
+    in_ = os.path.join(
+        home, "data", "IrrigationGIS", "soils", "vwc_timeseries", "ismn", "ismn_db"
+    )
+    out_shp_ = os.path.join(
+        home,
+        "data",
+        "IrrigationGIS",
+        "soils",
+        "vwc_timeseries",
+        "ismn",
+        "ismn_stations.shp",
+    )
     out_csv_ = None  # defaults to same basename with .csv
     res = build_ismn_station_metadata_shapefile(
         ismn_path=in_,
