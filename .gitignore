@@ -78,6 +78,10 @@ target/
 # Jupyter Notebook
 .ipynb_checkpoints
 
+# Notebook outputs (keep directory tracked via .gitkeep)
+notebooks/_outputs/*
+!notebooks/_outputs/.gitkeep
+
 # IPython
 profile_default/
 ipython_config.py

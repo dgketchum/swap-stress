@@ -1,0 +1,78 @@
+{
+  "meta": {
+    "source": "derived-from-user-claude-settings",
+    "generated_on": "2026-02-10"
+  },
+  "terminal": {
+    "allowlist": [
+      "^(ls|pwd|file|tree|du)( .*)?$",
+      "^(cat|head|tail|wc)( .*)?$",
+      "^(grep|rg|find)( .*)?$",
+      "^git (status|diff|log|show|branch|remote)( .*)?$",
+      "^git restore( .*)?$",
+      "^(python|python3) ( -m )?(pytest|unittest)( .*)?$",
+      "^(python|python3) ( -m )?(ruff|mypy)( .*)?$",
+      "^(python|python3) -m pytest( .*)?$",
+      "^(python|python3) -m unittest( .*)?$",
+      "^(python|python3) -m ruff( .*)?$",
+      "^(python|python3) -m mypy( .*)?$",
+      "^(python|python3) -m json\\.tool( .*)?$",
+      "^uv run ruff( .*)?$",
+      "^uv run pytest( .*)?$",
+      "^(pip3? list|pip3? show|conda (info|list))( .*)?$",
+      "^(env|printenv|echo)( .*)?$",
+      "^(ps)( .*)?$",
+      "^(mkdir)( .*)?$",
+      "^(which)( .*)?$",
+      "^(cd .* && git (status|diff|log))$"
+    ],
+    "denylist": [
+      "rm\\s+-rf\\s+/",
+      "rm\\s+-rf\\s+\\*",
+      "rm\\s+-rf\\s+\\/",
+      "mkfs\\b",
+      "dd\\b",
+      "^sudo\\b",
+      "^su\\b",
+      "chmod\\s+-R\\s+777",
+      "chown\\s+-R",
+      "git\\s+push( .*)?$",
+      "git\\s+commit( .*)?$",
+      "git\\s+reset\\s+--hard",
+      "git\\s+clean\\s+-fd",
+      "pip\\s+install",
+      "pip\\s+uninstall",
+      "pip3\\s+install",
+      "pip3\\s+uninstall",
+      "curl\\s+.*\\|\\s*bash",
+      "wget\\s+.*\\|\\s*bash",
+      "curl\\s+.*\\|\\s*sh",
+      "wget\\s+.*\\|\\s*sh",
+      "ssh\\b",
+      "scp\\b",
+      "docker\\s+rm\\b"
+    ],
+    "auto_approve": {
+      "enabled": true,
+      "for": [
+        "read-only commands in allowlist",
+        "test runs (pytest) that don't alter files",
+        "static analysis (ruff, mypy)"
+      ]
+    },
+    "approval_required_for": [
+      "any command matching denylist",
+      "any command not matching allowlist",
+      "git commit",
+      "git push",
+      "networking (ssh, curl to remote endpoints)",
+      "install/uninstall package managers",
+      "writing outside the workspace root"
+    ],
+    "logging": {
+      "path": "agent_exec.log",
+      "level": "info",
+      "append_only": true
+    }
+  }
+}
