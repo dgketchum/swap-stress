@@ -436,8 +436,8 @@ if __name__ == "__main__":
     run_gshp = False
     run_rosetta = False
     run_mt_mesonet = False
-    run_reesh = False
-    run_ncss = True
+    run_reesh = True
+    run_ncss = False
 
     if run_gshp:
         gshp_dir_ = os.path.join(
