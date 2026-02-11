@@ -488,6 +488,9 @@ def train_and_evaluate(
     joblib.dump(model, model_path)
     print(f"Saved model to {model_path}")
 
+    imputer_path = os.path.join(output_dir, "direct_rf_imputer.joblib")
+    joblib.dump(imputer, imputer_path)
+
     # Save feature list
     features_path = os.path.join(output_dir, "direct_rf_features.json")
     with open(features_path, "w") as f:
