@@ -504,6 +504,56 @@ def train_and_evaluate(
             os.path.join(output_dir, "metrics_by_source.csv"), index=False
         )
 
+    # Save predictions and scatter plot
+    pred_df = pd.DataFrame({"observed": y_test, "predicted": y_pred})
+    if "source" in test_df.columns:
+        pred_df["source"] = test_df["source"].values
+    pred_df.to_parquet(os.path.join(output_dir, "predictions.parquet"), index=False)
+
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    fig, ax = plt.subplots(figsize=(6, 6))
+    if "source" in pred_df.columns:
+        for src in sorted(pred_df["source"].unique()):
+            mask = pred_df["source"] == src
+            ax.scatter(
+                pred_df.loc[mask, "observed"],
+                pred_df.loc[mask, "predicted"],
+                s=2,
+                alpha=0.3,
+                label=src,
+            )
+        ax.legend(markerscale=4, fontsize=8)
+    else:
+        ax.scatter(pred_df["observed"], pred_df["predicted"], s=2, alpha=0.3)
+
+    lo = min(pred_df["observed"].min(), pred_df["predicted"].min())
+    hi = max(pred_df["observed"].max(), pred_df["predicted"].max())
+    ax.plot([lo, hi], [lo, hi], "k-", lw=0.8)
+    ax.set_xlabel("Observed log$_{10}$(suction) [cm]")
+    ax.set_ylabel("Predicted log$_{10}$(suction) [cm]")
+    ax.set_title("Direct Model — Spatial-Group Holdout")
+    ax.text(
+        0.05,
+        0.95,
+        f"R² = {metrics['r2']:.3f}\n"
+        f"RMSE = {metrics['rmse']:.3f}\n"
+        f"MAE = {metrics['mae']:.3f}\n"
+        f"n = {metrics['n']}",
+        transform=ax.transAxes,
+        va="top",
+        fontsize=9,
+        family="monospace",
+    )
+    fig.tight_layout()
+    scatter_path = os.path.join(output_dir, "scatter_direct.png")
+    fig.savefig(scatter_path, dpi=200)
+    plt.close(fig)
+    print(f"Saved scatter plot to {scatter_path}")
+
     return results
 
 
