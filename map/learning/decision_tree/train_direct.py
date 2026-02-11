@@ -36,16 +36,30 @@ from map.data.features import (
 )
 
 
-def extract_site_id(sample_id) -> str:
-    """Extract site identifier from sample_id for grouping.
+def assign_spatial_group(df: pd.DataFrame, resolution_m: float = 250) -> pd.Series:
+    """Quantize lat/lon to grid cells for spatial grouping.
 
-    sample_id format: {source}_{profile}_{depth}
-    Returns {source}_{profile}.
+    Groups observations that share the same EE pixel (~250 m) so that
+    all co-located profiles end up in the same train/test partition.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Must contain 'lat' and 'lon' columns.
+    resolution_m : float
+        Grid cell size in metres (default 250 m, matching EE extraction).
+
+    Returns
+    -------
+    pd.Series
+        String labels like ``"45.12300_-112.45600"`` (NaN where coords missing).
     """
-    if pd.isna(sample_id) or not isinstance(sample_id, str):
-        return str(sample_id)
-    parts = sample_id.rsplit("_", 1)
-    return parts[0] if len(parts) > 1 else sample_id
+    step = resolution_m / 111_320  # degrees per metre at equator
+    lat_q = (df["lat"] / step).round() * step
+    lon_q = (df["lon"] / step).round() * step
+    groups = lat_q.round(5).astype(str) + "_" + lon_q.round(5).astype(str)
+    groups[df["lat"].isna() | df["lon"].isna()] = np.nan
+    return groups
 
 
 def create_site_split(
@@ -54,39 +68,32 @@ def create_site_split(
     test_size: float = 0.2,
     random_state: int = 42,
 ) -> Tuple[Set[str], Set[str]]:
-    """
-    Create train/test site split reusable across dataframes.
+    """Create train/test split on spatial groups (quantized lat/lon).
 
     Parameters
     ----------
     df : pd.DataFrame
-        Input dataframe to derive sites from.
+        Input dataframe (must contain 'lat' and 'lon').
     group_col : str
-        Column to extract site ID from.
+        Unused, kept for backward-compatible call signatures.
     test_size : float
-        Fraction of sites for testing.
+        Fraction of spatial groups for testing.
     random_state : int
         Random seed.
 
     Returns
     -------
     tuple of (set, set)
-        (train_sites, test_sites)
+        (train_groups, test_groups)
     """
-    if group_col in df.columns:
-        site_ids = df[group_col].apply(extract_site_id)
-    elif df.index.name == group_col or "obs_id" in str(df.index.name):
-        site_ids = df.index.to_series().apply(extract_site_id)
-    else:
-        raise ValueError(f"Cannot find group column: {group_col}")
-
-    unique_sites = list(site_ids.unique())
-    train_sites, test_sites = train_test_split(
-        unique_sites,
+    groups = assign_spatial_group(df)
+    unique_groups = list(groups.dropna().unique())
+    train_groups, test_groups = train_test_split(
+        unique_groups,
         test_size=test_size,
         random_state=random_state,
     )
-    return set(train_sites), set(test_sites)
+    return set(train_groups), set(test_groups)
 
 
 def apply_site_split(
@@ -95,34 +102,27 @@ def apply_site_split(
     test_sites: Set[str],
     group_col: str = "sample_id",
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
-    """
-    Apply pre-computed site split to a dataframe.
+    """Apply pre-computed spatial-group split to a dataframe.
 
     Parameters
     ----------
     df : pd.DataFrame
-        Input dataframe.
+        Input dataframe (must contain 'lat' and 'lon').
     train_sites : set
-        Site identifiers for training.
+        Spatial group labels for training.
     test_sites : set
-        Site identifiers for testing.
+        Spatial group labels for testing.
     group_col : str
-        Column to extract site ID from.
+        Unused, kept for backward-compatible call signatures.
 
     Returns
     -------
     tuple of (pd.DataFrame, pd.DataFrame)
         (train_df, test_df)
     """
-    if group_col in df.columns:
-        site_ids = df[group_col].apply(extract_site_id)
-    elif df.index.name == group_col or "obs_id" in str(df.index.name):
-        site_ids = df.index.to_series().apply(extract_site_id)
-    else:
-        raise ValueError(f"Cannot find group column: {group_col}")
-
-    train_mask = site_ids.isin(train_sites)
-    test_mask = site_ids.isin(test_sites)
+    groups = assign_spatial_group(df)
+    train_mask = groups.isin(train_sites)
+    test_mask = groups.isin(test_sites)
     return df[train_mask.values].copy(), df[test_mask.values].copy()
 
 
@@ -377,7 +377,7 @@ def train_and_evaluate(
     print(f"  Using {len(feature_cols)} features + theta")
 
     # Site-level split
-    print("Creating site-level split...")
+    print("Creating spatial-group split...")
     train_sites, test_sites = create_site_split(
         df, "sample_id", test_size, random_state
     )
@@ -386,8 +386,8 @@ def train_and_evaluate(
     # Clean: require theta and target
     train_df = train_df.dropna(subset=["theta", "log10_suction_cm"])
     test_df = test_df.dropna(subset=["theta", "log10_suction_cm"])
-    print(f"  Train: {len(train_df)} obs from {len(train_sites)} sites")
-    print(f"  Test:  {len(test_df)} obs from {len(test_sites)} sites")
+    print(f"  Train: {len(train_df)} obs from {len(train_sites)} spatial groups")
+    print(f"  Test:  {len(test_df)} obs from {len(test_sites)} spatial groups")
 
     if "source" in train_df.columns:
         print("  Train by source:", train_df["source"].value_counts().to_dict())
@@ -438,16 +438,13 @@ def train_and_evaluate(
                 f"RMSE={row['rmse']:.4f} (n={row['n']:.0f})"
             )
 
-    # Site-level metrics
-    if "sample_id" in test_df.columns:
-        site_ids = test_df["sample_id"].apply(extract_site_id).values
-    else:
-        site_ids = test_df.index.to_series().apply(extract_site_id).values
-
-    site_metrics, site_summary = compute_metrics_by_site(y_test, y_pred, site_ids)
+    # Site-level metrics (grouped by spatial cell)
+    spatial_groups = assign_spatial_group(test_df).values
+    site_metrics, site_summary = compute_metrics_by_site(y_test, y_pred, spatial_groups)
     print(
         f"\nSite-weighted: mean R2={site_summary['mean_r2']:.4f}, "
-        f"median R2={site_summary['median_r2']:.4f} ({site_summary['n_sites']} sites)"
+        f"median R2={site_summary['median_r2']:.4f} "
+        f"({site_summary['n_sites']} spatial groups)"
     )
 
     # Feature importance (MDI)
