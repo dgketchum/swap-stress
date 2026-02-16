@@ -18,7 +18,6 @@ Usage:
 """
 
 import argparse
-import os
 
 import ee
 import geopandas as gpd
@@ -32,16 +31,7 @@ GCS_BUCKET = "wudr"
 GCS_PREFIX = "conus_features"
 EASE2_CRS = "EPSG:6933"
 
-_NAS_ROOT = "/nas"
-_LOCAL_ROOT = os.path.expanduser("~/data/IrrigationGIS")
-
-
-def _data_root():
-    """Return /nas if mounted, else fall back to ~/data/IrrigationGIS."""
-    if os.path.isdir(os.path.join(_NAS_ROOT, "soils")):
-        return _NAS_ROOT
-    return _LOCAL_ROOT
-
+DATA_ROOT = "/nas"
 
 START_YR = 1991
 END_YR = 2020
@@ -489,8 +479,7 @@ def main():
     if args.mode == "points" and (not args.shapefile or not args.index_col):
         parser.error("--shapefile and --index-col required for points mode")
 
-    root = _data_root()
-    print(f"Data root: {root}")
+    print(f"Data root: {DATA_ROOT}")
 
     is_authorized(project=args.project)
     groups = _resolve_groups(args.groups)
