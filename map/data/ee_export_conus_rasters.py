@@ -419,11 +419,14 @@ def export_points(groups, shapefile, index_col, bucket, prefix):
     points = ee.FeatureCollection(gdf.__geo_interface__)
     stack = ee.Image.cat([build_fn(roi) for build_fn, _ in groups.values()])
 
+    # Reproject to 9 km EASE-Grid2 so sampleRegions reads pixel values
+    # at the same resolution as the raster exports
+    stack = stack.reproject(crs=EASE2_CRS, scale=MAP_SCALE)
+
     samples = stack.sampleRegions(
         collection=points,
         properties=[index_col],
         scale=MAP_SCALE,
-        crs=EASE2_CRS,
         tileScale=16,
     )
 
