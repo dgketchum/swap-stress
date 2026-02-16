@@ -10,26 +10,32 @@ dependencies = [
     "numpy",
     "pandas",
     "scipy",
+    "lmfit",
+    "xarray",
 
     # Geospatial
     "geopandas",
     "shapely",
+    "pyproj",
     "earthengine-api",
 
     # Visualization
     "matplotlib",
     "seaborn",
     "pillow",
+    "visualtorch",
 
     # Machine learning
     "torch",
     "scikit-learn",
     "lightning",
+    "joblib",
 
     # Data access
     "ismn",
     "openet-ptjpl",
     "earthaccess",
+    "requests",
 
     # Raster I/O
     "rasterio",
@@ -38,12 +44,6 @@ dependencies = [
     # Utilities
     "tqdm",
     "pyarrow",
-]
-
-[project.optional-dependencies]
-dev = [
-    "pytest",
-    "ruff",
 ]
 
 [build-system]
