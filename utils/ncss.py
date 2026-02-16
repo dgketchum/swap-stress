@@ -305,17 +305,13 @@ def run_fit_new_samples(
 
 
 if __name__ == "__main__":
-    base_dir = os.path.expanduser(
-        "~/data/IrrigationGIS/soils/soil_potential_obs/ncss_labdatasqlite"
-    )
+    base_dir = "/nas/soils/soil_potential_obs/ncss_labdatasqlite"
     in_parquet = os.path.join(base_dir, "ncss_selection.parquet")
     out_csv = os.path.join(base_dir, "standardized_ncss.csv")
     out_csv_rfit = os.path.join(base_dir, "ncss_for_fit_new.csv")
     out_shp = os.path.join(base_dir, "ncss_profiles.shp")
     run_rfit = False
-    mgrs_shp = os.path.expanduser(
-        "~/data/IrrigationGIS/boundaries/mgrs/mgrs_world_attr.shp"
-    )
+    mgrs_shp = "/nas/boundaries/mgrs/mgrs_world_attr.shp"
 
     df_ = load_ncss_parquet(in_parquet)
     std_ = ncss_to_standardized(df_)
@@ -325,9 +321,7 @@ if __name__ == "__main__":
     rfit_df = standardized_to_rfit(std_)
     write_rfit_csv(rfit_df, out_csv_rfit)
 
-    gshp_fit = os.path.expanduser(
-        "~/data/IrrigationGIS/soils/soil_potential_obs/curve_fits/gshp/rfit"
-    )
+    gshp_fit = "/nas/soils/soil_potential_obs/curve_fits/gshp/rfit"
     ptf_rds = os.path.join(gshp_fit, "ptf_model.rds")
     fit_out_dir = os.path.join(base_dir, "ncss_fit_new_out")
     rscript_path = os.path.expanduser("~/code/GSHP-database/rwrap/fit_new_samples.R")

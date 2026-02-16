@@ -104,9 +104,7 @@ def export_ncss_parquet_and_shapefile(
 
 if __name__ == "__main__":
     # Define the input and output paths
-    base_dir = Path(
-        "~/data/IrrigationGIS/soils/soil_potential_obs/ncss_labdatasqlite"
-    ).expanduser()
+    base_dir = Path("/nas/soils/soil_potential_obs/ncss_labdatasqlite")
     in_db = base_dir / "ncss_labdata.sqlite"
     parquet_path = base_dir / "ncss_selection.parquet"
     shp_path = base_dir / "ncss_selection.shp"

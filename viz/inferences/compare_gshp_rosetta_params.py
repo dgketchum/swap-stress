@@ -302,8 +302,7 @@ def compare_gshp_to_rosetta(
 
 
 if __name__ == "__main__":
-    home = os.path.expanduser("~")
-    root_ = os.path.join(home, "data", "IrrigationGIS")
+    root_ = "/nas"
     gshp_directory_ = os.path.join(root_, "soils", "soil_potential_obs", "gshp")
 
     output_csv_ = os.path.join(

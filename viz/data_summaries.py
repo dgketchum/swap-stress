@@ -1,7 +1,5 @@
 """Stacked histogram of data_ct (observation count per profile) by source."""
 
-import os
-
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -82,12 +80,10 @@ def plot_data_count_histogram(training_path, output_path):
 
 
 if __name__ == "__main__":
-    default_training = os.path.expanduser(
-        "~/data/IrrigationGIS/soils/swapstress/training/unified_training_emb_250m.parquet"
+    default_training = (
+        "/nas/soils/swapstress/training/unified_training_emb_250m.parquet"
     )
-    default_output = os.path.expanduser(
-        "~/data/IrrigationGIS/soils/swapstress/training/data_ct_histogram.png"
-    )
+    default_output = "/nas/soils/swapstress/training/data_ct_histogram.png"
 
     import argparse
 

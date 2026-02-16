@@ -80,8 +80,7 @@ def _load_reesh_swrc_params():
     except Exception:
         return None
 
-    home = os.path.expanduser("~")
-    root = os.path.join(home, "data", "IrrigationGIS", "soils")
+    root = os.path.join("/nas", "soils")
     results_dir = os.path.join(root, "soil_potential_obs", "curve_fits")
 
     try:
@@ -266,10 +265,7 @@ def plot_texture_triangle(out_path, reesh_dir=None, gshp_file=None, property_key
         'saturated_hydraulic_conductivity', 'porosity', 'ph').
     """
     if reesh_dir is None or gshp_file is None:
-        home = os.path.expanduser("~")
-        base = os.path.join(
-            home, "data", "IrrigationGIS", "soils", "soil_potential_obs"
-        )
+        base = os.path.join("/nas", "soils", "soil_potential_obs")
         if reesh_dir is None:
             reesh_dir = os.path.join(base, "reesh")
         if gshp_file is None:
@@ -450,7 +446,7 @@ def plot_texture_triangle(out_path, reesh_dir=None, gshp_file=None, property_key
 
 
 if __name__ == "__main__":
-    out_dir_ = "/home/dgketchum/data/IrrigationGIS/soils/swapstress/texture"
+    out_dir_ = "/nas/soils/swapstress/texture"
 
     # One figure with no fourth property, matching map markers
     base_out_ = os.path.join(out_dir_, "texture_triangle.png")

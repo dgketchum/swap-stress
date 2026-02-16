@@ -60,8 +60,7 @@ def build_reesh_shapefile(in_dir, mgrs_shp_path, out_dir):
 
 
 if __name__ == "__main__":
-    home_ = os.path.expanduser("~")
-    root_ = os.path.join(home_, "data", "IrrigationGIS")
+    root_ = "/nas"
 
     in_dir_ = os.path.join(root_, "soils", "soil_potential_obs", "reesh")
     mgrs_shp_path_ = os.path.join(root_, "boundaries", "mgrs", "mgrs_world_attr.shp")

@@ -363,8 +363,7 @@ def plot_curves(
 
 
 if __name__ == "__main__":
-    home = os.path.expanduser("~")
-    root_ = os.path.join(home, "data", "IrrigationGIS")
+    root_ = "/nas"
     gshp_dir_ = os.path.join(root_, "soils", "soil_potential_obs", "gshp")
 
     gshp_csv_ = os.path.join(gshp_dir_, "WRC_dataset_surya_et_al_2021_final.csv")

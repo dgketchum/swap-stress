@@ -170,34 +170,24 @@ def test_fit_methods_across_stations(station_files, results_dir, plots_dir):
 
 
 if __name__ == "__main__":
-    home_ = os.path.expanduser("~")
-
     reesh_in_ = os.path.join(
-        home_,
-        "data",
-        "IrrigationGIS",
+        "/nas",
         "soils",
         "soil_potential_obs",
         "preprocessed",
         "reesh",
     )
     mtm_in_ = os.path.join(
-        home_,
-        "data",
-        "IrrigationGIS",
+        "/nas",
         "soils",
         "soil_potential_obs",
         "preprocessed",
         "mt_mesonet",
     )
 
-    fits_out_ = os.path.join(
-        home_, "data", "IrrigationGIS", "soils", "soil_potential_obs", "curve_fits"
-    )
+    fits_out_ = os.path.join("/nas", "soils", "soil_potential_obs", "curve_fits")
     plots_out_ = os.path.join(
-        home_,
-        "data",
-        "IrrigationGIS",
+        "/nas",
         "soils",
         "soil_potential_obs",
         "obs_fit_comparison",

@@ -173,13 +173,8 @@ def get_all_station_timeseries(
 
 
 if __name__ == "__main__":
-    home_ = os.path.expanduser("~")
-    root_ = os.path.join(
-        home_, "data", "IrrigationGIS", "soils", "soil_potential_obs", "mt_mesonet"
-    )
-    vwc_ = os.path.join(
-        home_, "data", "IrrigationGIS", "soils", "vwc_timeseries", "mt_mesonet"
-    )
+    root_ = os.path.join("/nas", "soils", "soil_potential_obs", "mt_mesonet")
+    vwc_ = os.path.join("/nas", "soils", "vwc_timeseries", "mt_mesonet")
 
     metadata_csv_ = os.path.join(root_, "station_metadata.csv")
 

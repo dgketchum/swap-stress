@@ -608,12 +608,8 @@ def run_regressions(
 
 
 if __name__ == "__main__":
-    home_ = os.path.expanduser("~")
-
     shapefile_ = os.path.join(
-        home_,
-        "data",
-        "IrrigationGIS",
+        "/nas",
         "soils",
         "soil_potential_obs",
         "reesh",
@@ -621,27 +617,19 @@ if __name__ == "__main__":
         "reesh_sites_mgrs_5070.shp",
     )
     vg_dir_ = os.path.join(
-        home_,
-        "data",
-        "IrrigationGIS",
+        "/nas",
         "soils",
         "soil_potential_obs",
         "curve_fits",
         "reesh",
         "bayes",
     )
-    amf_root_ = os.path.join(
-        home_, "data", "IrrigationGIS", "climate", "ameriflux", "amf_new"
-    )
+    amf_root_ = os.path.join("/nas", "climate", "ameriflux", "amf_new")
 
     site_ids_ = list_reesh_site_ids(shapefile_)
 
-    out_root_ = (
-        "/home/dgketchum/data/IrrigationGIS/soils/swapstress/reesh_site_analysis/"
-    )
-    gridmet_dir_ = (
-        "/home/dgketchum/data/IrrigationGIS/soils/swapstress/vwc/gridmet/reesh"
-    )
+    out_root_ = "/nas/soils/swapstress/reesh_site_analysis/"
+    gridmet_dir_ = "/nas/soils/swapstress/vwc/gridmet/reesh"
     overwrite_ = False
 
     # Build coordinate dict (lon, lat) in EPSG:4326

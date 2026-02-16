@@ -210,14 +210,9 @@ def build_ismn_station_metadata_shapefile(
 
 if __name__ == "__main__":
     # Example usage; adjust paths as needed.
-    home = os.path.expanduser("~")
-    in_ = os.path.join(
-        home, "data", "IrrigationGIS", "soils", "vwc_timeseries", "ismn", "ismn_db"
-    )
+    in_ = os.path.join("/nas", "soils", "vwc_timeseries", "ismn", "ismn_db")
     out_shp_ = os.path.join(
-        home,
-        "data",
-        "IrrigationGIS",
+        "/nas",
         "soils",
         "vwc_timeseries",
         "ismn",

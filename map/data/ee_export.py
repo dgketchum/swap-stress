@@ -202,8 +202,7 @@ if __name__ == "__main__":
 
     resolution_ = 250
 
-    home = os.path.expanduser("~")
-    root_ = os.path.join(home, "data", "IrrigationGIS")
+    root_ = "/nas"
     gcs_bucket_ = "wudr"
 
     if run_mt_mesonet_workflow:

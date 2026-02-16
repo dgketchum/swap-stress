@@ -125,8 +125,7 @@ if __name__ == "__main__":
     run_ptjpl_flux = True
 
     # Common config
-    home_ = os.path.expanduser("~")
-    root_ = os.path.join(home_, "data", "IrrigationGIS")
+    root_ = "/nas"
     bucket_ = "wudr"
     start_year_ = 2000
     end_year_ = date.today().year

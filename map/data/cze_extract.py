@@ -576,16 +576,14 @@ if __name__ == "__main__":
 
     if domain == "gshp":
         id_col = "profile_id"
-        shapefile = "/home/dgketchum/data/IrrigationGIS/soils/soil_potential_obs/gshp/wrc_aggregated_mgrs.shp"
-        check_dir_ = "/home/dgketchum/data/IrrigationGIS/soils/swapstress/cze/extracts/gshp/landsat"
+        shapefile = "/nas/soils/soil_potential_obs/gshp/wrc_aggregated_mgrs.shp"
+        check_dir_ = "/nas/soils/swapstress/cze/extracts/gshp/landsat"
 
     elif domain == "cze_train":
         id_col = "site_id"
-        # shapefile = '/home/dgketchum/data/IrrigationGIS/soils/gis/pretraining-roi-10000_mgrs.shp'
-        shapefile = (
-            "/home/dgketchum/data/IrrigationGIS/soils/gis/pretraining-roi-1000000.shp"
-        )
-        check_dir_ = "/home/dgketchum/data/IrrigationGIS/soils/swapstress/cze/extracts/pretrain/landsat"
+        # shapefile = '/nas/soils/gis/pretraining-roi-10000_mgrs.shp'
+        shapefile = "/nas/soils/gis/pretraining-roi-1000000.shp"
+        check_dir_ = "/nas/soils/swapstress/cze/extracts/pretrain/landsat"
 
     else:
         raise ValueError

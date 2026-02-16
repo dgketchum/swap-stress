@@ -816,8 +816,7 @@ def batch_plot_composite(
 def main():
     import argparse
 
-    home = os.path.expanduser("~")
-    data_root = os.path.join(home, "data", "IrrigationGIS", "soils")
+    data_root = os.path.join("/nas", "soils")
 
     parser = argparse.ArgumentParser(
         description="Generate composite SWRC comparison plots from fitted data.",

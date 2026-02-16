@@ -32,8 +32,7 @@ def plot_saved_curves_in_dir(fits_dir: str, out_dir: str, show: bool = False) ->
 
 if __name__ == "__main__":
     # Mirror the project style: set flags and paths here
-    home_ = os.path.expanduser("~")
-    root = os.path.join(home_, "data", "IrrigationGIS", "soils", "soil_potential_obs")
+    root = os.path.join("/nas", "soils", "soil_potential_obs")
 
     run_rosetta = False
     run_mt_mesonet = True

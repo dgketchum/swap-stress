@@ -112,8 +112,7 @@ def plot_swrc_icon(
 
 
 if __name__ == "__main__":
-    home_ = os.path.expanduser("~")
-    root_ = os.path.join(home_, "data", "IrrigationGIS", "soils", "soil_potential_obs")
+    root_ = os.path.join("/nas", "soils", "soil_potential_obs")
     fits_dir_ = os.path.join(root_, "curve_fits", "reesh", "bayes")
     site_base_ = "IN-Martell"
     candidates_ = [

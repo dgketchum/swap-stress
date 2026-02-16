@@ -151,20 +151,15 @@ def plot_reesh_site_overlays(
 
 
 if __name__ == "__main__":
-    home = os.path.expanduser("~")
     fits_dir_ = os.path.join(
-        home,
-        "data",
-        "IrrigationGIS",
+        "/nas",
         "soils",
         "soil_potential_obs",
         "curve_fits",
         "reesh",
         "bayes",
     )
-    out_dir_ = os.path.join(
-        home, "data", "IrrigationGIS", "soils", "soil_potential_obs", "reesh", "figures"
-    )
+    out_dir_ = os.path.join("/nas", "soils", "soil_potential_obs", "reesh", "figures")
     site_base_ = "IN-Martell"
     plot_reesh_site_overlays(site_base_, fits_dir_, out_dir_, show=False)
 # ========================= EOF ====================================================================

@@ -169,8 +169,7 @@ def plot_mae_examples(
 
 
 if __name__ == "__main__":
-    home_ = os.path.expanduser("~")
-    root_ = os.path.join(home_, "data", "IrrigationGIS")
+    root_ = "/nas"
 
     vwc_dir = "/data/ssd2/swapstress/vwc/hhp/rosetta"
     gridmet_dir = "/data/ssd2/swapstress/vwc/gridmet/rosetta"

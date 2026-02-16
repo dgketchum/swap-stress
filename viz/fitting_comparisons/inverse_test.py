@@ -189,8 +189,7 @@ def plot_inverse_vs_forward(station_key, reesh_csv_dir, forward_json_path, out_d
 
 
 if __name__ == "__main__":
-    home_ = os.path.expanduser("~")
-    root_ = os.path.join(home_, "data", "IrrigationGIS", "soils", "soil_potential_obs")
+    root_ = os.path.join("/nas", "soils", "soil_potential_obs")
 
     station_key_ = "US-MMS_SN"
     reesh_csv_dir_ = os.path.join(root_, "preprocessed", "reesh")

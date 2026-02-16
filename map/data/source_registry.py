@@ -256,7 +256,7 @@ class DataPaths:
         Parameters
         ----------
         data_root : str
-            Root data directory (e.g., ~/data/IrrigationGIS/soils)
+            Root data directory (e.g., /nas/soils)
         source : DataSource
             Source configuration.
         """
@@ -325,7 +325,7 @@ if __name__ == "__main__":
 
     # Example usage
     gshp = get_source("gshp")
-    paths = DataPaths("~/data/IrrigationGIS/soils", gshp)
+    paths = DataPaths("/nas/soils", gshp)
     print(f"GSHP EE table: {paths.ee_table}")
     print(f"GSHP labels: {paths.labels_file}")
     print(f"GSHP fit results: {paths.fit_results_dir}")

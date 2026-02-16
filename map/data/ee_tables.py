@@ -110,8 +110,7 @@ def concatenate_and_join(
 if __name__ == "__main__":
     """"""
 
-    home = os.path.expanduser("~")
-    root_ = os.path.join(home, "data", "IrrigationGIS")
+    root_ = "/nas"
 
     # placeholders for a single call after blocks
     do_run = False

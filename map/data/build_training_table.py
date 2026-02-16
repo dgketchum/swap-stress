@@ -605,8 +605,7 @@ def build_unified_table(
 
 
 if __name__ == "__main__":
-    home_ = os.path.expanduser("~")
-    data_root_ = os.path.join(home_, "data", "IrrigationGIS", "soils")
+    data_root_ = os.path.join("/nas", "soils")
     output_dir_ = os.path.join(data_root_, "swapstress", "training")
 
     include_embeddings_ = True

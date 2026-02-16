@@ -288,14 +288,9 @@ def build_ismn_vwc_series(
 
 
 if __name__ == "__main__":
-    home = os.path.expanduser("~")
-    in_ = os.path.join(
-        home, "data", "IrrigationGIS", "soils", "vwc_timeseries", "ismn", "ismn_db"
-    )
+    in_ = os.path.join("/nas", "soils", "vwc_timeseries", "ismn", "ismn_db")
     out_ = os.path.join(
-        home,
-        "data",
-        "IrrigationGIS",
+        "/nas",
         "soils",
         "vwc_timeseries",
         "ismn",

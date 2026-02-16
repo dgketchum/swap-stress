@@ -134,8 +134,7 @@ def build_gshp_training_table(
 if __name__ == "__main__":
     run_gshp_workflow = True
 
-    home_ = os.path.expanduser("~")
-    root_ = os.path.join(home_, "data", "IrrigationGIS")
+    root_ = "/nas"
 
     if run_gshp_workflow:
         gshp_directory_ = os.path.join(root_, "soils", "soil_potential_obs", "gshp")

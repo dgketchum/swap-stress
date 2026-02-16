@@ -181,8 +181,7 @@ def plot_parameter_influence(results_dir, output_dir):
 
 
 if __name__ == "__main__":
-    home_ = os.path.expanduser("~")
-    root_ = os.path.join(home_, "data", "IrrigationGIS", "soils")
+    root_ = os.path.join("/nas", "soils")
 
     fits = os.path.join(root_, "soil_potential_obs", "curve_fits", "gshp", "nelder")
     plot_output_dir_ = os.path.join(root_, "swapstress", "figures", "comparison_plots")

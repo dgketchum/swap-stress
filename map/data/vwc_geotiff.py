@@ -119,8 +119,7 @@ if __name__ == "__main__":
     run_gshp_workflow = True
     run_reesh_workflow = True
 
-    home = os.path.expanduser("~")
-    root_ = os.path.join(home, "data", "IrrigationGIS")
+    root_ = "/nas"
 
     vwc_ = "/data/ssd2/swapstress/vwc"
     out_dir_ = os.path.join(vwc_, "hhp")

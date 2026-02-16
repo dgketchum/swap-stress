@@ -447,7 +447,7 @@ if __name__ == "__main__":
     # Example wiring (edit paths as needed)
     home = os.path.expanduser("~")
     rosetta_soil_proj = os.path.join(home, "PycharmProjects", "rosetta-soil")
-    root = os.path.join(home, "data", "IrrigationGIS", "soils")
+    root = os.path.join("/nas", "soils")
 
     empirical_dir = os.path.join(
         root, "soil_potential_obs", "mt_mesonet", "results_by_station"
@@ -455,7 +455,7 @@ if __name__ == "__main__":
     rosetta_pqt = os.path.join(root, "rosetta", "extracted_rosetta_points.parquet")
     training_pqt = os.path.join(root, "swapstress", "training", "training_data.parquet")
     polaris_all_pqt = os.path.join(
-        home, "data", "IrrigationGIS", "soils", "polaris", "polaris_stations.parquet"
+        "/nas", "soils", "polaris", "polaris_stations.parquet"
     )
     preds_pqt = os.path.join(
         root, "swapstress", "training", "predictions", "stations_predictions_nn.parquet"

@@ -199,38 +199,29 @@ def plot_mesonet_dirs_swp_vs_vwc_with_violin(
 
 
 if __name__ == "__main__":
-    home_ = os.path.expanduser("~")
     swrc_dir_ = os.path.join(
-        home_,
-        "data",
-        "IrrigationGIS",
+        "/nas",
         "soils",
         "soil_potential_obs",
         "preprocessed",
         "mt_mesonet",
     )
     vwc_dir_ = os.path.join(
-        home_,
-        "data",
-        "IrrigationGIS",
+        "/nas",
         "soils",
         "vwc_timeseries",
         "mt_mesonet",
         "preprocessed_by_station",
     )
     out_dir_ = os.path.join(
-        home_,
-        "data",
-        "IrrigationGIS",
+        "/nas",
         "soils",
         "soil_potential_obs",
         "mt_mesonet",
         "swrc_vwc_violin",
     )
     meta_csv_ = os.path.join(
-        home_,
-        "data",
-        "IrrigationGIS",
+        "/nas",
         "soils",
         "soil_potential_obs",
         "mt_mesonet",

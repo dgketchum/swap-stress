@@ -214,8 +214,7 @@ def compare_parameter_errors(merged_df):
 
 
 if __name__ == "__main__":
-    home_ = os.path.expanduser("~")
-    root_ = os.path.join(home_, "data", "IrrigationGIS", "soils")
+    root_ = os.path.join("/nas", "soils")
     swap_root_ = os.path.join(root_, "swapstress")
 
     # Corrected path for fitted results from fit_swrc.py

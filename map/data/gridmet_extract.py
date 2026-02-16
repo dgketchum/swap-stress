@@ -165,8 +165,7 @@ if __name__ == "__main__":
     run_gshp_workflow = True
     run_reesh_workflow = True
 
-    home = os.path.expanduser("~")
-    root_ = os.path.join(home, "data", "IrrigationGIS")
+    root_ = "/nas"
     out_dir_ = os.path.join(root_, "soils", "swapstress", "vwc", "gridmet")
 
     base_dir_ = "/data/ssd2/gridmet"

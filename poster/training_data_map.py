@@ -6,8 +6,7 @@ from matplotlib.lines import Line2D
 
 
 def _load_sources(include_rosetta=True):
-    home_ = os.path.expanduser("~")
-    root_ = os.path.join(home_, "data", "IrrigationGIS")
+    root_ = "/nas"
     soils_ = os.path.join(root_, "soils")
     reesh_shp = os.path.join(
         soils_, "soil_potential_obs", "reesh", "shapefile", "reesh_sites_mgrs.shp"
@@ -27,11 +26,8 @@ def _load_sources(include_rosetta=True):
 
 
 def _find_land_shapefile():
-    home_ = os.path.expanduser("~")
     shp_ = os.path.join(
-        home_,
-        "data",
-        "IrrigationGIS",
+        "/nas",
         "boundaries",
         "natural_earth",
         "ne_110m_land.shp",
@@ -64,11 +60,8 @@ def plot_training_data_map(out_path, figsize=(10, 6), dpi=300, include_rosetta=T
     land = gpd.read_file(land_shp).to_crs(4326)
 
     # Load CONUS outline polygon
-    home_ = os.path.expanduser("~")
     conus_shp = os.path.join(
-        home_,
-        "data",
-        "IrrigationGIS",
+        "/nas",
         "boundaries",
         "world_countries",
         "united_states_conus.shp",

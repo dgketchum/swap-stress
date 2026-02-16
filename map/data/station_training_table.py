@@ -202,8 +202,7 @@ def build_station_training_table(
 if __name__ == "__main__":
     run_stations_workflow = True
 
-    home_ = os.path.expanduser("~")
-    root_ = os.path.join(home_, "data", "IrrigationGIS", "soils")
+    root_ = os.path.join("/nas", "soils")
 
     if run_stations_workflow:
         results_dir_ = os.path.join(root_, "soil_potential_obs", "curve_fits")

@@ -431,8 +431,6 @@ def write_standardized_ncss(parquet_path, out_dir, minimum_points):
 
 
 if __name__ == "__main__":
-    home_ = os.path.expanduser("~")
-
     run_gshp = False
     run_rosetta = False
     run_mt_mesonet = False
@@ -440,16 +438,12 @@ if __name__ == "__main__":
     run_ncss = False
 
     if run_gshp:
-        gshp_dir_ = os.path.join(
-            home_, "data", "IrrigationGIS", "soils", "soil_potential_obs", "gshp"
-        )
+        gshp_dir_ = os.path.join("/nas", "soils", "soil_potential_obs", "gshp")
         soil_csv_path_ = os.path.join(
             gshp_dir_, "WRC_dataset_surya_et_al_2021_final.csv"
         )
         out_dir_ = os.path.join(
-            home_,
-            "data",
-            "IrrigationGIS",
+            "/nas",
             "soils",
             "soil_potential_obs",
             "preprocessed",
@@ -458,15 +452,11 @@ if __name__ == "__main__":
         write_standardized_gshp(soil_csv_path_, out_dir_, minimum_points=4)
 
     if run_rosetta:
-        root_ = os.path.join(
-            home_, "data", "IrrigationGIS", "soils", "rosetta", "training_data"
-        )
+        root_ = os.path.join("/nas", "soils", "rosetta", "training_data")
         props_csv_ = os.path.join(root_, "rosetta_properties.csv")
         curves_wide_csv_ = os.path.join(root_, "rosetta_curves_wide.csv")
         out_dir_ = os.path.join(
-            home_,
-            "data",
-            "IrrigationGIS",
+            "/nas",
             "soils",
             "soil_potential_obs",
             "preprocessed",
@@ -475,15 +465,11 @@ if __name__ == "__main__":
         write_standardized_rosetta(curves_wide_csv_, out_dir_, profile_key="Index")
 
     if run_mt_mesonet:
-        root_ = os.path.join(
-            home_, "data", "IrrigationGIS", "soils", "soil_potential_obs", "mt_mesonet"
-        )
+        root_ = os.path.join("/nas", "soils", "soil_potential_obs", "mt_mesonet")
         swp_csv_ = os.path.join(root_, "swp.csv")
         metadata_csv_ = os.path.join(root_, "station_metadata.csv")
         out_dir_ = os.path.join(
-            home_,
-            "data",
-            "IrrigationGIS",
+            "/nas",
             "soils",
             "soil_potential_obs",
             "preprocessed",
@@ -494,13 +480,9 @@ if __name__ == "__main__":
         )
 
     if run_reesh:
-        in_dir_ = os.path.join(
-            home_, "data", "IrrigationGIS", "soils", "soil_potential_obs", "reesh"
-        )
+        in_dir_ = os.path.join("/nas", "soils", "soil_potential_obs", "reesh")
         out_dir_ = os.path.join(
-            home_,
-            "data",
-            "IrrigationGIS",
+            "/nas",
             "soils",
             "soil_potential_obs",
             "preprocessed",
@@ -510,18 +492,14 @@ if __name__ == "__main__":
 
     if run_ncss:
         base_dir_ = os.path.join(
-            home_,
-            "data",
-            "IrrigationGIS",
+            "/nas",
             "soils",
             "soil_potential_obs",
             "ncss_labdatasqlite",
         )
         parquet_path_ = os.path.join(base_dir_, "ncss_selection.parquet")
         out_dir_ = os.path.join(
-            home_,
-            "data",
-            "IrrigationGIS",
+            "/nas",
             "soils",
             "soil_potential_obs",
             "preprocessed",

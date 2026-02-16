@@ -405,8 +405,7 @@ if __name__ == "__main__":
     run_concat_gshp = True
 
     resolution_ = 250
-    home_ = os.path.expanduser("~")
-    root_ = os.path.join(home_, "data", "IrrigationGIS")
+    root_ = "/nas"
     gcs_bucket_ = "wudr"
 
     if run_mt_mesonet_export or run_reesh_export or run_gshp_export:
@@ -521,9 +520,7 @@ if __name__ == "__main__":
             f"reesh_polaris_all_depths_{resolution_}m",
         )
         out_file_ = os.path.join(
-            home_,
-            "data",
-            "IrrigationGIS",
+            "/nas",
             "soils",
             "polaris",
             "polaris_stations.parquet",
@@ -538,9 +535,7 @@ if __name__ == "__main__":
             "extracts",
             f"gshp_polaris_all_depths_{resolution_}m",
         )
-        out_gshp_ = os.path.join(
-            home_, "data", "IrrigationGIS", "soils", "polaris", "polaris_gshp.parquet"
-        )
+        out_gshp_ = os.path.join("/nas", "soils", "polaris", "polaris_gshp.parquet")
         concat_polaris_gshp(gshp_dir_, out_gshp_)
 
 # ========================= EOF ====================================================================

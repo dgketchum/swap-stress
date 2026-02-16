@@ -158,8 +158,7 @@ def process_soil_data(csv_path, shp_path, output_dir):
 
 
 if __name__ == "__main__":
-    home_dir = os.path.expanduser("~")
-    root_ = os.path.join(home_dir, "data", "IrrigationGIS")
+    root_ = "/nas"
 
     gshp_directory_ = os.path.join(root_, "soils", "soil_potential_obs", "gshp")
     soil_csv_path_ = os.path.join(
