@@ -29,6 +29,11 @@ dependencies = [
     # Data access
     "ismn",
     "openet-ptjpl",
+    "earthaccess",
+
+    # Raster I/O
+    "rasterio",
+    "h5py",
 
     # Utilities
     "tqdm",
