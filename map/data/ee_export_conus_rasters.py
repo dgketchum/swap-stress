@@ -18,6 +18,7 @@ Usage:
 """
 
 import argparse
+import os
 
 import ee
 import geopandas as gpd
@@ -30,6 +31,17 @@ from map.data.smap_download import MAP_SCALE, _conus_slice, _conus_transform
 GCS_BUCKET = "wudr"
 GCS_PREFIX = "conus_features"
 EASE2_CRS = "EPSG:6933"
+
+_NAS_ROOT = "/nas"
+_LOCAL_ROOT = os.path.expanduser("~/data/IrrigationGIS")
+
+
+def _data_root():
+    """Return /nas if mounted, else fall back to ~/data/IrrigationGIS."""
+    if os.path.isdir(os.path.join(_NAS_ROOT, "soils")):
+        return _NAS_ROOT
+    return _LOCAL_ROOT
+
 
 START_YR = 1991
 END_YR = 2020
@@ -469,6 +481,7 @@ def main():
     parser.add_argument(
         "--index-col", help="ID column in shapefile (required for points mode)"
     )
+    parser.add_argument("--project", default="ee-dgketchum", help="EE project ID")
     parser.add_argument("--bucket", default=GCS_BUCKET)
     parser.add_argument("--prefix", default=GCS_PREFIX)
     args = parser.parse_args()
@@ -476,7 +489,10 @@ def main():
     if args.mode == "points" and (not args.shapefile or not args.index_col):
         parser.error("--shapefile and --index-col required for points mode")
 
-    is_authorized()
+    root = _data_root()
+    print(f"Data root: {root}")
+
+    is_authorized(project=args.project)
     groups = _resolve_groups(args.groups)
     print(f"Groups: {', '.join(groups.keys())}")
 

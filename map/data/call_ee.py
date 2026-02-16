@@ -475,10 +475,10 @@ def stack_bands_climatology(
     return input_bands.clip(roi)
 
 
-def is_authorized():
+def is_authorized(project="ee-dgketchum"):
     try:
-        ee.Initialize(project="ee-dgketchum")
-        print("Authorized")
+        ee.Initialize(project=project)
+        print(f"Authorized ({project})")
     except Exception as e:
         print("You are not authorized: {}".format(e))
         exit(1)
