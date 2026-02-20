@@ -11,12 +11,12 @@ Fill value: -9999.0
 
 Usage:
     python -m map.data.smap_download \
-        --output-dir ~/data/smap/SPL3SMP_E \
+        --output-dir /nas/soils/smap/SPL3SMP_E \
         --start 2015-04-01 --end 2026-02-15
 
     # Download only (skip GeoTIFF conversion)
     python -m map.data.smap_download \
-        --output-dir ~/data/smap/SPL3SMP_E \
+        --output-dir /nas/soils/smap/SPL3SMP_E \
         --start 2015-04-01 --end 2026-02-15 \
         --download-only
 """

@@ -25,13 +25,17 @@ import geopandas as gpd
 from map.data.call_ee import get_world_climate, is_authorized
 from map.data.cdl import remap_cdl
 from map.data.ee_utils import landsat_composites
-from map.data.smap_download import MAP_SCALE, _conus_slice, _conus_transform
+from map.data.smap_download import MAP_SCALE
 
 GCS_BUCKET = "wudr"
 GCS_PREFIX = "conus_features"
-EASE2_CRS = "EPSG:6933"
+EXPORT_CRS = "EPSG:5070"
+EXPORT_SCALE = 9000
 
 DATA_ROOT = "/nas"
+
+# CONUS bounding box in WGS84
+_CONUS_W, _CONUS_S, _CONUS_E, _CONUS_N = -125.0, 24.0, -66.0, 50.0
 
 START_YR = 1991
 END_YR = 2020
@@ -42,26 +46,13 @@ END_YR = 2020
 # ---------------------------------------------------------------------------
 
 
-def _grid_params():
-    """Compute CONUS EASE-Grid2 9 km export parameters from SMAP grid constants."""
-    row_sl, col_sl = _conus_slice()
-    transform = _conus_transform(row_sl, col_sl)
-    width = col_sl.stop - col_sl.start
-    height = row_sl.stop - row_sl.start
-    x_origin = transform.c
-    y_origin = transform.f
-    crs_transform = [MAP_SCALE, 0, x_origin, 0, -MAP_SCALE, y_origin]
-    roi = ee.Geometry.Rectangle(
-        [
-            x_origin,
-            y_origin - height * MAP_SCALE,
-            x_origin + width * MAP_SCALE,
-            y_origin,
-        ],
-        proj=EASE2_CRS,
+def _conus_roi():
+    """CONUS bounding box as ee.Geometry in WGS84."""
+    return ee.Geometry.Rectangle(
+        [_CONUS_W, _CONUS_S, _CONUS_E, _CONUS_N],
+        proj="EPSG:4326",
         geodesic=False,
     )
-    return roi, crs_transform, width, height
 
 
 # ---------------------------------------------------------------------------
@@ -386,7 +377,7 @@ FEATURE_GROUPS = {
 
 def export_rasters(groups, bucket, prefix):
     """Submit EE Export.image tasks for each feature group."""
-    roi, crs_transform, width, height = _grid_params()
+    roi = _conus_roi()
 
     for name, (build_fn, filename) in groups.items():
         image = build_fn(roi)
@@ -395,9 +386,9 @@ def export_rasters(groups, bucket, prefix):
             description=f"conus_{name}_9km",
             bucket=bucket,
             fileNamePrefix=f"{prefix}/{filename}",
-            crs=EASE2_CRS,
-            crsTransform=crs_transform,
-            dimensions=f"{width}x{height}",
+            crs=EXPORT_CRS,
+            scale=EXPORT_SCALE,
+            region=roi,
             maxPixels=int(1e13),
             fileFormat="GeoTIFF",
         )
@@ -407,8 +398,6 @@ def export_rasters(groups, bucket, prefix):
 
 def export_points(groups, shapefile, index_col, bucket, prefix):
     """Sample feature groups at point locations on the 9 km grid and export CSV."""
-    roi, _, _, _ = _grid_params()
-
     gdf = gpd.read_file(shapefile)
     if index_col not in gdf.columns:
         raise ValueError(f"Column '{index_col}' not found in {shapefile}")
@@ -416,12 +405,16 @@ def export_points(groups, shapefile, index_col, bucket, prefix):
     if gdf.crs and gdf.crs.to_epsg() != 4326:
         gdf = gdf.to_crs(epsg=4326)
 
+    # Build ROI from shapefile extent in WGS84 (EE can't parse EPSG:6933 geometries)
+    bounds = gdf.total_bounds
+    roi = ee.Geometry.Rectangle(
+        [float(bounds[0]), float(bounds[1]), float(bounds[2]), float(bounds[3])],
+        proj="EPSG:4326",
+        geodesic=False,
+    ).buffer(50000)
+
     points = ee.FeatureCollection(gdf.__geo_interface__)
     stack = ee.Image.cat([build_fn(roi) for build_fn, _ in groups.values()])
-
-    # Reproject to 9 km EASE-Grid2 so sampleRegions reads pixel values
-    # at the same resolution as the raster exports
-    stack = stack.reproject(crs=EASE2_CRS, scale=MAP_SCALE)
 
     samples = stack.sampleRegions(
         collection=points,
@@ -430,9 +423,10 @@ def export_points(groups, shapefile, index_col, bucket, prefix):
         tileScale=16,
     )
 
+    desc = prefix.replace("/", "_") + "_point_9km"
     task = ee.batch.Export.table.toCloudStorage(
         samples,
-        description="conus_point_extract_9km",
+        description=desc,
         bucket=bucket,
         fileNamePrefix=f"{prefix}/point_extract_9km",
         fileFormat="CSV",
