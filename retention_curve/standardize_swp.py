@@ -303,6 +303,81 @@ def write_standardized_rosetta(curves_wide_csv, out_dir, profile_key):
         )
 
 
+def standardize_lacadian(df, depth_col=None):
+    d = df.copy()
+    n_initial = len(d)
+    dropped_reasons = []
+
+    if "KPA" in d.columns and "VWC" in d.columns:
+        mask_neg_vwc = d["VWC"].astype(float) < 0
+        if mask_neg_vwc.sum() > 0:
+            dropped_reasons.append(f"VWC<0: {mask_neg_vwc.sum()}")
+            d = d[~mask_neg_vwc]
+
+        mask_high_kpa = d["KPA"].astype(float).abs() > KPA_MAX
+        if mask_high_kpa.sum() > 0:
+            dropped_reasons.append(f"KPA>{KPA_MAX}: {mask_high_kpa.sum()}")
+            d = d[~mask_high_kpa]
+
+        d["suction"] = np.abs(d["KPA"].astype(float).values * 10.19716)
+        d["theta"] = d["VWC"].astype(float).values
+    elif "suction_cm" in d.columns and "theta" in d.columns:
+        d["suction"] = np.abs(d["suction_cm"].astype(float).values)
+        d["theta"] = d["theta"].astype(float).values
+    else:
+        raise ValueError("Expected ('KPA','VWC') or ('suction_cm','theta')")
+
+    d = _standardize_depth(d, depth_col)
+    if "name" not in d.columns and "station" in d.columns:
+        d["name"] = d["station"]
+    d = d.rename(columns={"suction": "suction_cm", "depth": "depth_cm"})
+    d = d[["suction_cm", "theta", "depth_cm", "name"]]
+
+    n_source_dropped = n_initial - len(d)
+    if n_source_dropped > 0 and dropped_reasons:
+        print(
+            f"  [LaCADIAN source-filter] Dropped {n_source_dropped}/{n_initial} rows: {', '.join(dropped_reasons)}"
+        )
+
+    d = apply_physical_filters(d, source_name="LaCADIAN")
+    return d
+
+
+def write_standardized_lacadian(swp_csv_path, metadata_csv_path, out_dir, profile_key):
+    os.makedirs(out_dir, exist_ok=True)
+    for p in [swp_csv_path, metadata_csv_path]:
+        if not os.path.exists(p):
+            print(f"Error: Source file not found at {p}")
+            return
+    obs_df = pd.read_csv(swp_csv_path)
+    meta_df = pd.read_csv(metadata_csv_path)
+    station_col = "station"
+    if station_col not in obs_df.columns or station_col not in meta_df.columns:
+        print(f"Error: Join column '{station_col}' not found in one or both files.")
+        return
+    merged = pd.merge(obs_df, meta_df, on=station_col, how="left")
+    s_min, s_max = np.inf, -np.inf
+    t_min, t_max = np.inf, -np.inf
+    stations = 0
+    for profile_id, r in tqdm(
+        merged.groupby(profile_key), total=merged[station_col].nunique()
+    ):
+        d = standardize_lacadian(r, depth_col="depth_cm")
+        d["profile_id"] = profile_id
+        d["station"] = profile_id
+        out_path = os.path.join(out_dir, f"{profile_id}.csv")
+        d.to_csv(out_path, index=False)
+        stations += 1
+        s_min = min(s_min, float(np.nanmin(d["suction_cm"].values)))
+        s_max = max(s_max, float(np.nanmax(d["suction_cm"].values)))
+        t_min = min(t_min, float(np.nanmin(d["theta"].values)))
+        t_max = max(t_max, float(np.nanmax(d["theta"].values)))
+    if stations:
+        print(
+            f"LaCADIAN standardized: stations={stations}, suction_cm=[{s_min:.3g}, {s_max:.3g}], theta=[{t_min:.3f}, {t_max:.3f}]"
+        )
+
+
 def write_standardized_mt_mesonet(
     swp_csv_path, metadata_csv_path, out_dir, profile_key
 ):
@@ -436,6 +511,7 @@ if __name__ == "__main__":
     run_mt_mesonet = False
     run_reesh = True
     run_ncss = False
+    run_lacadian = False
 
     if run_gshp:
         gshp_dir_ = os.path.join("/nas", "soils", "soil_potential_obs", "gshp")
@@ -506,5 +582,20 @@ if __name__ == "__main__":
             "ncss",
         )
         write_standardized_ncss(parquet_path_, out_dir_, minimum_points=4)
+
+    if run_lacadian:
+        root_ = os.path.join("/nas", "soils", "soil_potential_obs", "lacadian")
+        swp_csv_ = os.path.join(root_, "swp.csv")
+        metadata_csv_ = os.path.join(root_, "station_metadata.csv")
+        out_dir_ = os.path.join(
+            "/nas",
+            "soils",
+            "soil_potential_obs",
+            "preprocessed",
+            "lacadian",
+        )
+        write_standardized_lacadian(
+            swp_csv_, metadata_csv_, out_dir_, profile_key="station"
+        )
 
 # ========================= EOF ====================================================================

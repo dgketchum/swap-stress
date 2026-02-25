@@ -199,6 +199,7 @@ if __name__ == "__main__":
     run_ncss_workflow = False
     run_reesh_workflow = True
     run_ismn_workflow = False
+    run_lacadian_workflow = False
 
     resolution_ = 250
 
@@ -334,6 +335,41 @@ if __name__ == "__main__":
         )
         index_ = "site_id"
         output_prefix_ = f"swapstress/reesh_training_data_{resolution_}m"
+        mgrs_shapefile_ = os.path.join(
+            root_, "boundaries", "mgrs", "mgrs_world_attr.shp"
+        )
+
+        is_authorized()
+        get_bands(
+            shapefile_path=shapefile_,
+            mgrs_shp_path=mgrs_shapefile_,
+            bucket=gcs_bucket_,
+            file_prefix=output_prefix_,
+            resolution=resolution_,
+            index_col=index_,
+            split_tiles=False,
+            diagnose=False,
+            check_dir=extracts_dir_,
+            region="global",
+        )
+
+    elif run_lacadian_workflow:
+        extracts_dir_ = os.path.join(
+            root_,
+            "soils",
+            "swapstress",
+            "extracts",
+            f"lacadian_extracts_{resolution_}m",
+        )
+        shapefile_ = os.path.join(
+            root_,
+            "soils",
+            "soil_potential_obs",
+            "lacadian",
+            "lacadian_stations_mgrs.shp",
+        )
+        index_ = "station"
+        output_prefix_ = f"swapstress/lacadian_training_data_{resolution_}m"
         mgrs_shapefile_ = os.path.join(
             root_, "boundaries", "mgrs", "mgrs_world_attr.shp"
         )

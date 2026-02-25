@@ -152,6 +152,7 @@ if __name__ == "__main__":
     run_reesh_workflow = True
     run_gshp_workflow = False
     run_ncss_workflow = False
+    run_lacadian_workflow = False
 
     if run_gshp_workflow:
         network_ = "gshp"
@@ -242,6 +243,25 @@ if __name__ == "__main__":
             "ncss_categorical_mappings_250m.json",
         )
         rosetta_pqt_ = None  # NCSS has lab-measured soil properties, no Rosetta needed
+        do_run = True
+
+    if run_lacadian_workflow:
+        network_ = "lacadian"
+        index_col_ = "station"
+        ee_in_dir_ = os.path.join(
+            root_, "soils", "swapstress", "extracts", "lacadian_extracts_250m"
+        )
+        out_file_ = os.path.join(
+            root_, "soils", "swapstress", "training", "lacadian_ee_data_250m.parquet"
+        )
+        mappings_json_ = os.path.join(
+            root_,
+            "soils",
+            "swapstress",
+            "training",
+            "lacadian_categorical_mappings_250m.json",
+        )
+        rosetta_pqt_ = None
         do_run = True
 
     if do_run:

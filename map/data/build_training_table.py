@@ -610,7 +610,7 @@ if __name__ == "__main__":
 
     include_embeddings_ = True
 
-    sources_ = ["gshp", "ncss", "mt_mesonet", "reesh"]
+    sources_ = ["gshp", "ncss", "mt_mesonet", "reesh", "lacadian"]
     output_path_ = os.path.join(output_dir_, "obs_level_training_250m.parquet")
     if include_embeddings_:
         output_path_ = os.path.join(output_dir_, "obs_level_training_emb_250m.parquet")
