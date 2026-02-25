@@ -195,6 +195,8 @@ def convert_single_csv_to_parquet(
             index=gdf.index,
         )
 
+    coords["lat"] = pd.to_numeric(coords["lat"], errors="coerce")
+    coords["lon"] = pd.to_numeric(coords["lon"], errors="coerce")
     df = df.join(coords, how="left")
 
     df = df[sorted(df.columns.to_list())]
