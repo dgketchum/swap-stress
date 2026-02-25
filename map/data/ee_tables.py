@@ -1,8 +1,45 @@
+import argparse
 import os
 from glob import glob
 import json
 
+import geopandas as gpd
 import pandas as pd
+
+from map.data.source_registry import get_source, DataPaths, VALID_SCALES
+
+CATEGORIES = [
+    "hhs_stc",
+    "glc10_lc",
+    "WRB4",
+    "WRB_PHASES",
+    "WRB2_CODE",
+    "FAO90",
+    "KOPPEN",
+    "TEXTURE_USDA",
+]
+
+DROPCOLS_250M = [
+    ".geo",
+    "system:index",
+    "MGRS_TILE",
+    "name",
+    "has_swp",
+    "source",
+    "network",
+    "HWSD2_ID",
+    "WISE30s_ID",
+    "COVERAGE",
+    "SHARE",
+    "SWCC_class",
+    "obs_ct",
+    "nwsli_id",
+    "mesowest_i",
+    "gwic_id",
+    "funded",
+]
+
+DROPCOLS_9KM = [".geo", "system:index", "constant"]
 
 
 def concatenate_and_join(
@@ -50,10 +87,9 @@ def concatenate_and_join(
 
     ee_df = pd.concat(df_list, ignore_index=True)
 
-    if dropcols_:
-        drop_from_ee = [c for c in dropcols_ if c in ee_df.columns]
-        if dropcols is not None:
-            ee_df = ee_df.drop(columns=drop_from_ee)
+    if dropcols:
+        drop_from_ee = [c for c in dropcols if c in ee_df.columns]
+        ee_df = ee_df.drop(columns=drop_from_ee)
 
     ee_df[index_col] = ee_df[index_col].astype(str)
     ee_df.set_index(index_col, inplace=True)
@@ -66,10 +102,9 @@ def concatenate_and_join(
     if rosetta_pqt:
         rosetta_df = pd.read_parquet(rosetta_pqt)
         rosetta_df = rosetta_df.groupby(index_col).first()
-        if dropcols_:
-            drop_from_rose = [c for c in dropcols_ if c in rosetta_df.columns]
-            if dropcols is not None:
-                rosetta_df = rosetta_df.drop(columns=drop_from_rose)
+        if dropcols:
+            drop_from_rose = [c for c in dropcols if c in rosetta_df.columns]
+            rosetta_df = rosetta_df.drop(columns=drop_from_rose)
 
         try:
             rosetta_df.drop(columns=["elevation"], inplace=True)
@@ -107,173 +142,152 @@ def concatenate_and_join(
     print(f"Saving final concatenated data to {out_file} {len(final_df)} samples")
 
 
+def convert_single_csv_to_parquet(
+    csv_path,
+    out_file,
+    index_col,
+    shapefile_path,
+    lat_col=None,
+    lon_col=None,
+    dropcols=None,
+):
+    """Convert a single EE CSV (9km extraction) to parquet with lat/lon from shapefile.
+
+    Parameters
+    ----------
+    csv_path : str
+        Path to the single CSV file.
+    out_file : str
+        Output parquet path.
+    index_col : str
+        Primary key column name.
+    shapefile_path : str
+        Path to source shapefile for coordinate lookup.
+    lat_col : str or None
+        Latitude column name in shapefile. If None, extract from geometry centroid.
+    lon_col : str or None
+        Longitude column name in shapefile. If None, extract from geometry centroid.
+    dropcols : list of str, optional
+        Columns to drop from the CSV.
+    """
+    df = pd.read_csv(csv_path)
+    print(f"Read {len(df)} rows from {csv_path}")
+
+    if dropcols:
+        drop = [c for c in dropcols if c in df.columns]
+        df = df.drop(columns=drop)
+
+    df[index_col] = df[index_col].astype(str)
+    df = df.set_index(index_col)
+
+    # Join lat/lon from shapefile
+    gdf = gpd.read_file(shapefile_path)
+    gdf[index_col] = gdf[index_col].astype(str)
+    gdf = gdf.set_index(index_col)
+
+    if lat_col and lon_col:
+        coords = gdf[[lat_col, lon_col]].rename(
+            columns={lat_col: "lat", lon_col: "lon"}
+        )
+    else:
+        coords = pd.DataFrame(
+            {"lat": gdf.geometry.centroid.y, "lon": gdf.geometry.centroid.x},
+            index=gdf.index,
+        )
+
+    df = df.join(coords, how="left")
+
+    df = df[sorted(df.columns.to_list())]
+
+    out_dir = os.path.dirname(out_file)
+    if out_dir and not os.path.exists(out_dir):
+        os.makedirs(out_dir)
+
+    df.to_parquet(out_file)
+    print(f"Saved {len(df)} rows to {out_file}")
+
+
+# Rosetta parquet paths for 250m workflows (relative to data_root)
+_ROSETTA_SUBPATHS = {
+    "gshp": "soil_potential_obs/gshp/extracted_rosetta_points.parquet",
+    "mt_mesonet": "rosetta/mt_mesonet/extracted_rosetta_points.parquet",
+    "reesh": "soil_potential_obs/reesh/extracted_rosetta_points.parquet",
+    "ncss": None,
+    "lacadian": None,
+}
+
+
 if __name__ == "__main__":
-    """"""
+    parser = argparse.ArgumentParser(
+        description="Convert EE CSV extracts to training parquets.",
+    )
+    parser.add_argument(
+        "--source",
+        type=str,
+        nargs="+",
+        required=True,
+        help="Source name(s) to process (e.g., gshp ncss mt_mesonet reesh lacadian).",
+    )
+    parser.add_argument(
+        "--scale",
+        type=str,
+        default="250m",
+        choices=VALID_SCALES,
+        help="Resolution scale (default: 250m).",
+    )
+    parser.add_argument(
+        "--data-root",
+        type=str,
+        default="/nas/soils",
+        help="Root data directory (default: /nas/soils).",
+    )
+    args = parser.parse_args()
 
-    root_ = "/nas"
+    for source_name in args.source:
+        print(f"\n=== Processing {source_name} at {args.scale} ===")
+        source = get_source(source_name)
+        paths = DataPaths(args.data_root, source, scale=args.scale)
 
-    # placeholders for a single call after blocks
-    do_run = False
-    ee_in_dir_ = None
-    out_file_ = None
-    index_col_ = None
-    mappings_json_ = None
-    rosetta_pqt_ = None
-    network_ = None
-
-    categories_ = [
-        "hhs_stc",
-        "glc10_lc",
-        "WRB4",
-        "WRB_PHASES",
-        "WRB2_CODE",
-        "FAO90",
-        "KOPPEN",
-        "TEXTURE_USDA",
-    ]
-
-    dropcols_ = [
-        ".geo",
-        "system:index",
-        "MGRS_TILE",
-        "name",
-        "has_swp",
-        "source",
-        "network",
-        "HWSD2_ID",
-        "WISE30s_ID",
-        "COVERAGE",
-        "SHARE",
-        "SWCC_class",
-        "obs_ct",
-    ]
-
-    run_mt_mesonet_workflow = False
-    run_reesh_workflow = True
-    run_gshp_workflow = False
-    run_ncss_workflow = False
-    run_lacadian_workflow = False
-
-    if run_gshp_workflow:
-        network_ = "gshp"
-        index_col_ = "profile_id"
-        ee_in_dir_ = os.path.join(
-            root_, "soils", "swapstress", "extracts", "gshp_extracts_250m"
-        )
-        out_file_ = os.path.join(
-            root_, "soils", "swapstress", "training", "gshp_ee_data_250m.parquet"
-        )
-        mappings_json_ = os.path.join(
-            root_,
-            "soils",
-            "swapstress",
-            "training",
-            "gshp_categorical_mappings_250m.json",
-        )
-        rosetta_pqt_ = os.path.join(
-            root_,
-            "soils",
-            "soil_potential_obs",
-            "gshp",
-            "extracted_rosetta_points.parquet",
-        )
-        do_run = True
-
-    if run_mt_mesonet_workflow:
-        network_ = "mt_mesonet"
-        index_col_ = "station"
-        ee_in_dir_ = os.path.join(
-            root_, "soils", "swapstress", "extracts", "mt_mesonet_extracts_250m"
-        )
-        out_file_ = os.path.join(
-            root_, "soils", "swapstress", "training", "mt_ee_data_250m.parquet"
-        )
-        mappings_json_ = os.path.join(
-            root_,
-            "soils",
-            "swapstress",
-            "training",
-            "mt_categorical_mappings_250m.json",
-        )
-        rosetta_pqt_ = os.path.join(
-            root_, "soils", "rosetta", "mt_mesonet", "extracted_rosetta_points.parquet"
-        )
-        dropcols_ += ["nwsli_id", "network", "mesowest_i", "gwic_id", "funded"]
-        do_run = True
-
-    if run_reesh_workflow:
-        network_ = "reesh"
-        index_col_ = "site_id"
-        ee_in_dir_ = os.path.join(
-            root_, "soils", "swapstress", "extracts", "reesh_extracts_250m"
-        )
-        out_file_ = os.path.join(
-            root_, "soils", "swapstress", "training", "reesh_ee_data_250m.parquet"
-        )
-        mappings_json_ = os.path.join(
-            root_,
-            "soils",
-            "swapstress",
-            "training",
-            "reesh_categorical_mappings_250m.json",
-        )
-        rosetta_pqt_ = os.path.join(
-            root_,
-            "soils",
-            "soil_potential_obs",
-            "reesh",
-            "extracted_rosetta_points.parquet",
-        )
-        do_run = True
-
-    if run_ncss_workflow:
-        network_ = "ncss"
-        index_col_ = "profile_id"
-        ee_in_dir_ = os.path.join(
-            root_, "soils", "swapstress", "extracts", "ncss_extracts_250m"
-        )
-        out_file_ = os.path.join(
-            root_, "soils", "swapstress", "training", "ncss_ee_data_250m.parquet"
-        )
-        mappings_json_ = os.path.join(
-            root_,
-            "soils",
-            "swapstress",
-            "training",
-            "ncss_categorical_mappings_250m.json",
-        )
-        rosetta_pqt_ = None  # NCSS has lab-measured soil properties, no Rosetta needed
-        do_run = True
-
-    if run_lacadian_workflow:
-        network_ = "lacadian"
-        index_col_ = "station"
-        ee_in_dir_ = os.path.join(
-            root_, "soils", "swapstress", "extracts", "lacadian_extracts_250m"
-        )
-        out_file_ = os.path.join(
-            root_, "soils", "swapstress", "training", "lacadian_ee_data_250m.parquet"
-        )
-        mappings_json_ = os.path.join(
-            root_,
-            "soils",
-            "swapstress",
-            "training",
-            "lacadian_categorical_mappings_250m.json",
-        )
-        rosetta_pqt_ = None
-        do_run = True
-
-    if do_run:
-        concatenate_and_join(
-            ee_in_dir=ee_in_dir_,
-            out_file=out_file_,
-            rosetta_pqt=rosetta_pqt_,
-            index_col=index_col_,
-            categorical_mappings_json=mappings_json_,
-            network=network_,
-            categories=categories_,
-            dropcols=dropcols_,
-        )
+        if paths.is_single_csv:
+            csv_path = paths.ee_csv_file
+            if not os.path.exists(csv_path):
+                print(f"  CSV not found: {csv_path}, skipping")
+                continue
+            shp_path = paths.shapefile
+            if not shp_path or not os.path.exists(shp_path):
+                print(f"  Shapefile not found: {shp_path}, skipping")
+                continue
+            convert_single_csv_to_parquet(
+                csv_path=csv_path,
+                out_file=paths.ee_table,
+                index_col=source.index_col,
+                shapefile_path=shp_path,
+                lat_col=source.lat_col,
+                lon_col=source.lon_col,
+                dropcols=DROPCOLS_9KM,
+            )
+        else:
+            rosetta_subpath = _ROSETTA_SUBPATHS.get(source_name)
+            rosetta_pqt = (
+                os.path.join(args.data_root, rosetta_subpath)
+                if rosetta_subpath
+                else None
+            )
+            mappings_json = os.path.join(
+                args.data_root,
+                "swapstress",
+                "training",
+                f"{source_name}_categorical_mappings_250m.json",
+            )
+            concatenate_and_join(
+                ee_in_dir=paths.ee_extracts_dir,
+                out_file=paths.ee_table,
+                rosetta_pqt=rosetta_pqt,
+                index_col=source.index_col,
+                categorical_mappings_json=mappings_json,
+                network=source_name,
+                categories=CATEGORIES,
+                dropcols=DROPCOLS_250M,
+            )
 
 # ========================= EOF ====================================================================

@@ -82,6 +82,20 @@ FEATURE_GROUPS = {
     "embeddings": [],  # Handled by pattern matching
     "worldclim": ["wc"],
     "hihydrosoil": ["hhs"],
+    "prism": [
+        "ppt",
+        "tdmean",
+        "tmin",
+        "tmax",
+        "tmean",
+        "vpdmin",
+        "vpdmax",
+        "solclear",
+        "solslope",
+        "soltotal",
+        "soltrans",
+    ],
+    "ssurgo": ["ssurgo_awc", "ssurgo_clay", "ssurgo_ksat", "ssurgo_sand"],
     "landcover": list(_LANDCOVER_FEATURES),
 }
 
@@ -126,6 +140,8 @@ NON_FEATURE_COLS = {
     "rosetta_level",
     "depth_cm",
     "depth",
+    # EE export artifact
+    "constant",
     # NCSS lab measurements (not available at inference time)
     "clay_tot_psa",
     "sand_tot_psa",
@@ -245,6 +261,8 @@ def classify_feature(feature_name: str) -> str:
         "coords",
         "worldclim",
         "hihydrosoil",
+        "prism",
+        "ssurgo",
         "landcover",
     ]
 

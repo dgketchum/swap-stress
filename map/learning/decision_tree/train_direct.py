@@ -67,6 +67,7 @@ def create_site_split(
     group_col: str = "sample_id",
     test_size: float = 0.2,
     random_state: int = 42,
+    resolution_m: float = 250,
 ) -> Tuple[Set[str], Set[str]]:
     """Create train/test split on spatial groups (quantized lat/lon).
 
@@ -80,13 +81,15 @@ def create_site_split(
         Fraction of spatial groups for testing.
     random_state : int
         Random seed.
+    resolution_m : float
+        Grid cell size in metres for spatial grouping.
 
     Returns
     -------
     tuple of (set, set)
         (train_groups, test_groups)
     """
-    groups = assign_spatial_group(df)
+    groups = assign_spatial_group(df, resolution_m=resolution_m)
     unique_groups = list(groups.dropna().unique())
     train_groups, test_groups = train_test_split(
         unique_groups,
@@ -101,6 +104,7 @@ def apply_site_split(
     train_sites: Set[str],
     test_sites: Set[str],
     group_col: str = "sample_id",
+    resolution_m: float = 250,
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """Apply pre-computed spatial-group split to a dataframe.
 
@@ -114,13 +118,15 @@ def apply_site_split(
         Spatial group labels for testing.
     group_col : str
         Unused, kept for backward-compatible call signatures.
+    resolution_m : float
+        Grid cell size in metres for spatial grouping.
 
     Returns
     -------
     tuple of (pd.DataFrame, pd.DataFrame)
         (train_df, test_df)
     """
-    groups = assign_spatial_group(df)
+    groups = assign_spatial_group(df, resolution_m=resolution_m)
     train_mask = groups.isin(train_sites)
     test_mask = groups.isin(test_sites)
     return df[train_mask.values].copy(), df[test_mask.values].copy()
@@ -320,6 +326,7 @@ def train_and_evaluate(
     test_size: float = 0.2,
     random_state: int = 42,
     drop_blocking_features: bool = True,
+    resolution_m: float = 250,
 ) -> Dict:
     """
     Train direct RF model and evaluate with site-level holdout.
@@ -379,9 +386,11 @@ def train_and_evaluate(
     # Site-level split
     print("Creating spatial-group split...")
     train_sites, test_sites = create_site_split(
-        df, "sample_id", test_size, random_state
+        df, "sample_id", test_size, random_state, resolution_m=resolution_m
     )
-    train_df, test_df = apply_site_split(df, train_sites, test_sites, "sample_id")
+    train_df, test_df = apply_site_split(
+        df, train_sites, test_sites, "sample_id", resolution_m=resolution_m
+    )
 
     # Clean: require theta and target
     train_df = train_df.dropna(subset=["theta", "log10_suction_cm"])
@@ -439,7 +448,7 @@ def train_and_evaluate(
             )
 
     # Site-level metrics (grouped by spatial cell)
-    spatial_groups = assign_spatial_group(test_df).values
+    spatial_groups = assign_spatial_group(test_df, resolution_m=resolution_m).values
     site_metrics, site_summary = compute_metrics_by_site(y_test, y_pred, spatial_groups)
     print(
         f"\nSite-weighted: mean R2={site_summary['mean_r2']:.4f}, "
@@ -601,6 +610,12 @@ if __name__ == "__main__":
         default=42,
         help="Random seed (default: 42).",
     )
+    parser.add_argument(
+        "--resolution-m",
+        type=float,
+        default=250,
+        help="Spatial grouping grid cell size in metres (default: 250).",
+    )
     args = parser.parse_args()
 
     train_and_evaluate(
@@ -610,4 +625,5 @@ if __name__ == "__main__":
         n_estimators=args.n_estimators,
         test_size=args.test_size,
         random_state=args.random_state,
+        resolution_m=args.resolution_m,
     )

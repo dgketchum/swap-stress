@@ -105,6 +105,11 @@ class DataSource:
     quality_filter_col: Optional[str] = None  # e.g., 'data_flag'
     quality_filter_value: Optional[str] = None  # e.g., 'good quality estimate'
 
+    # Shapefile metadata (for 9km single-CSV workflows)
+    shapefile_subpath: Optional[str] = None  # relative to data_root
+    lat_col: Optional[str] = "latitude"  # coordinate column in shapefile
+    lon_col: Optional[str] = "longitude"
+
     # Extra columns to drop (source-specific)
     extra_drop_cols: List[str] = field(default_factory=list)
 
@@ -136,6 +141,7 @@ SOURCES = {
         embeddings_subdir="gshp",
         quality_filter_col="data_flag",
         quality_filter_value="good quality estimate",
+        shapefile_subpath="soil_potential_obs/gshp/wrc_aggregated_mgrs.shp",
         extra_drop_cols=["hzn_top", "hzn_bot", "SWCC_classes", "climate_classes"],
     ),
     "ncss": DataSource(
@@ -152,6 +158,9 @@ SOURCES = {
         fit_results_subdir="ncss",
         depth_col="depth_cm",
         embeddings_subdir="ncss",
+        shapefile_subpath="soil_potential_obs/ncss_labdatasqlite/ncss_profiles.shp",
+        lat_col=None,
+        lon_col=None,
         extra_drop_cols=["SWCC_classes", "source_db"],
     ),
     "mt_mesonet": DataSource(
@@ -168,6 +177,7 @@ SOURCES = {
         fit_results_subdir="mt_mesonet",
         depth_col="depth_cm",
         embeddings_subdir="mt_mesonet",
+        shapefile_subpath="soil_potential_obs/mt_mesonet/station_metadata_mgrs.shp",
     ),
     "reesh": DataSource(
         name="reesh",
@@ -183,6 +193,9 @@ SOURCES = {
         fit_results_subdir="reesh",
         depth_col="depth_cm",
         embeddings_subdir="reesh",
+        shapefile_subpath="soil_potential_obs/reesh/shapefile/reesh_sites_mgrs.shp",
+        lat_col="Latitude",
+        lon_col="Longitude",
     ),
     "lacadian": DataSource(
         name="lacadian",
@@ -198,6 +211,7 @@ SOURCES = {
         fit_results_subdir="lacadian",
         depth_col="depth_cm",
         embeddings_subdir="lacadian",
+        shapefile_subpath="soil_potential_obs/lacadian/lacadian_stations_mgrs.shp",
     ),
     "rosetta": DataSource(
         name="rosetta",
@@ -257,6 +271,9 @@ def list_sources() -> None:
         )
 
 
+VALID_SCALES = ("250m", "9km_conus", "9km_global")
+
+
 class DataPaths:
     """
     Helper class for resolving data paths for a source.
@@ -264,7 +281,7 @@ class DataPaths:
     Centralizes path construction to avoid hardcoded paths throughout codebase.
     """
 
-    def __init__(self, data_root: str, source: DataSource):
+    def __init__(self, data_root: str, source: DataSource, scale: str = "250m"):
         """
         Initialize path resolver.
 
@@ -274,13 +291,39 @@ class DataPaths:
             Root data directory (e.g., /nas/soils)
         source : DataSource
             Source configuration.
+        scale : str
+            Resolution scale: "250m", "9km_conus", or "9km_global".
         """
+        if scale not in VALID_SCALES:
+            raise ValueError(f"Invalid scale '{scale}'. Must be one of {VALID_SCALES}")
         self.data_root = os.path.expanduser(data_root)
         self.source = source
+        self.scale = scale
+
+    @property
+    def is_single_csv(self) -> bool:
+        """Whether this scale uses a single CSV (9km) vs per-tile CSVs (250m)."""
+        return self.scale != "250m"
 
     @property
     def ee_extracts_dir(self) -> str:
         """Directory containing raw EE CSV extracts."""
+        if self.scale == "9km_conus":
+            return os.path.join(
+                self.data_root,
+                "swapstress",
+                "inference",
+                "conus_features",
+                self.source.name,
+            )
+        elif self.scale == "9km_global":
+            return os.path.join(
+                self.data_root,
+                "swapstress",
+                "inference",
+                "global_features",
+                self.source.name,
+            )
         return os.path.join(
             self.data_root, "swapstress", "extracts", self.source.ee_extracts_subdir
         )
@@ -288,9 +331,37 @@ class DataPaths:
     @property
     def ee_table(self) -> str:
         """Path to concatenated EE features parquet."""
+        if self.scale == "9km_conus":
+            return os.path.join(
+                self.data_root,
+                "swapstress",
+                "training",
+                f"{self.source.name}_ee_data_9km_conus.parquet",
+            )
+        elif self.scale == "9km_global":
+            return os.path.join(
+                self.data_root,
+                "swapstress",
+                "training",
+                f"{self.source.name}_ee_data_9km_global.parquet",
+            )
         return os.path.join(
             self.data_root, "swapstress", "training", self.source.ee_table_filename
         )
+
+    @property
+    def ee_csv_file(self) -> Optional[str]:
+        """Path to the single CSV for 9km scales (None for 250m)."""
+        if self.is_single_csv:
+            return os.path.join(self.ee_extracts_dir, "point_extract_9km.csv")
+        return None
+
+    @property
+    def shapefile(self) -> Optional[str]:
+        """Path to source shapefile."""
+        if self.source.shapefile_subpath:
+            return os.path.join(self.data_root, self.source.shapefile_subpath)
+        return None
 
     @property
     def labels_file(self) -> Optional[str]:
@@ -326,8 +397,9 @@ class DataPaths:
     @property
     def embeddings_dir(self) -> Optional[str]:
         """Directory containing embedding parquet files."""
+        if self.scale != "250m":
+            return None
         if self.source.embeddings_subdir:
-            # Embeddings are on a different mount
             return os.path.join(
                 "/data/ssd2/swapstress/vwc/embeddings", self.source.embeddings_subdir
             )

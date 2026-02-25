@@ -21,6 +21,7 @@ Usage:
     )
 """
 
+import argparse
 import os
 import json
 from glob import glob
@@ -35,6 +36,7 @@ from map.data.source_registry import (
     DataSource,
     DataPaths,
     TRAINING_TABLE_DROP_COLS,
+    VALID_SCALES,
 )
 from retention_curve.depth_utils import depth_to_rosetta_level
 
@@ -342,6 +344,7 @@ def load_source_observations(
     fit_method: str = "bayes",
     prefer_preprocessed: bool = True,
     include_embeddings: bool = False,
+    scale: str = "250m",
 ) -> pd.DataFrame:
     """
     Load and join EE features with raw observations for a single source.
@@ -360,6 +363,8 @@ def load_source_observations(
         Prefer preprocessed CSVs over JSON data.
     include_embeddings : bool
         Whether to include embeddings.
+    scale : str
+        Resolution scale passed to DataPaths.
 
     Returns
     -------
@@ -367,7 +372,9 @@ def load_source_observations(
         Combined features and observations with standardized columns.
         Each row is a single (theta, suction) observation with all EE features.
     """
-    paths = DataPaths(data_root, source)
+    if scale != "250m":
+        include_embeddings = False
+    paths = DataPaths(data_root, source, scale=scale)
 
     # Load EE features
     ee_table = paths.ee_table
@@ -484,6 +491,7 @@ def build_unified_table(
     include_embeddings: bool = False,
     prefer_preprocessed: bool = True,
     amsr_vod_path: Optional[str] = None,
+    scale: str = "250m",
 ) -> pd.DataFrame:
     """
     Build a unified observation-level training table from multiple data sources.
@@ -506,12 +514,17 @@ def build_unified_table(
         Prefer preprocessed CSVs over JSON data arrays.
     amsr_vod_path : str, optional
         Path to AMSR VOD climatology parquet (from amsr_extract.py).
+    scale : str
+        Resolution scale passed to DataPaths.
 
     Returns
     -------
     pd.DataFrame
         Unified training table: theta as input, log10_suction_cm as target.
     """
+    if scale != "250m":
+        include_embeddings = False
+
     frames = []
 
     for source_name in sources:
@@ -525,6 +538,7 @@ def build_unified_table(
                 fit_method=fit_method,
                 prefer_preprocessed=prefer_preprocessed,
                 include_embeddings=include_embeddings,
+                scale=scale,
             )
             print(f"  Loaded {len(df)} observations from {source_name}")
             frames.append(df)
@@ -605,22 +619,66 @@ def build_unified_table(
 
 
 if __name__ == "__main__":
-    data_root_ = os.path.join("/nas", "soils")
-    output_dir_ = os.path.join(data_root_, "swapstress", "training")
+    parser = argparse.ArgumentParser(
+        description="Build unified observation-level training table.",
+    )
+    parser.add_argument(
+        "--sources",
+        type=str,
+        nargs="+",
+        default=["gshp", "ncss", "mt_mesonet", "reesh", "lacadian"],
+        help="Source names to include.",
+    )
+    parser.add_argument(
+        "--scale",
+        type=str,
+        default="250m",
+        choices=VALID_SCALES,
+        help="Resolution scale (default: 250m).",
+    )
+    parser.add_argument(
+        "--data-root",
+        type=str,
+        default="/nas/soils",
+        help="Root data directory (default: /nas/soils).",
+    )
+    parser.add_argument(
+        "--output",
+        type=str,
+        default=None,
+        help="Output parquet path (auto-generated if omitted).",
+    )
+    parser.add_argument(
+        "--embeddings",
+        action="store_true",
+        help="Include embeddings (250m only).",
+    )
+    parser.add_argument(
+        "--fit-method",
+        type=str,
+        default="bayes",
+        help="Fitting method for JSON files (default: bayes).",
+    )
+    args = parser.parse_args()
 
-    include_embeddings_ = True
+    output_path_ = args.output
+    if output_path_ is None:
+        suffix = f"_emb_{args.scale}" if args.embeddings else f"_{args.scale}"
+        output_path_ = os.path.join(
+            args.data_root,
+            "swapstress",
+            "training",
+            f"obs_level_training{suffix}.parquet",
+        )
 
-    sources_ = ["gshp", "ncss", "mt_mesonet", "reesh", "lacadian"]
-    output_path_ = os.path.join(output_dir_, "obs_level_training_250m.parquet")
-    if include_embeddings_:
-        output_path_ = os.path.join(output_dir_, "obs_level_training_emb_250m.parquet")
     build_unified_table(
-        sources=sources_,
-        data_root=data_root_,
+        sources=args.sources,
+        data_root=args.data_root,
         output_path=output_path_,
-        fit_method="bayes",
-        include_embeddings=include_embeddings_,
+        fit_method=args.fit_method,
+        include_embeddings=args.embeddings,
         prefer_preprocessed=True,
+        scale=args.scale,
     )
 
 # ========================= EOF ====================================================================
