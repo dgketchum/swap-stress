@@ -106,6 +106,7 @@ def run_group_ablation(
     groups_to_ablate: Optional[List[str]] = None,
     n_estimators: int = 250,
     random_state: int = 42,
+    resolution_m: float = 250,
 ) -> pd.DataFrame:
     """
     Retrain model with each feature group excluded, measure R² drop.
@@ -159,7 +160,9 @@ def run_group_ablation(
     if df.index.name:
         df = df.reset_index()
 
-    train_df, test_df = apply_site_split(df, train_sites, test_sites, "sample_id")
+    train_df, test_df = apply_site_split(
+        df, train_sites, test_sites, "sample_id", resolution_m=resolution_m
+    )
     train_df = train_df.dropna(subset=["theta", "log10_suction_cm"])
     test_df = test_df.dropna(subset=["theta", "log10_suction_cm"])
 
@@ -238,6 +241,7 @@ def run_analysis(
     n_repeats: int = 10,
     test_size: float = 0.2,
     random_state: int = 42,
+    resolution_m: float = 250,
 ) -> Dict:
     """
     Run full feature importance analysis.
@@ -278,9 +282,11 @@ def run_analysis(
 
     # Site-level split
     train_sites, test_sites = create_site_split(
-        df, "sample_id", test_size, random_state
+        df, "sample_id", test_size, random_state, resolution_m=resolution_m
     )
-    train_df, test_df = apply_site_split(df, train_sites, test_sites, "sample_id")
+    train_df, test_df = apply_site_split(
+        df, train_sites, test_sites, "sample_id", resolution_m=resolution_m
+    )
     train_df = train_df.dropna(subset=["theta", "log10_suction_cm"])
     test_df = test_df.dropna(subset=["theta", "log10_suction_cm"])
 
@@ -351,6 +357,7 @@ def run_analysis(
         test_sites,
         n_estimators=n_estimators,
         random_state=random_state,
+        resolution_m=resolution_m,
     )
     ablation_path = os.path.join(output_dir, "group_ablation.csv")
     ablation_df.to_csv(ablation_path, index=False)
@@ -379,6 +386,7 @@ def run_analysis(
             "n_repeats": n_repeats,
             "test_size": test_size,
             "random_state": random_state,
+            "resolution_m": resolution_m,
             "n_features": len(all_features),
         },
     }
@@ -431,6 +439,12 @@ if __name__ == "__main__":
         default=42,
         help="Random seed (default: 42).",
     )
+    parser.add_argument(
+        "--resolution-m",
+        type=float,
+        default=250,
+        help="Spatial grouping grid cell size in metres (default: 250).",
+    )
     args = parser.parse_args()
 
     run_analysis(
@@ -440,4 +454,5 @@ if __name__ == "__main__":
         n_repeats=args.n_repeats,
         test_size=args.test_size,
         random_state=args.random_state,
+        resolution_m=args.resolution_m,
     )
