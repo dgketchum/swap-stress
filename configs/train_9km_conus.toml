@@ -2,6 +2,7 @@ run_type = "train"
 
 obs_table = "/nas/soils/swapstress/training/obs_level_training_9km_conus.parquet"
 output_dir = "/nas/soils/swapstress/models/direct_rf_9km_conus"
+split_manifest = "/nas/soils/swapstress/models/splits/9km_conus_split.json"
 
 feature_groups = [
     "fao",

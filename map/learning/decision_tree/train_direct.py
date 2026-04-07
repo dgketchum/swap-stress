@@ -39,6 +39,7 @@ def train_and_evaluate(
     exclude_groups: Optional[List[str]] = None,
     n_estimators: int = 250,
     test_size: float = 0.2,
+    val_size: float = 0.2,
     random_state: int = 42,
     drop_blocking_features: bool = True,
     resolution_m: float = 250,
@@ -60,6 +61,10 @@ def train_and_evaluate(
         Number of trees.
     test_size : float
         Fraction of sites for testing.
+    val_size : float
+        Fraction of non-test sites for validation.  RF does not use a
+        validation set itself, but the split is recorded in the manifest
+        so NN trainers reusing the same manifest get an identical holdout.
     random_state : int
         Random seed.
     drop_blocking_features : bool
@@ -70,9 +75,12 @@ def train_and_evaluate(
     dict
         Results including metrics, config, feature list.
     """
+    import pandas as pd
+
     from map.learning.direct.data import write_split_manifest
 
-    # Shared data loading and spatial split
+    # Shared data loading and spatial split — always request val split
+    # so the manifest is consumable by both RF and NN.
     data = prepare_direct_data(
         obs_table_path=obs_table_path,
         output_dir=output_dir,
@@ -80,24 +88,32 @@ def train_and_evaluate(
         drop_blocking_features=drop_blocking_features,
         resolution_m=resolution_m,
         test_size=test_size,
+        val_size=val_size,
         random_state=random_state,
         split_manifest=split_manifest,
     )
 
     df = data["df"]
     all_features = data["all_features"]
-    train_df = data["train_df"]
     test_df = data["test_df"]
-    train_sites = data["train_sites"]
     test_sites = data["test_sites"]
 
-    # Write split manifest so NN trainers can reuse the same holdout
+    # RF uses all non-test data (train + val) for fitting.
+    # If a three-way manifest was loaded, merge train_df + val_df.
+    train_df = data["train_df"]
+    train_sites = set(data["train_sites"])
+    if data.get("val_df") is not None:
+        train_df = pd.concat([train_df, data["val_df"]], ignore_index=True)
+        train_sites = train_sites | data["val_sites"]
+
+    # Write three-way split manifest so NN trainers can reuse the holdout
     manifest_path = split_manifest or os.path.join(output_dir, "spatial_split.json")
     if not os.path.exists(manifest_path):
         write_split_manifest(
             manifest_path,
-            train_groups=train_sites,
-            test_groups=test_sites,
+            train_groups=data["train_sites"],
+            test_groups=data["test_sites"],
+            val_groups=data.get("val_sites"),
             random_state=random_state,
             resolution_m=resolution_m,
         )
@@ -247,6 +263,12 @@ if __name__ == "__main__":
         help="Spatial grouping grid cell size in metres (default: 250).",
     )
     parser.add_argument(
+        "--val-size",
+        type=float,
+        default=None,
+        help="Fraction of non-test groups for validation (default: 0.2).",
+    )
+    parser.add_argument(
         "--split-manifest",
         type=str,
         default=None,
@@ -274,6 +296,7 @@ if __name__ == "__main__":
         exclude_groups=exclude_groups,
         n_estimators=config.get("n_estimators", 250),
         test_size=config.get("test_size", 0.2),
+        val_size=config.get("val_size", 0.2),
         random_state=config.get("random_state", 42),
         resolution_m=config.get("resolution_m", 250),
         split_manifest=config.get("split_manifest"),

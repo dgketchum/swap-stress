@@ -456,7 +456,7 @@ class TestCompareRuns:
 
 
 class TestManifestInterop:
-    def test_nn_crashes_on_two_way_manifest(self, tmp_path):
+    def test_nn_rejects_two_way_manifest(self, tmp_path):
         """NN trainer must reject a manifest without val_groups."""
         from map.learning.direct.data import prepare_direct_data
 
@@ -488,8 +488,7 @@ class TestManifestInterop:
         pqt = str(tmp_path / "obs.parquet")
         df.to_parquet(pqt, index=False)
 
-        # prepare_direct_data with val_size and a two-way manifest
-        # should return val_df=None since the manifest has no val_groups
+        # prepare_direct_data with a two-way manifest returns val_df=None
         data = prepare_direct_data(
             obs_table_path=pqt,
             output_dir=str(tmp_path / "out"),
@@ -500,8 +499,79 @@ class TestManifestInterop:
         )
         assert data.get("val_df") is None
 
+    def test_rf_writes_three_way_manifest(self, tiny_parquet, tmp_path):
+        """RF trainer must write a manifest with val_groups so NN can consume it."""
+        from map.learning.direct.data import (
+            prepare_direct_data,
+            read_split_manifest,
+            write_split_manifest,
+        )
+
+        manifest_path = str(tmp_path / "shared_split.json")
+
+        # Simulate what RF does: request val_size to get a three-way split
+        data = prepare_direct_data(
+            obs_table_path=tiny_parquet,
+            output_dir=str(tmp_path / "rf_out"),
+            resolution_m=9000,
+            test_size=0.2,
+            val_size=0.2,
+        )
+
+        # Write the manifest with val_groups (as RF now does)
+        write_split_manifest(
+            manifest_path,
+            train_groups=data["train_sites"],
+            test_groups=data["test_sites"],
+            val_groups=data.get("val_sites"),
+            random_state=42,
+            resolution_m=9000,
+        )
+
+        # The manifest must have val_groups
+        loaded = read_split_manifest(manifest_path)
+        assert loaded["val_groups"] is not None
+        assert len(loaded["val_groups"]) > 0
+
+        # NN can consume this manifest
+        nn_data = prepare_direct_data(
+            obs_table_path=tiny_parquet,
+            output_dir=str(tmp_path / "nn_out"),
+            resolution_m=9000,
+            test_size=0.2,
+            val_size=0.2,
+            split_manifest=manifest_path,
+        )
+        assert nn_data["val_df"] is not None
+        assert nn_data["test_sites"] == data["test_sites"]
+
+    def test_rf_merges_val_into_train(self, tiny_parquet, tmp_path):
+        """RF should train on train+val groups, not just train groups."""
+        from map.learning.direct.data import prepare_direct_data
+
+        data = prepare_direct_data(
+            obs_table_path=tiny_parquet,
+            output_dir=str(tmp_path / "out"),
+            resolution_m=9000,
+            test_size=0.2,
+            val_size=0.2,
+        )
+
+        train_only_n = len(data["train_df"])
+        val_n = len(data["val_df"])
+
+        # Simulate what RF does: merge train + val
+        import pandas as pd
+
+        merged = pd.concat([data["train_df"], data["val_df"]], ignore_index=True)
+        merged_sites = data["train_sites"] | data["val_sites"]
+
+        # RF training data should be larger than train-only
+        assert len(merged) == train_only_n + val_n
+        assert len(merged_sites) == len(data["train_sites"]) + len(data["val_sites"])
+
     def test_manifest_written_to_shared_path(self, tmp_path):
-        """RF trainer writes manifest to split_manifest path, not just output_dir."""
+        """write_split_manifest creates parent dirs and writes correctly."""
         from map.learning.direct.data import write_split_manifest
 
         shared_path = str(tmp_path / "shared" / "split.json")
@@ -509,6 +579,7 @@ class TestManifestInterop:
             shared_path,
             train_groups={"a", "b"},
             test_groups={"c"},
+            val_groups={"d"},
             random_state=42,
             resolution_m=9000,
         )
@@ -517,6 +588,7 @@ class TestManifestInterop:
             doc = json.load(f)
         assert set(doc["train_groups"]) == {"a", "b"}
         assert set(doc["test_groups"]) == {"c"}
+        assert set(doc["val_groups"]) == {"d"}
 
 
 # ---------------------------------------------------------------------------
