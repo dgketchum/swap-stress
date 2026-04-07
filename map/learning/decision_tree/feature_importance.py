@@ -32,13 +32,13 @@ from map.data.features import (
     filter_feature_groups,
     get_feature_columns,
 )
-from map.learning.decision_tree.train_direct import (
+from map.learning.direct.data import (
     apply_site_split,
-    build_preprocessor,
-    compute_metrics,
     create_site_split,
     filter_complete_samples,
 )
+from map.learning.direct.metrics import compute_metrics
+from map.learning.direct.preprocessing import build_preprocessor
 
 
 def run_permutation_importance(
@@ -242,6 +242,7 @@ def run_analysis(
     test_size: float = 0.2,
     random_state: int = 42,
     resolution_m: float = 250,
+    config_dict: Optional[Dict] = None,
 ) -> Dict:
     """
     Run full feature importance analysis.
@@ -396,6 +397,28 @@ def run_analysis(
         json.dump(results, f, indent=2, default=str)
     print(f"\nSaved results to {results_path}")
 
+    # Write provenance artifact
+    if config_dict is not None:
+        from map.config import input_checksum, write_provenance
+
+        prov_path = write_provenance(
+            output_dir=output_dir,
+            config=config_dict,
+            run_type="feature_importance",
+            extras={
+                "inputs": {
+                    "obs_table_sha256": input_checksum(obs_table_path),
+                    "obs_table_n_rows": len(df),
+                },
+                "outputs": {
+                    "n_features": len(all_features),
+                    "n_groups_ablated": len(ablation_df) - 1,
+                },
+                "upstream": None,
+            },
+        )
+        print(f"Saved provenance to {prov_path}")
+
     return results
 
 
@@ -404,55 +427,71 @@ if __name__ == "__main__":
         description="Feature importance analysis for direct suction model.",
     )
     parser.add_argument(
+        "--config",
+        type=str,
+        default=None,
+        help="Path to TOML run config.",
+    )
+    parser.add_argument(
         "--obs-table",
         type=str,
-        required=True,
+        default=None,
         help="Path to observation-level training parquet.",
     )
     parser.add_argument(
         "--output-dir",
         type=str,
-        required=True,
+        default=None,
         help="Directory for output files.",
     )
     parser.add_argument(
         "--n-estimators",
         type=int,
-        default=250,
+        default=None,
         help="Number of RF trees (default: 250).",
     )
     parser.add_argument(
         "--n-repeats",
         type=int,
-        default=10,
+        default=None,
         help="Number of permutation repeats (default: 10).",
     )
     parser.add_argument(
         "--test-size",
         type=float,
-        default=0.2,
+        default=None,
         help="Fraction of sites for testing (default: 0.2).",
     )
     parser.add_argument(
         "--random-state",
         type=int,
-        default=42,
+        default=None,
         help="Random seed (default: 42).",
     )
     parser.add_argument(
         "--resolution-m",
         type=float,
-        default=250,
+        default=None,
         help="Spatial grouping grid cell size in metres (default: 250).",
     )
     args = parser.parse_args()
 
+    from map.config import load_config
+
+    config = load_config(args.config, vars(args))
+
+    if not config.get("obs_table"):
+        parser.error("--obs-table is required (via CLI or TOML config)")
+    if not config.get("output_dir"):
+        parser.error("--output-dir is required (via CLI or TOML config)")
+
     run_analysis(
-        obs_table_path=args.obs_table,
-        output_dir=args.output_dir,
-        n_estimators=args.n_estimators,
-        n_repeats=args.n_repeats,
-        test_size=args.test_size,
-        random_state=args.random_state,
-        resolution_m=args.resolution_m,
+        obs_table_path=config["obs_table"],
+        output_dir=config["output_dir"],
+        n_estimators=config.get("n_estimators", 250),
+        n_repeats=config.get("n_repeats", 10),
+        test_size=config.get("test_size", 0.2),
+        random_state=config.get("random_state", 42),
+        resolution_m=config.get("resolution_m", 250),
+        config_dict=config,
     )

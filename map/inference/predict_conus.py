@@ -116,7 +116,9 @@ class StaticRasterStack:
                     )
 
                 descriptions = list(src.descriptions)
-                missing_desc = [i + 1 for i, desc in enumerate(descriptions) if not desc]
+                missing_desc = [
+                    i + 1 for i, desc in enumerate(descriptions) if not desc
+                ]
                 if missing_desc:
                     raise ValueError(
                         f"Missing band descriptions in {raster_path}: bands {missing_desc}"
@@ -317,7 +319,9 @@ def write_prediction_raster(
         )
 
 
-def validate_feature_contract(model_artifacts: ModelArtifacts) -> tuple[set[str], set[str]]:
+def validate_feature_contract(
+    model_artifacts: ModelArtifacts,
+) -> tuple[set[str], set[str]]:
     """Split saved features into raster-derived and fixed categories."""
     feature_set = set(model_artifacts.feature_names)
     if "theta" not in feature_set:
@@ -347,6 +351,7 @@ def run_prediction(
     batch_size: int,
     overwrite: bool,
     write_linear: bool,
+    config_dict: dict | None = None,
 ) -> None:
     """Run daily CONUS predictions over the requested SMAP date range."""
     if batch_size <= 0:
@@ -382,6 +387,7 @@ def run_prediction(
     )
     print(f"Dates matched: {len(smap_files)}")
 
+    n_written = 0
     for date, smap_path in smap_files:
         out_name = f"suction_{date.strftime('%Y%m%d')}.tif"
         out_path = output_path / out_name
@@ -431,10 +437,37 @@ def run_prediction(
             model_dir=model_artifacts.model_dir,
             source_path=smap_path,
         )
+        n_written += 1
         print(
-            f"WROTE {out_name} "
-            f"({valid_idx.size}/{theta_flat.size} valid theta pixels)"
+            f"WROTE {out_name} ({valid_idx.size}/{theta_flat.size} valid theta pixels)"
         )
+
+    # Write provenance artifact
+    if config_dict is not None:
+        from map.config import write_provenance
+
+        upstream_prov = model_artifacts.model_dir / "provenance.json"
+        prov_path = write_provenance(
+            output_dir=str(output_path),
+            config=config_dict,
+            run_type="predict",
+            extras={
+                "inputs": {
+                    "n_smap_files": len(smap_files),
+                    "n_static_rasters": len(list(Path(static_dir).glob("*_ease2.tif"))),
+                    "n_model_features": len(model_artifacts.feature_names),
+                },
+                "outputs": {
+                    "n_rasters_written": n_written,
+                },
+                "upstream": {
+                    "model_provenance": str(upstream_prov)
+                    if upstream_prov.exists()
+                    else None,
+                },
+            },
+        )
+        print(f"Saved provenance to {prov_path}")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -443,18 +476,24 @@ def build_parser() -> argparse.ArgumentParser:
         description="Run the direct RF model over CONUS 9 km rasters",
     )
     parser.add_argument(
+        "--config",
+        type=str,
+        default=None,
+        help="Path to TOML run config.",
+    )
+    parser.add_argument(
         "--model-dir",
-        default=DEFAULT_MODEL_DIR,
+        default=None,
         help=f"Directory containing saved direct RF artifacts (default: {DEFAULT_MODEL_DIR})",
     )
     parser.add_argument(
         "--static-dir",
-        default=DEFAULT_STATIC_DIR,
+        default=None,
         help=f"Directory containing *_ease2.tif static rasters (default: {DEFAULT_STATIC_DIR})",
     )
     parser.add_argument(
         "--smap-dir",
-        default=DEFAULT_SMAP_DIR,
+        default=None,
         help=f"Directory containing daily SMAP GeoTIFFs (default: {DEFAULT_SMAP_DIR})",
     )
     parser.add_argument(
@@ -475,7 +514,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--depth-cm",
         type=float,
-        default=5.0,
+        default=None,
         help="Depth to inject as a model feature (default: 5.0)",
     )
     parser.add_argument(
@@ -487,17 +526,19 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--batch-size",
         type=int,
-        default=50000,
+        default=None,
         help="Prediction batch size in valid pixels (default: 50000)",
     )
     parser.add_argument(
         "--overwrite",
         action="store_true",
+        default=None,
         help="Overwrite existing output rasters",
     )
     parser.add_argument(
         "--write-linear",
         action="store_true",
+        default=None,
         help="Write a second band with suction in cm H2O",
     )
     return parser
@@ -506,18 +547,24 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> None:
     """CLI entry point."""
     args = build_parser().parse_args()
+
+    from map.config import load_config
+
+    config = load_config(args.config, vars(args))
+
     run_prediction(
-        model_dir=args.model_dir,
-        static_dir=args.static_dir,
-        smap_dir=args.smap_dir,
-        output_dir=args.output_dir,
-        start_date=args.start_date,
-        end_date=args.end_date,
-        depth_cm=args.depth_cm,
-        rosetta_level=args.rosetta_level,
-        batch_size=args.batch_size,
-        overwrite=args.overwrite,
-        write_linear=args.write_linear,
+        model_dir=config.get("model_dir", DEFAULT_MODEL_DIR),
+        static_dir=config.get("static_dir", DEFAULT_STATIC_DIR),
+        smap_dir=config.get("smap_dir", DEFAULT_SMAP_DIR),
+        output_dir=config.get("output_dir"),
+        start_date=config.get("start_date"),
+        end_date=config.get("end_date"),
+        depth_cm=config.get("depth_cm", 5.0),
+        rosetta_level=config.get("rosetta_level"),
+        batch_size=config.get("batch_size", 50000),
+        overwrite=config.get("overwrite", False),
+        write_linear=config.get("write_linear", False),
+        config_dict=config,
     )
 
 
