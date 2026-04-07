@@ -1,0 +1,10 @@
+run_type = "gapfill"
+
+source_dir = "/nas/soils/swapstress/inference/predictions/direct_rf_9km_global_pruned"
+output_dir = "/nas/soils/swapstress/inference/predictions/direct_rf_9km_global_pruned_gapfilled"
+
+prefix = "suction"
+band_description = "log10_suction_cm"
+start_date = "20240101"
+end_date = "20241231"
+overwrite = false

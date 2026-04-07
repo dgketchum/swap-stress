@@ -1,0 +1,25 @@
+run_type = "train"
+
+obs_table = "/nas/soils/swapstress/training/obs_level_training_9km_conus.parquet"
+output_dir = "/nas/soils/swapstress/models/direct_rf_9km_conus"
+
+feature_groups = [
+    "fao",
+    "global_et0",
+    "gridmet",
+    "landcover",
+    "landsat_bands",
+    "polaris",
+    "prism",
+    "sentinel1",
+    "smap",
+    "soilgrids",
+    "ssurgo",
+    "terrain",
+    "worldclim",
+]
+
+n_estimators = 250
+test_size = 0.2
+random_state = 42
+resolution_m = 9000

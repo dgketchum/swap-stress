@@ -1,0 +1,39 @@
+run_type = "train_nn"
+model_name = "ft_transformer"
+
+obs_table = "/nas/soils/swapstress/training/obs_level_training_9km_conus.parquet"
+output_dir = "/nas/soils/swapstress/models/direct_ftt_9km_conus"
+split_manifest = "/nas/soils/swapstress/models/splits/9km_conus_split.json"
+
+feature_groups = [
+    "fao",
+    "global_et0",
+    "gridmet",
+    "landcover",
+    "landsat_bands",
+    "polaris",
+    "prism",
+    "sentinel1",
+    "smap",
+    "soilgrids",
+    "ssurgo",
+    "terrain",
+    "worldclim",
+]
+
+test_size = 0.2
+val_size = 0.2
+random_state = 42
+resolution_m = 9000
+
+batch_size = 1024
+max_epochs = 200
+learning_rate = 1e-3
+weight_decay = 1e-5
+patience = 20
+
+d_token = 192
+n_blocks = 3
+n_heads = 8
+attn_dropout = 0.2
+ff_dropout = 0.1
