@@ -116,15 +116,22 @@ def train_and_evaluate(
 
     all_features = data["all_features"]
     train_df = data["train_df"]
-    val_df = data["val_df"]
     test_df = data["test_df"]
     train_sites = data["train_sites"]
     test_sites = data["test_sites"]
+
+    # NN requires a validation split
+    if "val_df" not in data or data["val_df"] is None:
+        raise ValueError(
+            "NN training requires a validation split. Either pass val_size > 0 "
+            "or use a split manifest that includes val_groups."
+        )
+    val_df = data["val_df"]
     val_sites = data["val_sites"]
 
-    # Save split manifest if we created one
-    manifest_path = os.path.join(output_dir, "spatial_split.json")
-    if not (split_manifest and os.path.exists(split_manifest)):
+    # Write split manifest to the shared path (config-specified or output_dir)
+    manifest_path = split_manifest or os.path.join(output_dir, "spatial_split.json")
+    if not os.path.exists(manifest_path):
         write_split_manifest(
             manifest_path,
             train_groups=train_sites,
@@ -238,26 +245,40 @@ def train_and_evaluate(
     )
     trainer.fit(lit_module, train_loader, val_loader)
 
-    best_epoch = checkpoint_cb.best_model_score
+    best_val_rmse_score = checkpoint_cb.best_model_score
     stopped_epoch = trainer.current_epoch
-    best_val_rmse = float(best_epoch.cpu().item()) if best_epoch is not None else None
-    print(f"\nBest val RMSE: {best_val_rmse:.4f} (stopped at epoch {stopped_epoch})")
+    best_val_rmse = (
+        float(best_val_rmse_score.cpu().item())
+        if best_val_rmse_score is not None
+        else None
+    )
+
+    # Extract best epoch from checkpoint filename (pattern: best-{epoch:03d}-...)
+    best_ckpt_path = checkpoint_cb.best_model_path
+    import re
+
+    _epoch_match = re.search(r"best-(\d+)-", os.path.basename(best_ckpt_path or ""))
+    best_epoch_num = int(_epoch_match.group(1)) if _epoch_match else stopped_epoch
+    # Lightning epochs are 0-indexed; refit needs epoch *count*
+    refit_epochs = best_epoch_num + 1
+
+    print(
+        f"\nBest val RMSE: {best_val_rmse:.4f} at epoch {best_epoch_num} "
+        f"(stopped at epoch {stopped_epoch})"
+    )
 
     # Capture training history
     training_history = {
         "best_val_rmse": best_val_rmse,
+        "best_epoch": best_epoch_num,
         "stopped_epoch": stopped_epoch,
-        "best_checkpoint": checkpoint_cb.best_model_path,
+        "best_checkpoint": best_ckpt_path,
     }
 
     # ------------------------------------------------------------------
-    # 5. Refit on train+val, then evaluate on test
+    # 5. Refit on train+val with best epoch count
     # ------------------------------------------------------------------
-    print("\nRefitting on train+val with best epoch count...")
-    refit_epochs = min(
-        stopped_epoch + 1,
-        max_epochs,
-    )
+    print(f"\nRefitting on train+val for {refit_epochs} epochs (best epoch)...")
 
     # Merge train and val for refit
     import pandas as pd

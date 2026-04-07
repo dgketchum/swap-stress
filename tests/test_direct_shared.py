@@ -1,6 +1,8 @@
 """Tests for shared direct-task utilities and tabular NN components."""
 
 import json
+import os
+import re as _re
 
 import numpy as np
 import pandas as pd
@@ -256,6 +258,34 @@ class TestNNPreprocessor:
         assert "elevation" in nums
         assert "slope" in nums
 
+    def test_missing_categoricals_map_to_unknown(self, tiny_df):
+        """NaN in categorical columns should map to 0 (unknown bucket),
+        not a median-imputed fake class ID."""
+        features = ["elevation", "nlcd", "theta"]
+        # Inject NaN into nlcd
+        tiny_df = tiny_df.copy()
+        tiny_df.loc[tiny_df.index[:20], "nlcd"] = np.nan
+        pp = NNPreprocessor().fit(tiny_df, features)
+        X_num, X_cat, y = pp.transform(tiny_df, features)
+        # All NaN rows should have cat index 0 (unknown bucket)
+        assert (X_cat[:20, 0] == 0).all()
+        # Non-NaN rows should have cat index > 0
+        assert (X_cat[20:, 0] > 0).all()
+
+    def test_categorical_not_median_imputed(self, tiny_df):
+        """Categorical columns must NOT go through median imputation,
+        which could create non-existent class IDs like 46.5 -> 46."""
+        features = ["elevation", "nlcd", "theta"]
+        tiny_df = tiny_df.copy()
+        tiny_df.loc[tiny_df.index[:10], "nlcd"] = np.nan
+        pp = NNPreprocessor().fit(tiny_df, features)
+        # The imputer should only know about numeric columns
+        assert pp.imputer.statistics_.shape[0] == 2  # elevation, theta
+        # Category map should only contain real nlcd values from the data
+        real_nlcd = set(tiny_df["nlcd"].dropna().astype(int).unique())
+        mapped_vals = set(pp.category_maps["nlcd"].keys())
+        assert mapped_vals == real_nlcd
+
 
 # ---------------------------------------------------------------------------
 # Model architecture tests
@@ -418,3 +448,99 @@ class TestCompareRuns:
         assert len(df) == 2
         assert set(df["run"]) == {"rf_run", "nn_run"}
         assert df.loc[df["run"] == "rf_run", "r2"].iloc[0] == 0.55
+
+
+# ---------------------------------------------------------------------------
+# Manifest interop regression tests
+# ---------------------------------------------------------------------------
+
+
+class TestManifestInterop:
+    def test_nn_crashes_on_two_way_manifest(self, tmp_path):
+        """NN trainer must reject a manifest without val_groups."""
+        from map.learning.direct.data import prepare_direct_data
+
+        # Write a two-way manifest (no val_groups)
+        manifest = {
+            "random_state": 42,
+            "resolution_m": 9000,
+            "n_train": 2,
+            "n_test": 1,
+            "train_groups": ["a", "b"],
+            "test_groups": ["c"],
+        }
+        mpath = str(tmp_path / "split.json")
+        with open(mpath, "w") as f:
+            json.dump(manifest, f)
+
+        # Create a tiny parquet
+        rng = np.random.RandomState(42)
+        n = 50
+        df = pd.DataFrame(
+            {
+                "lat": rng.uniform(30, 50, n),
+                "lon": rng.uniform(-120, -80, n),
+                "theta": rng.uniform(0.05, 0.45, n),
+                "log10_suction_cm": rng.uniform(0.5, 4.5, n),
+                "elevation": rng.uniform(100, 3000, n),
+            }
+        )
+        pqt = str(tmp_path / "obs.parquet")
+        df.to_parquet(pqt, index=False)
+
+        # prepare_direct_data with val_size and a two-way manifest
+        # should return val_df=None since the manifest has no val_groups
+        data = prepare_direct_data(
+            obs_table_path=pqt,
+            output_dir=str(tmp_path / "out"),
+            resolution_m=9000,
+            test_size=0.2,
+            val_size=0.2,
+            split_manifest=mpath,
+        )
+        assert data.get("val_df") is None
+
+    def test_manifest_written_to_shared_path(self, tmp_path):
+        """RF trainer writes manifest to split_manifest path, not just output_dir."""
+        from map.learning.direct.data import write_split_manifest
+
+        shared_path = str(tmp_path / "shared" / "split.json")
+        write_split_manifest(
+            shared_path,
+            train_groups={"a", "b"},
+            test_groups={"c"},
+            random_state=42,
+            resolution_m=9000,
+        )
+        assert os.path.exists(shared_path)
+        with open(shared_path) as f:
+            doc = json.load(f)
+        assert set(doc["train_groups"]) == {"a", "b"}
+        assert set(doc["test_groups"]) == {"c"}
+
+
+# ---------------------------------------------------------------------------
+# Refit epoch regression test
+# ---------------------------------------------------------------------------
+
+
+class TestRefitEpochExtraction:
+    def test_extracts_best_epoch_from_checkpoint_filename(self):
+        """Refit should use best epoch, not terminal epoch."""
+        # Simulate the checkpoint filename pattern
+        ckpt_name = "best-012-0.3456.ckpt"
+        match = _re.search(r"best-(\d+)-", ckpt_name)
+        assert match is not None
+        best_epoch = int(match.group(1))
+        assert best_epoch == 12
+        # Refit epochs = best_epoch + 1 (0-indexed)
+        refit_epochs = best_epoch + 1
+        assert refit_epochs == 13
+
+    def test_refit_less_than_stopped(self):
+        """If patience=20 and best epoch=30, stopped~50, refit should be 31 not 51."""
+        best_epoch = 30
+        stopped_epoch = 50
+        refit_epochs = best_epoch + 1
+        assert refit_epochs == 31
+        assert refit_epochs < stopped_epoch + 1

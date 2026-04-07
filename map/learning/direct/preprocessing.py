@@ -93,34 +93,36 @@ class NNPreprocessor:
             Training data.
         all_features : list of str
             Feature columns including theta.
+
+        Notes
+        -----
+        Categorical columns are **not** median-imputed.  Missing values map
+        to the reserved unknown bucket (index 0).  Only numeric columns go
+        through the median imputer and standard scaler.
         """
         # Separate numeric and categorical
         self.cat_cols = [c for c in all_features if c in CATEGORICAL_FEATURES]
         self.num_cols = [c for c in all_features if c not in CATEGORICAL_FEATURES]
 
-        # Fit imputer on all features (numeric values)
-        self.imputer = SimpleImputer(strategy="median", add_indicator=False)
-        self.imputer.fit(train_df[all_features].values)
-
-        # Impute training data, then fit scaler on numeric columns only
-        imputed = pd.DataFrame(
-            self.imputer.transform(train_df[all_features].values),
-            columns=all_features,
-        )
-
-        self.scaler = StandardScaler()
-        self.scaler.fit(imputed[self.num_cols].values)
-
-        # Build category maps: value -> index (0 = unknown/missing)
+        # Build category maps from raw (pre-imputation) training data.
+        # 0 is reserved for unknown / missing.
         self.category_maps = {}
         self.cat_cardinalities = []
         for col in self.cat_cols:
-            vals = imputed[col].dropna().unique()
-            # Sort for determinism; 0 is reserved for unknown
-            sorted_vals = sorted(set(int(v) for v in vals))
+            raw = train_df[col].dropna()
+            sorted_vals = sorted(set(int(v) for v in raw.unique()))
             mapping = {v: i + 1 for i, v in enumerate(sorted_vals)}
             self.category_maps[col] = mapping
             self.cat_cardinalities.append(len(mapping) + 1)  # +1 for unknown bucket
+
+        # Fit median imputer on numeric columns only
+        self.imputer = SimpleImputer(strategy="median", add_indicator=False)
+        self.imputer.fit(train_df[self.num_cols].values)
+
+        # Fit scaler on imputed numeric columns
+        num_imputed = self.imputer.transform(train_df[self.num_cols].values)
+        self.scaler = StandardScaler()
+        self.scaler.fit(num_imputed)
 
         return self
 
@@ -136,24 +138,26 @@ class NNPreprocessor:
         X_num : np.ndarray, shape (n, n_numeric)
             Imputed and standardized numeric features.
         X_cat : np.ndarray of int64, shape (n, n_categorical)
-            Integer-encoded categorical features (0 = unknown).
+            Integer-encoded categorical features (0 = unknown/missing).
         y : np.ndarray
             Target values.
         """
-        imputed = pd.DataFrame(
-            self.imputer.transform(df[all_features].values),
-            columns=all_features,
-        )
+        # Numeric: impute then scale
+        X_num = self.scaler.transform(
+            self.imputer.transform(df[self.num_cols].values)
+        ).astype(np.float32)
 
-        X_num = self.scaler.transform(imputed[self.num_cols].values).astype(np.float32)
-
+        # Categorical: map raw values to indices; NaN -> 0 (unknown bucket)
         if self.cat_cols:
             X_cat = np.zeros((len(df), len(self.cat_cols)), dtype=np.int64)
             for j, col in enumerate(self.cat_cols):
                 mapping = self.category_maps[col]
-                raw = imputed[col].values
+                raw = df[col].values
                 for i, v in enumerate(raw):
-                    X_cat[i, j] = mapping.get(int(v), 0)
+                    if pd.isna(v):
+                        X_cat[i, j] = 0  # unknown bucket
+                    else:
+                        X_cat[i, j] = mapping.get(int(v), 0)
         else:
             X_cat = np.zeros((len(df), 0), dtype=np.int64)
 

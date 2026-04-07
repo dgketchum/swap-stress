@@ -42,6 +42,7 @@ def train_and_evaluate(
     random_state: int = 42,
     drop_blocking_features: bool = True,
     resolution_m: float = 250,
+    split_manifest: Optional[str] = None,
     config_dict: Optional[Dict] = None,
 ) -> Dict:
     """
@@ -69,6 +70,8 @@ def train_and_evaluate(
     dict
         Results including metrics, config, feature list.
     """
+    from map.learning.direct.data import write_split_manifest
+
     # Shared data loading and spatial split
     data = prepare_direct_data(
         obs_table_path=obs_table_path,
@@ -78,6 +81,7 @@ def train_and_evaluate(
         resolution_m=resolution_m,
         test_size=test_size,
         random_state=random_state,
+        split_manifest=split_manifest,
     )
 
     df = data["df"]
@@ -86,6 +90,17 @@ def train_and_evaluate(
     test_df = data["test_df"]
     train_sites = data["train_sites"]
     test_sites = data["test_sites"]
+
+    # Write split manifest so NN trainers can reuse the same holdout
+    manifest_path = split_manifest or os.path.join(output_dir, "spatial_split.json")
+    if not os.path.exists(manifest_path):
+        write_split_manifest(
+            manifest_path,
+            train_groups=train_sites,
+            test_groups=test_sites,
+            random_state=random_state,
+            resolution_m=resolution_m,
+        )
 
     # Impute and build arrays
     X_train, X_test, y_train, y_test, imputer = prepare_rf_arrays(
@@ -231,6 +246,12 @@ if __name__ == "__main__":
         default=None,
         help="Spatial grouping grid cell size in metres (default: 250).",
     )
+    parser.add_argument(
+        "--split-manifest",
+        type=str,
+        default=None,
+        help="Path to existing spatial_split.json (reuse holdout from prior run).",
+    )
     args = parser.parse_args()
 
     from map.config import feature_groups_to_exclude, load_config
@@ -255,5 +276,6 @@ if __name__ == "__main__":
         test_size=config.get("test_size", 0.2),
         random_state=config.get("random_state", 42),
         resolution_m=config.get("resolution_m", 250),
+        split_manifest=config.get("split_manifest"),
         config_dict=config,
     )
