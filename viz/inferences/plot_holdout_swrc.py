@@ -28,14 +28,14 @@ import pandas as pd
 from sklearn.metrics import mean_squared_error, r2_score
 
 from map.data.features import get_feature_columns
-from map.learning.decision_tree.train_direct import (
+from map.learning.direct.data import (
     apply_site_split,
     audit_dataset,
-    build_preprocessor,
     create_site_split,
     filter_blocking_features,
     filter_complete_samples,
 )
+from map.learning.direct.preprocessing import build_preprocessor
 
 
 def extract_site_name(sample_id: str) -> str:
