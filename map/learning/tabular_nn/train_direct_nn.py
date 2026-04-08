@@ -80,6 +80,7 @@ def train_and_evaluate(
     lambda_bound: float = 0.0,
     bound_lo: float = 0.0,
     bound_hi: float = 7.0,
+    lambda_mono: float = 0.0,
     # Config/provenance
     config_dict: Optional[Dict] = None,
 ) -> Dict:
@@ -154,6 +155,12 @@ def train_and_evaluate(
     n_cat = len(preprocessor.cat_cols)
     cat_cards = preprocessor.cat_cardinalities
 
+    # Locate theta in the numeric feature vector for monotonicity constraint.
+    # For split-input models (MLPWithEmbeddings, FTTransformer), theta_idx is
+    # its position in preprocessor.num_cols.  For flat MLP, numeric columns
+    # come first so the same index applies.
+    theta_idx = preprocessor.num_cols.index("theta") if lambda_mono > 0 else None
+
     if is_split:
         X_train_num, X_train_cat, y_train = preprocessor.transform(
             train_df, all_features
@@ -221,6 +228,8 @@ def train_and_evaluate(
         lambda_bound=lambda_bound,
         bound_lo=bound_lo,
         bound_hi=bound_hi,
+        lambda_mono=lambda_mono,
+        theta_idx=theta_idx,
     )
 
     # ------------------------------------------------------------------
@@ -344,6 +353,8 @@ def train_and_evaluate(
         lambda_bound=lambda_bound,
         bound_lo=bound_lo,
         bound_hi=bound_hi,
+        lambda_mono=lambda_mono,
+        theta_idx=theta_idx,
     )
 
     refit_trainer = L.Trainer(
@@ -407,6 +418,7 @@ def train_and_evaluate(
             "lambda_bound": lambda_bound,
             "bound_lo": bound_lo,
             "bound_hi": bound_hi,
+            "lambda_mono": lambda_mono,
         },
         model_family="nn",
         model_name=model_name,
@@ -533,6 +545,12 @@ if __name__ == "__main__":
         default=None,
         help="Upper physical bound for log10_suction_cm (default: 7).",
     )
+    parser.add_argument(
+        "--lambda-mono",
+        type=float,
+        default=None,
+        help="Weight for monotonicity physics penalty (default: 0).",
+    )
     args = parser.parse_args()
 
     from map.config import feature_groups_to_exclude, load_config
@@ -577,5 +595,6 @@ if __name__ == "__main__":
         lambda_bound=config.get("lambda_bound", 0.0),
         bound_lo=config.get("bound_lo", 0.0),
         bound_hi=config.get("bound_hi", 7.0),
+        lambda_mono=config.get("lambda_mono", 0.0),
         config_dict=config,
     )

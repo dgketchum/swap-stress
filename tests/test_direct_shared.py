@@ -460,6 +460,77 @@ class TestLightningModule:
         loss_with = lit.training_step((x, y), 0)
         assert loss_with.dim() == 0
 
+    def test_mono_penalty_flat_input(self):
+        """Monotonicity penalty runs on VanillaMLP (flat input)."""
+        model = VanillaMLP(n_features=5, hidden_dim=16, num_hidden_layers=1)
+        # theta is at index 3 in the 5-feature input
+        lit = DirectRegressionModule(
+            model,
+            split_input=False,
+            lambda_mono=0.1,
+            theta_idx=3,
+        )
+        x = torch.randn(4, 5)
+        y = torch.randn(4, 1)
+        loss = lit.training_step((x, y), 0)
+        assert loss.dim() == 0
+        assert loss.requires_grad
+
+    def test_mono_penalty_split_input(self):
+        """Monotonicity penalty runs on MLPWithEmbeddings (split input)."""
+        model = MLPWithEmbeddings(
+            n_num_features=5,
+            cat_cardinalities=[3],
+            embedding_dim=4,
+            hidden_dim=16,
+            num_hidden_layers=1,
+        )
+        # theta is at index 2 in the 5-column numeric tensor
+        lit = DirectRegressionModule(
+            model,
+            split_input=True,
+            lambda_mono=0.5,
+            theta_idx=2,
+        )
+        x_num = torch.randn(4, 5)
+        x_cat = torch.randint(0, 3, (4, 1))
+        y = torch.randn(4, 1)
+        loss = lit.training_step(((x_num, x_cat), y), 0)
+        assert loss.dim() == 0
+        assert loss.requires_grad
+
+    def test_mono_penalty_off_when_zero(self):
+        """lambda_mono=0 should use the regular _step path, not _mono_step."""
+        model = VanillaMLP(n_features=5, hidden_dim=16, num_hidden_layers=1)
+        lit = DirectRegressionModule(
+            model,
+            split_input=False,
+            lambda_mono=0.0,
+            theta_idx=3,
+        )
+        x = torch.randn(4, 5)
+        y = torch.randn(4, 1)
+        loss = lit.training_step((x, y), 0)
+        assert loss.dim() == 0
+
+    def test_mono_and_bound_combined(self):
+        """Both penalties active simultaneously."""
+        model = VanillaMLP(n_features=5, hidden_dim=16, num_hidden_layers=1)
+        lit = DirectRegressionModule(
+            model,
+            split_input=False,
+            lambda_mono=0.1,
+            theta_idx=3,
+            lambda_bound=0.1,
+            bound_lo=0.0,
+            bound_hi=7.0,
+        )
+        x = torch.randn(4, 5)
+        y = torch.randn(4, 1)
+        loss = lit.training_step((x, y), 0)
+        assert loss.dim() == 0
+        assert loss.requires_grad
+
 
 # ---------------------------------------------------------------------------
 # Compare runs test

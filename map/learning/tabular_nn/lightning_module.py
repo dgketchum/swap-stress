@@ -42,6 +42,8 @@ class DirectRegressionModule(L.LightningModule):
         lambda_bound: float = 0.0,
         bound_lo: float = 0.0,
         bound_hi: float = 7.0,
+        lambda_mono: float = 0.0,
+        theta_idx: int | None = None,
     ):
         super().__init__()
         self.save_hyperparameters(ignore=["model"])
@@ -53,6 +55,8 @@ class DirectRegressionModule(L.LightningModule):
         self.lambda_bound = lambda_bound
         self.bound_lo = bound_lo
         self.bound_hi = bound_hi
+        self.lambda_mono = lambda_mono
+        self.theta_idx = theta_idx
         self.criterion = nn.MSELoss()
 
         # Collect test predictions
@@ -82,12 +86,58 @@ class DirectRegressionModule(L.LightningModule):
             + torch.relu(self.bound_lo - y_hat).mean()
         )
 
+    def _mono_step(
+        self, batch: Any
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Forward pass that also computes d(pred)/d(theta) via autograd.
+
+        Isolates the theta column as a leaf tensor with requires_grad=True,
+        rebuilds the input, runs the forward pass, then differentiates the
+        output w.r.t. theta.
+
+        Returns (mse_loss, y_hat, y, d_pred_d_theta).
+        """
+        idx = self.theta_idx
+
+        if self.split_input:
+            (x_num, x_cat), y = batch
+            # Detach and re-attach theta so it becomes an autograd leaf
+            theta_col = x_num[:, idx : idx + 1].detach().requires_grad_(True)
+            x_num = torch.cat([x_num[:, :idx], theta_col, x_num[:, idx + 1 :]], dim=1)
+            y_hat = self.model(x_num, x_cat)
+        else:
+            x, y = batch
+            theta_col = x[:, idx : idx + 1].detach().requires_grad_(True)
+            x = torch.cat([x[:, :idx], theta_col, x[:, idx + 1 :]], dim=1)
+            y_hat = self.model(x)
+
+        mse_loss = self.criterion(y_hat, y)
+
+        (d_pred_d_theta,) = torch.autograd.grad(
+            outputs=y_hat,
+            inputs=theta_col,
+            grad_outputs=torch.ones_like(y_hat),
+            create_graph=True,
+            retain_graph=True,
+        )
+        return mse_loss, y_hat, y, d_pred_d_theta
+
     def training_step(self, batch: Any, batch_idx: int) -> torch.Tensor:
-        loss, y_hat, _ = self._step(batch)
+        use_mono = self.lambda_mono > 0 and self.theta_idx is not None
+
+        if use_mono:
+            loss, y_hat, _, d_pred_d_theta = self._mono_step(batch)
+            mono_loss = torch.relu(d_pred_d_theta).mean()
+            self.log("train_mono_loss", mono_loss, prog_bar=False)
+            loss = loss + self.lambda_mono * mono_loss
+        else:
+            loss, y_hat, _ = self._step(batch)
+
         if self.lambda_bound > 0:
             bound_loss = self._bound_penalty(y_hat)
             self.log("train_bound_loss", bound_loss, prog_bar=False)
             loss = loss + self.lambda_bound * bound_loss
+
         self.log("train_loss", loss, prog_bar=True)
         return loss
 
