@@ -406,6 +406,60 @@ class TestLightningModule:
         loss = lit.training_step(((x_num, x_cat), y), 0)
         assert loss.dim() == 0
 
+    def test_configure_optimizers_without_scheduler(self):
+        model = VanillaMLP(n_features=5, hidden_dim=16, num_hidden_layers=1)
+        lit = DirectRegressionModule(
+            model,
+            split_input=False,
+            scheduler_monitor=None,
+        )
+        optimizers = lit.configure_optimizers()
+        assert "optimizer" in optimizers
+        assert "lr_scheduler" not in optimizers
+
+    def test_bound_penalty_zero_when_in_range(self):
+        model = VanillaMLP(n_features=5, hidden_dim=16, num_hidden_layers=1)
+        lit = DirectRegressionModule(
+            model,
+            split_input=False,
+            lambda_bound=1.0,
+            bound_lo=0.0,
+            bound_hi=7.0,
+        )
+        y_hat = torch.tensor([[1.0], [3.5], [6.9]])
+        penalty = lit._bound_penalty(y_hat)
+        assert penalty.item() == pytest.approx(0.0)
+
+    def test_bound_penalty_positive_when_out_of_range(self):
+        model = VanillaMLP(n_features=5, hidden_dim=16, num_hidden_layers=1)
+        lit = DirectRegressionModule(
+            model,
+            split_input=False,
+            lambda_bound=1.0,
+            bound_lo=0.0,
+            bound_hi=7.0,
+        )
+        # One prediction below 0, one above 7
+        y_hat = torch.tensor([[-1.0], [8.0], [3.0]])
+        penalty = lit._bound_penalty(y_hat)
+        # relu(-1 - 7)=0, relu(8 - 7)=1, relu(3 - 7)=0 -> mean = 1/3
+        # relu(0 - (-1))=1, relu(0 - 8)=0, relu(0 - 3)=0 -> mean = 1/3
+        assert penalty.item() == pytest.approx(1.0 / 3.0 + 1.0 / 3.0)
+
+    def test_bound_penalty_in_training_step(self):
+        model = VanillaMLP(n_features=5, hidden_dim=16, num_hidden_layers=1)
+        lit = DirectRegressionModule(
+            model,
+            split_input=False,
+            lambda_bound=0.1,
+            bound_lo=0.0,
+            bound_hi=7.0,
+        )
+        x = torch.randn(4, 5)
+        y = torch.randn(4, 1)
+        loss_with = lit.training_step((x, y), 0)
+        assert loss_with.dim() == 0
+
 
 # ---------------------------------------------------------------------------
 # Compare runs test
@@ -456,9 +510,9 @@ class TestCompareRuns:
 
 
 class TestManifestInterop:
-    def test_nn_rejects_two_way_manifest(self, tmp_path):
-        """NN trainer must reject a manifest without val_groups."""
-        from map.learning.direct.data import prepare_direct_data
+    def test_two_way_manifest_is_upgraded_for_nn(self, tmp_path):
+        """Legacy two-way manifests should be upgraded in place for NN use."""
+        from map.learning.direct.data import prepare_direct_data, read_split_manifest
 
         # Write a two-way manifest (no val_groups)
         manifest = {
@@ -488,7 +542,8 @@ class TestManifestInterop:
         pqt = str(tmp_path / "obs.parquet")
         df.to_parquet(pqt, index=False)
 
-        # prepare_direct_data with a two-way manifest returns val_df=None
+        # prepare_direct_data should upgrade the manifest in place, preserving
+        # the original test groups while deriving val_groups from train_groups.
         data = prepare_direct_data(
             obs_table_path=pqt,
             output_dir=str(tmp_path / "out"),
@@ -497,7 +552,13 @@ class TestManifestInterop:
             val_size=0.2,
             split_manifest=mpath,
         )
-        assert data.get("val_df") is None
+        assert data.get("val_df") is not None
+        assert data["test_sites"] == {"c"}
+
+        upgraded = read_split_manifest(mpath)
+        assert upgraded["val_groups"] is not None
+        assert upgraded["test_groups"] == {"c"}
+        assert upgraded["train_groups"] | upgraded["val_groups"] == {"a", "b"}
 
     def test_rf_writes_three_way_manifest(self, tiny_parquet, tmp_path):
         """RF trainer must write a manifest with val_groups so NN can consume it."""

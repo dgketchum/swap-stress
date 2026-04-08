@@ -38,6 +38,10 @@ class DirectRegressionModule(L.LightningModule):
         learning_rate: float = 1e-3,
         weight_decay: float = 1e-5,
         split_input: bool = False,
+        scheduler_monitor: str | None = "val_rmse",
+        lambda_bound: float = 0.0,
+        bound_lo: float = 0.0,
+        bound_hi: float = 7.0,
     ):
         super().__init__()
         self.save_hyperparameters(ignore=["model"])
@@ -45,6 +49,10 @@ class DirectRegressionModule(L.LightningModule):
         self.learning_rate = learning_rate
         self.weight_decay = weight_decay
         self.split_input = split_input
+        self.scheduler_monitor = scheduler_monitor
+        self.lambda_bound = lambda_bound
+        self.bound_lo = bound_lo
+        self.bound_hi = bound_hi
         self.criterion = nn.MSELoss()
 
         # Collect test predictions
@@ -67,8 +75,19 @@ class DirectRegressionModule(L.LightningModule):
         loss = self.criterion(y_hat, y)
         return loss, y_hat, y
 
+    def _bound_penalty(self, y_hat: torch.Tensor) -> torch.Tensor:
+        """Soft penalty for predictions outside [bound_lo, bound_hi]."""
+        return (
+            torch.relu(y_hat - self.bound_hi).mean()
+            + torch.relu(self.bound_lo - y_hat).mean()
+        )
+
     def training_step(self, batch: Any, batch_idx: int) -> torch.Tensor:
-        loss, _, _ = self._step(batch)
+        loss, y_hat, _ = self._step(batch)
+        if self.lambda_bound > 0:
+            bound_loss = self._bound_penalty(y_hat)
+            self.log("train_bound_loss", bound_loss, prog_bar=False)
+            loss = loss + self.lambda_bound * bound_loss
         self.log("train_loss", loss, prog_bar=True)
         return loss
 
@@ -96,6 +115,9 @@ class DirectRegressionModule(L.LightningModule):
             lr=self.learning_rate,
             weight_decay=self.weight_decay,
         )
+        if self.scheduler_monitor is None:
+            return {"optimizer": optimizer}
+
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
             optimizer,
             mode="min",
@@ -107,7 +129,7 @@ class DirectRegressionModule(L.LightningModule):
             "optimizer": optimizer,
             "lr_scheduler": {
                 "scheduler": scheduler,
-                "monitor": "val_rmse",
+                "monitor": self.scheduler_monitor,
                 "interval": "epoch",
             },
         }

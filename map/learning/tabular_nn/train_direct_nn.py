@@ -76,6 +76,10 @@ def train_and_evaluate(
     n_heads: int = 8,
     attn_dropout: float = 0.2,
     ff_dropout: float = 0.1,
+    # Physics constraint hyperparameters
+    lambda_bound: float = 0.0,
+    bound_lo: float = 0.0,
+    bound_hi: float = 7.0,
     # Config/provenance
     config_dict: Optional[Dict] = None,
 ) -> Dict:
@@ -214,6 +218,9 @@ def train_and_evaluate(
         learning_rate=learning_rate,
         weight_decay=weight_decay,
         split_input=is_split,
+        lambda_bound=lambda_bound,
+        bound_lo=bound_lo,
+        bound_hi=bound_hi,
     )
 
     # ------------------------------------------------------------------
@@ -333,6 +340,10 @@ def train_and_evaluate(
         learning_rate=learning_rate,
         weight_decay=weight_decay,
         split_input=is_split,
+        scheduler_monitor=None,
+        lambda_bound=lambda_bound,
+        bound_lo=bound_lo,
+        bound_hi=bound_hi,
     )
 
     refit_trainer = L.Trainer(
@@ -393,6 +404,9 @@ def train_and_evaluate(
             "hidden_dim": hidden_dim,
             "num_hidden_layers": num_hidden_layers,
             "dropout": dropout,
+            "lambda_bound": lambda_bound,
+            "bound_lo": bound_lo,
+            "bound_hi": bound_hi,
         },
         model_family="nn",
         model_name=model_name,
@@ -501,6 +515,24 @@ if __name__ == "__main__":
     parser.add_argument("--n-heads", type=int, default=None)
     parser.add_argument("--attn-dropout", type=float, default=None)
     parser.add_argument("--ff-dropout", type=float, default=None)
+    parser.add_argument(
+        "--lambda-bound",
+        type=float,
+        default=None,
+        help="Weight for bounded-output physics penalty (default: 0).",
+    )
+    parser.add_argument(
+        "--bound-lo",
+        type=float,
+        default=None,
+        help="Lower physical bound for log10_suction_cm (default: 0).",
+    )
+    parser.add_argument(
+        "--bound-hi",
+        type=float,
+        default=None,
+        help="Upper physical bound for log10_suction_cm (default: 7).",
+    )
     args = parser.parse_args()
 
     from map.config import feature_groups_to_exclude, load_config
@@ -542,5 +574,8 @@ if __name__ == "__main__":
         n_heads=config.get("n_heads", 8),
         attn_dropout=config.get("attn_dropout", 0.2),
         ff_dropout=config.get("ff_dropout", 0.1),
+        lambda_bound=config.get("lambda_bound", 0.0),
+        bound_lo=config.get("bound_lo", 0.0),
+        bound_hi=config.get("bound_hi", 7.0),
         config_dict=config,
     )
