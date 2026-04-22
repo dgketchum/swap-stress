@@ -184,21 +184,20 @@ def main():
         default=None,
         help="Output directory (default: <model-dir>/error_analysis/).",
     )
-    parser.add_argument(
-        "--resolution-m",
-        type=float,
-        default=9000,
-        help="Spatial grouping resolution in meters (default: 9000 = SMAP pixel).",
-    )
     args = parser.parse_args()
 
     model_path = Path(args.model_dir)
     output_dir = args.output_dir or os.path.join(args.model_dir, "error_analysis")
     os.makedirs(output_dir, exist_ok=True)
 
+    from error_analysis.reconstruct_test_set import _get_resolution_m
+
     with open(model_path / "direct_model_results.json") as f:
         model_results = json.load(f)
     config = model_results["config"]
+
+    resolution_m = _get_resolution_m(args.model_dir)
+    print(f"Using resolution_m={resolution_m} from model artifacts")
 
     with open(model_path / "direct_rf_features.json") as f:
         all_features = json.load(f)
@@ -212,7 +211,7 @@ def main():
 
     from map.learning.direct.data import assign_spatial_group
 
-    df["spatial_group"] = assign_spatial_group(df, resolution_m=args.resolution_m)
+    df["spatial_group"] = assign_spatial_group(df, resolution_m=resolution_m)
     df = df.dropna(subset=["spatial_group"])
     print(f"  {len(df)} observations, {df['spatial_group'].nunique()} spatial groups")
 

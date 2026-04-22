@@ -315,12 +315,6 @@ def main():
         default=None,
         help="Limit SMAP files processed (for testing).",
     )
-    parser.add_argument(
-        "--resolution-m",
-        type=float,
-        default=9000,
-        help="Spatial grouping resolution in meters (default: 9000 = SMAP pixel).",
-    )
     args = parser.parse_args()
 
     model_path = Path(args.model_dir)
@@ -333,7 +327,6 @@ def main():
     with open(model_path / "direct_model_results.json") as f:
         config = json.load(f)["config"]
 
-    # Reproduce the exact train/test split to get the training subset
     resolution_m = _get_resolution_m(args.model_dir)
     print(f"Reproducing split with resolution_m={resolution_m}...")
     data = prepare_direct_data(

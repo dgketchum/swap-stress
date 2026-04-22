@@ -83,8 +83,24 @@ def sample_beck_koppen(
 
 
 def _get_resolution_m(model_dir: str) -> float:
-    """Read the training-time resolution_m from reprod.json."""
+    """Read the training-time resolution_m from model artifacts.
+
+    Checks (in order):
+      1. direct_model_results.json  config.resolution_m
+      2. reprod.json  training.spatial_holdout.resolution_m
+    """
     model_path = Path(model_dir)
+
+    # Primary: saved config (written by train_direct.py)
+    results_path = model_path / "direct_model_results.json"
+    if results_path.exists():
+        with open(results_path) as f:
+            results = json.load(f)
+        res = results.get("config", {}).get("resolution_m")
+        if res is not None:
+            return float(res)
+
+    # Fallback: reprod.json (hand-written provenance)
     reprod_path = model_path / "reprod.json"
     if reprod_path.exists():
         with open(reprod_path) as f:
@@ -92,9 +108,11 @@ def _get_resolution_m(model_dir: str) -> float:
         res = reprod.get("training", {}).get("spatial_holdout", {}).get("resolution_m")
         if res is not None:
             return float(res)
+
     raise FileNotFoundError(
-        f"Cannot determine resolution_m: {reprod_path} missing or lacks "
-        "training.spatial_holdout.resolution_m"
+        f"Cannot determine resolution_m from {model_dir}: "
+        "neither config.resolution_m in direct_model_results.json "
+        "nor training.spatial_holdout.resolution_m in reprod.json found"
     )
 
 
@@ -159,12 +177,47 @@ def _build_test_set(model_dir: str) -> pd.DataFrame:
     return test_df
 
 
+def _validate_cache(cache_path: Path, model_dir: str) -> pd.DataFrame | None:
+    """Load and validate a cached test set. Returns None if stale."""
+    model_path = Path(model_dir)
+    results_path = model_path / "direct_model_results.json"
+    if not results_path.exists():
+        return None
+
+    with open(results_path) as f:
+        results = json.load(f)
+
+    n_expected = results["config"].get("n_test", 0)
+    r2_saved = results["overall_metrics"]["r2"]
+
+    test_df = pd.read_parquet(cache_path)
+
+    if n_expected and len(test_df) != n_expected:
+        print(f"Cache stale: {len(test_df)} rows, expected {n_expected}. Rebuilding.")
+        return None
+
+    if "observed" not in test_df.columns or "predicted" not in test_df.columns:
+        print("Cache stale: missing observed/predicted columns. Rebuilding.")
+        return None
+
+    r2_cache = 1 - np.sum((test_df["observed"] - test_df["predicted"]) ** 2) / np.sum(
+        (test_df["observed"] - test_df["observed"].mean()) ** 2
+    )
+    if abs(r2_cache - r2_saved) > 0.001:
+        print(f"Cache stale: R2={r2_cache:.4f} vs saved {r2_saved:.4f}. Rebuilding.")
+        return None
+
+    print(f"Loaded cached test set: {len(test_df)} rows from {cache_path}")
+    return test_df
+
+
 def reconstruct(model_dir: str = MODEL_DIR) -> pd.DataFrame:
     """Return the test DataFrame with observed, predicted, and all metadata.
 
     On first call, reproduces the spatial split using the training-time
-    resolution_m from reprod.json and saves the result to
-    ``<model_dir>/test_set_full.parquet``.  Subsequent calls load the cache.
+    resolution_m and saves the result to ``<model_dir>/test_set_full.parquet``.
+    Subsequent calls load and validate the cache (row count and R2 must match
+    the saved model artifacts); a stale cache triggers a rebuild.
 
     Returns
     -------
@@ -174,9 +227,9 @@ def reconstruct(model_dir: str = MODEL_DIR) -> pd.DataFrame:
     """
     cache_path = Path(model_dir) / TEST_SET_CACHE
     if cache_path.exists():
-        test_df = pd.read_parquet(cache_path)
-        print(f"Loaded cached test set: {len(test_df)} rows from {cache_path}")
-        return test_df
+        cached = _validate_cache(cache_path, model_dir)
+        if cached is not None:
+            return cached
 
     return _build_test_set(model_dir)
 

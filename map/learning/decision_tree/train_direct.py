@@ -162,6 +162,7 @@ def train_and_evaluate(
             "test_size": test_size,
             "random_state": random_state,
             "drop_blocking_features": drop_blocking_features,
+            "resolution_m": resolution_m,
         },
         model_family="rf",
     )
