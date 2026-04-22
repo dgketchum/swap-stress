@@ -343,7 +343,7 @@ def main():
         f"  Using {len(df)} training rows (excluded {len(data['test_df'])} test rows)"
     )
 
-    df["spatial_group"] = assign_spatial_group(df, resolution_m=args.resolution_m)
+    df["spatial_group"] = assign_spatial_group(df, resolution_m=resolution_m)
     df = df.dropna(subset=["spatial_group", "theta"])
     print(
         f"  {len(df)} training observations across "
