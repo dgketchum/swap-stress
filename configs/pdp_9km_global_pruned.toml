@@ -1,0 +1,28 @@
+run_type = "pdp"
+
+model_dir = "/nas/soils/swapstress/models/direct_rf_9km_global_pruned"
+output_dir = "/nas/soils/swapstress/models/direct_rf_9km_global_pruned/pdp"
+
+max_samples = 5000
+grid_resolution = 100
+random_state = 42
+
+features_1d = [
+    "theta",
+    "depth_cm",
+    "wc_tmax_winter",
+    "sand_0-5cm_mean",
+    "silt_5-15cm_mean",
+    "clay_0-5cm_mean",
+    "cec_5-15cm_mean",
+    "soc_0-5cm_mean",
+    "wc_prec_summer",
+    "eto_yearly_mean",
+]
+
+features_2d = [
+    ["theta", "clay_0-5cm_mean"],
+    ["theta", "depth_cm"],
+]
+
+ice_features = ["theta"]
