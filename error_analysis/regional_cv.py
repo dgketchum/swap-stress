@@ -28,7 +28,6 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 from error_analysis.reconstruct_test_set import sample_beck_koppen
-from map.learning.direct.data import prepare_direct_data
 from map.learning.direct.metrics import compute_metrics
 
 MODEL_DIR = "/nas/soils/swapstress/models/direct_rf_9km_global_pruned"
@@ -36,14 +35,17 @@ MODEL_DIR = "/nas/soils/swapstress/models/direct_rf_9km_global_pruned"
 
 def run_regional_cv(
     obs_table: str,
-    exclude_groups: list[str] | None,
+    all_features: list[str],
     n_estimators: int = 250,
     random_state: int = 42,
-    resolution_m: float = 250,
     min_samples: int = 100,
     level: str = "major",
 ) -> pd.DataFrame:
     """Run leave-one-climate-region-out CV using Beck et al. (2018) Koppen.
+
+    Uses the saved feature list from the model directory so that feature
+    selection is not re-derived from the full table (which would leak
+    held-out information into preprocessing).
 
     Parameters
     ----------
@@ -55,18 +57,8 @@ def run_regional_cv(
     pd.DataFrame
         One row per held-out region with overall metrics.
     """
-    data = prepare_direct_data(
-        obs_table_path=obs_table,
-        output_dir="/tmp/regional_cv_scratch",
-        exclude_groups=exclude_groups,
-        drop_blocking_features=True,
-        resolution_m=resolution_m,
-        test_size=0.0001,
-        random_state=random_state,
-    )
-
-    df = data["df"].dropna(subset=["theta", "log10_suction_cm"])
-    all_features = data["all_features"]
+    df = pd.read_parquet(obs_table)
+    df = df.dropna(subset=["theta", "log10_suction_cm", "lat", "lon"])
 
     # Must have lat/lon for Beck sampling
     df = df.dropna(subset=["lat", "lon"])
@@ -226,6 +218,9 @@ def main():
     config = model_results["config"]
     baseline = model_results["overall_metrics"]
 
+    with open(model_path / "direct_rf_features.json") as f:
+        all_features = json.load(f)
+
     levels = ["major", "subclass"] if args.level == "both" else [args.level]
 
     all_results = []
@@ -236,10 +231,9 @@ def main():
 
         results_df = run_regional_cv(
             obs_table=config["obs_table"],
-            exclude_groups=config.get("exclude_groups"),
+            all_features=all_features,
             n_estimators=args.n_estimators,
             random_state=config.get("random_state", 42),
-            resolution_m=config.get("resolution_m") or 250,
             min_samples=args.min_samples,
             level=level,
         )

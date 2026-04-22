@@ -30,9 +30,6 @@ from sklearn.ensemble import RandomForestRegressor
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-from map.learning.direct.data import (
-    prepare_direct_data,
-)
 from map.learning.direct.metrics import compute_metrics
 
 from error_analysis.conditional_bias import compute_conditional_bias
@@ -42,12 +39,15 @@ MODEL_DIR = "/nas/soils/swapstress/models/direct_rf_9km_global_pruned"
 
 def run_loso(
     obs_table: str,
-    exclude_groups: list[str] | None,
+    all_features: list[str],
     n_estimators: int = 250,
     random_state: int = 42,
-    resolution_m: float = 250,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Run leave-one-source-out CV.
+
+    Uses the saved feature list from the model directory so that feature
+    selection is not re-derived from the full table (which would leak
+    held-out information into preprocessing).
 
     Returns
     -------
@@ -57,6 +57,7 @@ def run_loso(
         Conditional bias by theta-decile per fold.
     """
     full_df = pd.read_parquet(obs_table)
+    full_df = full_df.dropna(subset=["theta", "log10_suction_cm", "lat", "lon"])
     sources = sorted(full_df["source"].unique())
     print(f"Sources: {sources}")
 
@@ -67,26 +68,8 @@ def run_loso(
         print(f"\n{'=' * 60}")
         print(f"LOSO fold: holding out {held_out}")
 
-        # Load full data through prepare_direct_data for consistent feature
-        # selection and blocking-feature filtering
-        data = prepare_direct_data(
-            obs_table_path=obs_table,
-            output_dir="/tmp/loso_scratch",
-            exclude_groups=exclude_groups,
-            drop_blocking_features=True,
-            resolution_m=resolution_m,
-            test_size=0.0001,
-            random_state=random_state,
-        )
-        df = data["df"]
-        all_features = data["all_features"]
-
-        # Split by source
-        train_mask = df["source"] != held_out
-        test_mask = df["source"] == held_out
-
-        train_df = df[train_mask].dropna(subset=["theta", "log10_suction_cm"])
-        test_df = df[test_mask].dropna(subset=["theta", "log10_suction_cm"])
+        train_df = full_df[full_df["source"] != held_out]
+        test_df = full_df[full_df["source"] == held_out]
 
         if len(test_df) < 10:
             print(f"  Skipping {held_out}: only {len(test_df)} test samples")
@@ -225,12 +208,14 @@ def main():
 
     config = model_results["config"]
 
+    with open(model_path / "direct_rf_features.json") as f:
+        all_features = json.load(f)
+
     results_df, conditional_df = run_loso(
         obs_table=config["obs_table"],
-        exclude_groups=config.get("exclude_groups"),
+        all_features=all_features,
         n_estimators=args.n_estimators,
         random_state=config.get("random_state", 42),
-        resolution_m=config.get("resolution_m") or 250,
     )
 
     results_df.to_csv(os.path.join(output_dir, "loso_results.csv"), index=False)

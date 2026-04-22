@@ -2,9 +2,10 @@
 Reconstruct the full test set for the global-pruned RF model.
 
 The saved predictions.parquet has only (observed, predicted, source).
-This module re-runs prepare_direct_data() with the same config to recover
-theta, depth_cm, lat, lon, spatial_group, and all features for the test set.
-It also loads the trained model to regenerate predictions in the same row order.
+This module identifies test rows by running the saved model on all candidate
+rows and matching the output to predictions.parquet.  This avoids dependence
+on reproducing the exact spatial split, which requires parameters
+(resolution_m) that were not persisted in early model configs.
 """
 
 from __future__ import annotations
@@ -15,8 +16,6 @@ from pathlib import Path
 import joblib
 import numpy as np
 import pandas as pd
-
-from map.learning.direct.data import assign_spatial_group, prepare_direct_data
 
 MODEL_DIR = "/nas/soils/swapstress/models/direct_rf_9km_global_pruned"
 
@@ -77,65 +76,102 @@ def sample_beck_koppen(
     return codes, labels, major
 
 
-def reconstruct(model_dir: str = MODEL_DIR) -> pd.DataFrame:
-    """Return the test DataFrame with observed, predicted, and all metadata.
+def load_table_and_model(
+    model_dir: str = MODEL_DIR,
+) -> tuple[pd.DataFrame, list[str], object, object, dict]:
+    """Load the full observation table, saved feature list, model, and imputer.
 
-    Returns
-    -------
-    pd.DataFrame
-        Test-set rows with columns: observed, predicted, theta, depth_cm,
-        source, sample_id, lat, lon, spatial_group, plus all feature columns.
+    Returns (df, all_features, model, imputer, config).
     """
     model_path = Path(model_dir)
 
     with open(model_path / "direct_model_results.json") as f:
         results = json.load(f)
-
     config = results["config"]
-    obs_table = config["obs_table"]
-    exclude_groups = config.get("exclude_groups")
-    test_size = config.get("test_size", 0.2)
-    random_state = config.get("random_state", 42)
-    resolution_m = config.get("resolution_m") or 250
 
-    split_manifest = str(model_path / "spatial_split.json")
-    manifest_exists = Path(split_manifest).exists()
+    with open(model_path / "direct_rf_features.json") as f:
+        all_features = json.load(f)
 
-    data = prepare_direct_data(
-        obs_table_path=obs_table,
-        output_dir=model_dir,
-        exclude_groups=exclude_groups,
-        drop_blocking_features=config.get("drop_blocking_features", True),
-        resolution_m=resolution_m,
-        test_size=test_size,
-        random_state=random_state,
-        split_manifest=split_manifest if manifest_exists else None,
-    )
-
-    test_df = data["test_df"].copy()
-    all_features = data["all_features"]
-
-    # Load model and imputer, regenerate predictions
     model = joblib.load(model_path / "direct_rf_model.joblib")
     imputer = joblib.load(model_path / "direct_rf_imputer.joblib")
 
-    X_test = test_df[all_features].values.astype(np.float32)
-    X_test = imputer.transform(X_test)
-    y_pred = model.predict(X_test).astype(np.float32)
+    df = pd.read_parquet(config["obs_table"])
+    df = df.dropna(subset=["theta", "log10_suction_cm", "lat", "lon"])
 
-    test_df["observed"] = test_df["log10_suction_cm"].values
-    test_df["predicted"] = y_pred
-    test_df["spatial_group"] = assign_spatial_group(test_df, resolution_m=resolution_m)
+    return df, all_features, model, imputer, config
+
+
+def reconstruct(model_dir: str = MODEL_DIR) -> pd.DataFrame:
+    """Return the test DataFrame with observed, predicted, and all metadata.
+
+    Identifies test rows by predicting on every candidate row with the saved
+    model+imputer and matching (predicted, observed, source) triples to the
+    stored predictions.parquet.  This is deterministic and independent of
+    the spatial-split parameters.
+
+    Returns
+    -------
+    pd.DataFrame
+        Test-set rows with columns: observed, predicted, theta, depth_cm,
+        source, sample_id, lat, lon, plus all feature columns.
+    """
+    model_path = Path(model_dir)
+    predictions = pd.read_parquet(model_path / "predictions.parquet")
+    n_expected = len(predictions)
+
+    df, all_features, model, imputer, config = load_table_and_model(model_dir)
+
+    # Predict on every row with the saved model and imputer.
+    # Keep float64 to match the precision stored in predictions.parquet.
+    X = df[all_features].values.astype(np.float32)
+    X = imputer.transform(X)
+    preds = model.predict(X)  # float64
+    df["predicted"] = preds
+    df["observed"] = df["log10_suction_cm"].values
+
+    # Build a set of target triples from predictions.parquet for matching.
+    # Round to 5 decimal places to absorb any float32/64 storage mismatch.
+    def _key(pred, obs, src):
+        return (round(float(pred), 5), round(float(obs), 5), src)
+
+    target_keys = {}
+    for _, row in predictions.iterrows():
+        k = _key(row["predicted"], row["observed"], row["source"])
+        target_keys[k] = target_keys.get(k, 0) + 1
+
+    # Match rows in the full table to the target set
+    match_counts = {}
+    mask = np.zeros(len(df), dtype=bool)
+    pred_arr = df["predicted"].values
+    obs_arr = df["observed"].values
+    src_arr = df["source"].values
+
+    for i in range(len(df)):
+        k = _key(pred_arr[i], obs_arr[i], src_arr[i])
+        if k in target_keys:
+            used = match_counts.get(k, 0)
+            if used < target_keys[k]:
+                mask[i] = True
+                match_counts[k] = used + 1
+
+    test_df = df[mask].copy()
+    if len(test_df) != n_expected:
+        print(
+            f"WARNING: matched {len(test_df)}/{n_expected} test rows "
+            f"(delta={len(test_df) - n_expected})"
+        )
+    else:
+        print(f"Matched all {n_expected} test rows")
 
     return test_df
 
 
 if __name__ == "__main__":
-    df = reconstruct()
+    test = reconstruct()
     out = Path(MODEL_DIR) / "test_set_full.parquet"
-    df.to_parquet(out, index=False)
-    print(f"Wrote {len(df)} rows to {out}")
-    print(f"Columns: {df.columns.tolist()[:15]}...")
+    test.to_parquet(out, index=False)
+    print(f"Wrote {len(test)} rows to {out}")
+    print(f"Columns: {test.columns.tolist()[:15]}...")
     print(
-        f"R2 check: {1 - np.sum((df['observed'] - df['predicted']) ** 2) / np.sum((df['observed'] - df['observed'].mean()) ** 2):.4f}"
+        f"R2 check: {1 - np.sum((test['observed'] - test['predicted']) ** 2) / np.sum((test['observed'] - test['observed'].mean()) ** 2):.4f}"
     )

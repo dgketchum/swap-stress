@@ -322,11 +322,41 @@ def main():
 
     os.makedirs(args.output_dir, exist_ok=True)
 
-    print("Loading training table...")
-    df = pd.read_parquet(args.obs_table)
-    df = df.dropna(subset=["theta", "lat", "lon"])
-
+    from error_analysis.reconstruct_test_set import load_table_and_model
     from map.learning.direct.data import assign_spatial_group
+
+    print("Loading training table and identifying train/test split...")
+    full_df, all_features, model, imputer, config = load_table_and_model()
+
+    # Predict on all rows to identify the test set (same as reconstruct)
+    predictions = pd.read_parquet(
+        os.path.join(
+            "/nas/soils/swapstress/models/direct_rf_9km_global_pruned",
+            "predictions.parquet",
+        )
+    )
+    preds = model.predict(
+        imputer.transform(full_df[all_features].values.astype(np.float32))
+    )  # keep float64 to match predictions.parquet
+    full_df["_pred"] = preds
+    full_df["_obs"] = full_df["log10_suction_cm"].values
+
+    def _key(pred, obs, src):
+        return (round(float(pred), 5), round(float(obs), 5), src)
+
+    test_keys = set()
+    for _, row in predictions.iterrows():
+        test_keys.add(_key(row["predicted"], row["observed"], row["source"]))
+
+    is_test = np.array(
+        [
+            _key(p, o, s) in test_keys
+            for p, o, s in zip(full_df["_pred"], full_df["_obs"], full_df["source"])
+        ]
+    )
+    df = full_df[~is_test].copy()
+    df = df.drop(columns=["_pred", "_obs"])
+    print(f"  Excluded {is_test.sum()} test rows, using {len(df)} training rows")
 
     df["spatial_group"] = assign_spatial_group(df, resolution_m=args.resolution_m)
     df = df.dropna(subset=["spatial_group"])
