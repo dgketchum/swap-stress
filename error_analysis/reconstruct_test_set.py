@@ -2,10 +2,12 @@
 Reconstruct the full test set for the global-pruned RF model.
 
 The saved predictions.parquet has only (observed, predicted, source).
-This module identifies test rows by running the saved model on all candidate
-rows and matching the output to predictions.parquet.  This avoids dependence
-on reproducing the exact spatial split, which requires parameters
-(resolution_m) that were not persisted in early model configs.
+This module reproduces the exact spatial split by calling
+``prepare_direct_data`` with the training-time ``resolution_m`` read from
+``reprod.json``, then predicts with the saved model+imputer.
+
+The result is cached as ``test_set_full.parquet`` so downstream consumers
+never re-derive the split.
 """
 
 from __future__ import annotations
@@ -17,7 +19,11 @@ import joblib
 import numpy as np
 import pandas as pd
 
+from map.learning.direct.data import prepare_direct_data
+
 MODEL_DIR = "/nas/soils/swapstress/models/direct_rf_9km_global_pruned"
+
+TEST_SET_CACHE = "test_set_full.parquet"
 
 BECK_KOPPEN_TIF = "/nas/soils/swapstress/ancillary/Beck_KG_V1_present_0p0083.tif"
 
@@ -76,38 +82,89 @@ def sample_beck_koppen(
     return codes, labels, major
 
 
-def load_table_and_model(
-    model_dir: str = MODEL_DIR,
-) -> tuple[pd.DataFrame, list[str], object, object, dict]:
-    """Load the full observation table, saved feature list, model, and imputer.
+def _get_resolution_m(model_dir: str) -> float:
+    """Read the training-time resolution_m from reprod.json."""
+    model_path = Path(model_dir)
+    reprod_path = model_path / "reprod.json"
+    if reprod_path.exists():
+        with open(reprod_path) as f:
+            reprod = json.load(f)
+        res = reprod.get("training", {}).get("spatial_holdout", {}).get("resolution_m")
+        if res is not None:
+            return float(res)
+    raise FileNotFoundError(
+        f"Cannot determine resolution_m: {reprod_path} missing or lacks "
+        "training.spatial_holdout.resolution_m"
+    )
 
-    Returns (df, all_features, model, imputer, config).
+
+def _build_test_set(model_dir: str) -> pd.DataFrame:
+    """Reproduce the spatial split and predict with the saved model.
+
+    Reads resolution_m from reprod.json, calls prepare_direct_data to
+    reproduce the exact train/test split, then predicts with the saved
+    model+imputer. The result is saved to ``<model_dir>/test_set_full.parquet``.
     """
     model_path = Path(model_dir)
 
     with open(model_path / "direct_model_results.json") as f:
         results = json.load(f)
     config = results["config"]
+    n_expected = results["config"].get("n_test", 0)
 
     with open(model_path / "direct_rf_features.json") as f:
         all_features = json.load(f)
 
+    resolution_m = _get_resolution_m(model_dir)
+    print(f"Reproducing split with resolution_m={resolution_m}")
+
+    data = prepare_direct_data(
+        obs_table_path=config["obs_table"],
+        output_dir="/tmp/reconstruct_scratch",
+        exclude_groups=config.get("exclude_groups"),
+        drop_blocking_features=config.get("drop_blocking_features", True),
+        resolution_m=resolution_m,
+        test_size=config.get("test_size", 0.2),
+        random_state=config.get("random_state", 42),
+    )
+
+    test_df = data["test_df"].copy()
+    if n_expected and len(test_df) != n_expected:
+        raise ValueError(
+            f"Reproduced split has {len(test_df)} test rows, "
+            f"expected {n_expected} from config"
+        )
+
     model = joblib.load(model_path / "direct_rf_model.joblib")
     imputer = joblib.load(model_path / "direct_rf_imputer.joblib")
 
-    df = pd.read_parquet(config["obs_table"])
-    df = df.dropna(subset=["theta", "log10_suction_cm", "lat", "lon"])
+    X = test_df[all_features].values.astype(np.float32)
+    X = imputer.transform(X)
+    test_df["predicted"] = model.predict(X)
+    test_df["observed"] = test_df["log10_suction_cm"].values
 
-    return df, all_features, model, imputer, config
+    # Verify against saved metrics
+    r2_ours = 1 - np.sum((test_df["observed"] - test_df["predicted"]) ** 2) / np.sum(
+        (test_df["observed"] - test_df["observed"].mean()) ** 2
+    )
+    r2_saved = results["overall_metrics"]["r2"]
+    print(f"Test set: {len(test_df)} rows, R2={r2_ours:.4f} (saved: {r2_saved:.4f})")
+    if abs(r2_ours - r2_saved) > 0.001:
+        print("WARNING: R2 mismatch — split may not be fully reproduced")
+
+    cache_path = model_path / TEST_SET_CACHE
+    test_df.to_parquet(cache_path, index=False)
+    print(f"Cached to {cache_path}")
+
+    return test_df
 
 
 def reconstruct(model_dir: str = MODEL_DIR) -> pd.DataFrame:
     """Return the test DataFrame with observed, predicted, and all metadata.
 
-    Identifies test rows by predicting on every candidate row with the saved
-    model+imputer and matching (predicted, observed, source) triples to the
-    stored predictions.parquet.  This is deterministic and independent of
-    the spatial-split parameters.
+    On first call, reproduces the spatial split using the training-time
+    resolution_m from reprod.json and saves the result to
+    ``<model_dir>/test_set_full.parquet``.  Subsequent calls load the cache.
 
     Returns
     -------
@@ -115,63 +172,22 @@ def reconstruct(model_dir: str = MODEL_DIR) -> pd.DataFrame:
         Test-set rows with columns: observed, predicted, theta, depth_cm,
         source, sample_id, lat, lon, plus all feature columns.
     """
-    model_path = Path(model_dir)
-    predictions = pd.read_parquet(model_path / "predictions.parquet")
-    n_expected = len(predictions)
+    cache_path = Path(model_dir) / TEST_SET_CACHE
+    if cache_path.exists():
+        test_df = pd.read_parquet(cache_path)
+        print(f"Loaded cached test set: {len(test_df)} rows from {cache_path}")
+        return test_df
 
-    df, all_features, model, imputer, config = load_table_and_model(model_dir)
-
-    # Predict on every row with the saved model and imputer.
-    # Keep float64 to match the precision stored in predictions.parquet.
-    X = df[all_features].values.astype(np.float32)
-    X = imputer.transform(X)
-    preds = model.predict(X)  # float64
-    df["predicted"] = preds
-    df["observed"] = df["log10_suction_cm"].values
-
-    # Build a set of target triples from predictions.parquet for matching.
-    # Round to 5 decimal places to absorb any float32/64 storage mismatch.
-    def _key(pred, obs, src):
-        return (round(float(pred), 5), round(float(obs), 5), src)
-
-    target_keys = {}
-    for _, row in predictions.iterrows():
-        k = _key(row["predicted"], row["observed"], row["source"])
-        target_keys[k] = target_keys.get(k, 0) + 1
-
-    # Match rows in the full table to the target set
-    match_counts = {}
-    mask = np.zeros(len(df), dtype=bool)
-    pred_arr = df["predicted"].values
-    obs_arr = df["observed"].values
-    src_arr = df["source"].values
-
-    for i in range(len(df)):
-        k = _key(pred_arr[i], obs_arr[i], src_arr[i])
-        if k in target_keys:
-            used = match_counts.get(k, 0)
-            if used < target_keys[k]:
-                mask[i] = True
-                match_counts[k] = used + 1
-
-    test_df = df[mask].copy()
-    if len(test_df) != n_expected:
-        print(
-            f"WARNING: matched {len(test_df)}/{n_expected} test rows "
-            f"(delta={len(test_df) - n_expected})"
-        )
-    else:
-        print(f"Matched all {n_expected} test rows")
-
-    return test_df
+    return _build_test_set(model_dir)
 
 
 if __name__ == "__main__":
+    # Force rebuild (delete cache first).
+    cache = Path(MODEL_DIR) / TEST_SET_CACHE
+    if cache.exists():
+        cache.unlink()
+        print(f"Deleted existing cache {cache}")
+
     test = reconstruct()
-    out = Path(MODEL_DIR) / "test_set_full.parquet"
-    test.to_parquet(out, index=False)
-    print(f"Wrote {len(test)} rows to {out}")
+    print(f"Rows: {len(test)}")
     print(f"Columns: {test.columns.tolist()[:15]}...")
-    print(
-        f"R2 check: {1 - np.sum((test['observed'] - test['predicted']) ** 2) / np.sum((test['observed'] - test['observed'].mean()) ** 2):.4f}"
-    )

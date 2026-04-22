@@ -15,6 +15,7 @@ Produces:
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
 from pathlib import Path
@@ -288,13 +289,15 @@ def plot_histograms(
 
 
 def main():
+    from error_analysis.reconstruct_test_set import MODEL_DIR
+
     parser = argparse.ArgumentParser(
-        description="Phase 1A: distribution-shift confrontation"
+        description="Section 5.4: distribution-shift confrontation"
     )
     parser.add_argument(
-        "--obs-table",
-        default="/nas/soils/swapstress/training/obs_level_training_9km_global.parquet",
-        help="Path to training table parquet.",
+        "--model-dir",
+        default=MODEL_DIR,
+        help="Path to trained model directory (for config and test-set cache).",
     )
     parser.add_argument(
         "--smap-dir",
@@ -303,8 +306,8 @@ def main():
     )
     parser.add_argument(
         "--output-dir",
-        default="/nas/soils/swapstress/models/direct_rf_9km_global_pruned/error_analysis",
-        help="Output directory.",
+        default=None,
+        help="Output directory (default: <model-dir>/error_analysis/).",
     )
     parser.add_argument(
         "--max-files",
@@ -315,53 +318,43 @@ def main():
     parser.add_argument(
         "--resolution-m",
         type=float,
-        default=250,
-        help="Spatial grouping resolution in meters.",
+        default=9000,
+        help="Spatial grouping resolution in meters (default: 9000 = SMAP pixel).",
     )
     args = parser.parse_args()
 
-    os.makedirs(args.output_dir, exist_ok=True)
+    model_path = Path(args.model_dir)
+    output_dir = args.output_dir or os.path.join(args.model_dir, "error_analysis")
+    os.makedirs(output_dir, exist_ok=True)
 
-    from error_analysis.reconstruct_test_set import load_table_and_model
-    from map.learning.direct.data import assign_spatial_group
+    from error_analysis.reconstruct_test_set import _get_resolution_m
+    from map.learning.direct.data import assign_spatial_group, prepare_direct_data
 
-    print("Loading training table and identifying train/test split...")
-    full_df, all_features, model, imputer, config = load_table_and_model()
+    with open(model_path / "direct_model_results.json") as f:
+        config = json.load(f)["config"]
 
-    # Predict on all rows to identify the test set (same as reconstruct)
-    predictions = pd.read_parquet(
-        os.path.join(
-            "/nas/soils/swapstress/models/direct_rf_9km_global_pruned",
-            "predictions.parquet",
-        )
+    # Reproduce the exact train/test split to get the training subset
+    resolution_m = _get_resolution_m(args.model_dir)
+    print(f"Reproducing split with resolution_m={resolution_m}...")
+    data = prepare_direct_data(
+        obs_table_path=config["obs_table"],
+        output_dir="/tmp/distshift_scratch",
+        exclude_groups=config.get("exclude_groups"),
+        drop_blocking_features=config.get("drop_blocking_features", True),
+        resolution_m=resolution_m,
+        test_size=config.get("test_size", 0.2),
+        random_state=config.get("random_state", 42),
     )
-    preds = model.predict(
-        imputer.transform(full_df[all_features].values.astype(np.float32))
-    )  # keep float64 to match predictions.parquet
-    full_df["_pred"] = preds
-    full_df["_obs"] = full_df["log10_suction_cm"].values
-
-    def _key(pred, obs, src):
-        return (round(float(pred), 5), round(float(obs), 5), src)
-
-    test_keys = set()
-    for _, row in predictions.iterrows():
-        test_keys.add(_key(row["predicted"], row["observed"], row["source"]))
-
-    is_test = np.array(
-        [
-            _key(p, o, s) in test_keys
-            for p, o, s in zip(full_df["_pred"], full_df["_obs"], full_df["source"])
-        ]
+    df = data["train_df"].copy()
+    print(
+        f"  Using {len(df)} training rows (excluded {len(data['test_df'])} test rows)"
     )
-    df = full_df[~is_test].copy()
-    df = df.drop(columns=["_pred", "_obs"])
-    print(f"  Excluded {is_test.sum()} test rows, using {len(df)} training rows")
 
     df["spatial_group"] = assign_spatial_group(df, resolution_m=args.resolution_m)
-    df = df.dropna(subset=["spatial_group"])
+    df = df.dropna(subset=["spatial_group", "theta"])
     print(
-        f"  {len(df)} observations across {df['spatial_group'].nunique()} spatial groups"
+        f"  {len(df)} training observations across "
+        f"{df['spatial_group'].nunique()} spatial groups"
     )
 
     print("Mapping training pixels to SMAP row/col...")
@@ -429,14 +422,14 @@ def main():
 
     stats_df = pd.DataFrame(stats_rows)
     stats_df.to_csv(
-        os.path.join(args.output_dir, "distribution_shift_stats.csv"), index=False
+        os.path.join(output_dir, "distribution_shift_stats.csv"), index=False
     )
     print("\nSaved distribution shift statistics")
 
     # Plots
-    plot_cdf_overlay(source_data, args.output_dir)
-    plot_qq(source_data, args.output_dir)
-    plot_histograms(source_data, args.output_dir)
+    plot_cdf_overlay(source_data, output_dir)
+    plot_qq(source_data, output_dir)
+    plot_histograms(source_data, output_dir)
 
 
 if __name__ == "__main__":

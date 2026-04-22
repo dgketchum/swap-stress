@@ -187,8 +187,8 @@ def main():
     parser.add_argument(
         "--resolution-m",
         type=float,
-        default=250,
-        help="Spatial grouping resolution in meters.",
+        default=9000,
+        help="Spatial grouping resolution in meters (default: 9000 = SMAP pixel).",
     )
     args = parser.parse_args()
 
