@@ -40,6 +40,7 @@ def build_comparison_table(run_dirs: list[str]) -> pd.DataFrame:
 
         row = {
             "run": r["run_name"],
+            "run_dir": r["run_dir"],
             "model_family": r.get("model_family", "rf"),
             "model_name": r.get("model_name", "random_forest"),
             "r2": om.get("r2"),
@@ -58,9 +59,17 @@ def build_comparison_table(run_dirs: list[str]) -> pd.DataFrame:
             row["val_rmse"] = r["validation_metrics"].get("val_rmse")
 
         config = r.get("config", {})
+        training = r.get("training_summary", {})
         row["n_features"] = config.get("n_features")
         row["n_train"] = config.get("n_train")
         row["n_test"] = config.get("n_test")
+        row["lambda_mono"] = config.get("lambda_mono", 0.0)
+        row["lambda_bound"] = config.get("lambda_bound", 0.0)
+        row["bound_lo"] = config.get("bound_lo")
+        row["bound_hi"] = config.get("bound_hi")
+        row["best_val_rmse"] = training.get("best_val_rmse")
+        row["best_epoch"] = training.get("best_epoch")
+        row["stopped_epoch"] = training.get("stopped_epoch")
 
         rows.append(row)
 
