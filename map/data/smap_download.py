@@ -90,7 +90,7 @@ def _conus_transform(row_slice: slice, col_slice: slice) -> Affine:
 
 def _parse_date_from_filename(filename: str) -> Optional[str]:
     """Extract YYYYMMDD from SMAP filename like SMAP_L3_SM_P_E_20150401_..."""
-    m = re.search(r"_(\d{8})_", filename)
+    m = re.search(r"_(\d{8})[_.]", filename)
     if m:
         return m.group(1)
     return None
