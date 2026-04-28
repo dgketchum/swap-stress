@@ -45,6 +45,9 @@ def train_and_evaluate(
     resolution_m: float = 250,
     split_manifest: Optional[str] = None,
     config_dict: Optional[Dict] = None,
+    holdout_col: Optional[str] = None,
+    n_folds: int = 5,
+    test_fold: int = 0,
 ) -> Dict:
     """
     Train direct RF model and evaluate with site-level holdout.
@@ -69,6 +72,12 @@ def train_and_evaluate(
         Random seed.
     drop_blocking_features : bool
         If True, remove features 100% missing for any source.
+    holdout_col : str or None
+        Column for spatial holdout (e.g. 'MGRS_TILE').  None = legacy.
+    n_folds : int
+        Number of folds for hash-based splitting.
+    test_fold : int
+        Which fold to hold out as test.
 
     Returns
     -------
@@ -91,6 +100,9 @@ def train_and_evaluate(
         val_size=val_size,
         random_state=random_state,
         split_manifest=split_manifest,
+        holdout_col=holdout_col,
+        n_folds=n_folds,
+        test_fold=test_fold,
     )
 
     df = data["df"]
@@ -107,16 +119,18 @@ def train_and_evaluate(
         train_sites = train_sites | data["val_sites"]
 
     # Write three-way split manifest so NN trainers can reuse the holdout
-    manifest_path = split_manifest or os.path.join(output_dir, "spatial_split.json")
-    if not os.path.exists(manifest_path):
-        write_split_manifest(
-            manifest_path,
-            train_groups=data["train_sites"],
-            test_groups=data["test_sites"],
-            val_groups=data.get("val_sites"),
-            random_state=random_state,
-            resolution_m=resolution_m,
-        )
+    # (kfold manifests are written by prepare_direct_data when holdout_col is set)
+    if holdout_col is None:
+        manifest_path = split_manifest or os.path.join(output_dir, "spatial_split.json")
+        if not os.path.exists(manifest_path):
+            write_split_manifest(
+                manifest_path,
+                train_groups=data["train_sites"],
+                test_groups=data["test_sites"],
+                val_groups=data.get("val_sites"),
+                random_state=random_state,
+                resolution_m=resolution_m,
+            )
 
     # Impute and build arrays
     X_train, X_test, y_train, y_test, imputer = prepare_rf_arrays(
@@ -155,6 +169,7 @@ def train_and_evaluate(
         test_sites=test_sites,
         resolution_m=resolution_m,
         feature_importance=importance_dict,
+        holdout_col=holdout_col,
         extra_config={
             "obs_table": obs_table_path,
             "exclude_groups": exclude_groups,
@@ -275,6 +290,30 @@ if __name__ == "__main__":
         default=None,
         help="Path to existing spatial_split.json (reuse holdout from prior run).",
     )
+    parser.add_argument(
+        "--holdout-col",
+        type=str,
+        default=None,
+        help="Column for spatial holdout (e.g. 'MGRS_TILE'). Default: legacy coords.",
+    )
+    parser.add_argument(
+        "--n-folds",
+        type=int,
+        default=None,
+        help="Number of folds for hash-based splitting (default: 5).",
+    )
+    parser.add_argument(
+        "--test-fold",
+        type=int,
+        default=None,
+        help="Which fold to hold out as test (default: 0).",
+    )
+    parser.add_argument(
+        "--kfold",
+        action="store_true",
+        default=False,
+        help="Run full k-fold cross-validation instead of single holdout.",
+    )
     args = parser.parse_args()
 
     from map.config import feature_groups_to_exclude, load_config
@@ -291,15 +330,43 @@ if __name__ == "__main__":
     if config.get("feature_groups") is not None:
         exclude_groups = feature_groups_to_exclude(config["feature_groups"])
 
-    train_and_evaluate(
-        obs_table_path=config["obs_table"],
-        output_dir=config["output_dir"],
-        exclude_groups=exclude_groups,
-        n_estimators=config.get("n_estimators", 250),
-        test_size=config.get("test_size", 0.2),
-        val_size=config.get("val_size", 0.2),
-        random_state=config.get("random_state", 42),
-        resolution_m=config.get("resolution_m", 250),
-        split_manifest=config.get("split_manifest"),
-        config_dict=config,
-    )
+    holdout_col = config.get("holdout_col")
+    n_folds = config.get("n_folds", 5)
+    do_kfold = args.kfold or config.get("kfold", False)
+
+    if do_kfold:
+        from map.learning.direct.crossval import run_kfold_cv
+
+        run_kfold_cv(
+            obs_table_path=config["obs_table"],
+            output_dir=config["output_dir"],
+            n_folds=n_folds,
+            holdout_col=holdout_col or "MGRS_TILE",
+            trainer_fn=train_and_evaluate,
+            trainer_kwargs={
+                "exclude_groups": exclude_groups,
+                "n_estimators": config.get("n_estimators", 250),
+                "test_size": config.get("test_size", 0.2),
+                "val_size": config.get("val_size", 0.2),
+                "random_state": config.get("random_state", 42),
+                "drop_blocking_features": True,
+                "resolution_m": config.get("resolution_m", 250),
+                "config_dict": config,
+            },
+        )
+    else:
+        train_and_evaluate(
+            obs_table_path=config["obs_table"],
+            output_dir=config["output_dir"],
+            exclude_groups=exclude_groups,
+            n_estimators=config.get("n_estimators", 250),
+            test_size=config.get("test_size", 0.2),
+            val_size=config.get("val_size", 0.2),
+            random_state=config.get("random_state", 42),
+            resolution_m=config.get("resolution_m", 250),
+            split_manifest=config.get("split_manifest"),
+            config_dict=config,
+            holdout_col=holdout_col,
+            n_folds=n_folds,
+            test_fold=config.get("test_fold", 0),
+        )

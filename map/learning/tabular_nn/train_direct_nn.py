@@ -81,6 +81,10 @@ def train_and_evaluate(
     bound_lo: float = 0.0,
     bound_hi: float = 7.0,
     lambda_mono: float = 0.0,
+    # Spatial holdout
+    holdout_col: Optional[str] = None,
+    n_folds: int = 5,
+    test_fold: int = 0,
     # Config/provenance
     config_dict: Optional[Dict] = None,
 ) -> Dict:
@@ -117,6 +121,9 @@ def train_and_evaluate(
         val_size=val_size,
         random_state=random_state,
         split_manifest=split_manifest,
+        holdout_col=holdout_col,
+        n_folds=n_folds,
+        test_fold=test_fold,
     )
 
     all_features = data["all_features"]
@@ -135,16 +142,18 @@ def train_and_evaluate(
     val_sites = data["val_sites"]
 
     # Write split manifest to the shared path (config-specified or output_dir)
-    manifest_path = split_manifest or os.path.join(output_dir, "spatial_split.json")
-    if not os.path.exists(manifest_path):
-        write_split_manifest(
-            manifest_path,
-            train_groups=train_sites,
-            test_groups=test_sites,
-            val_groups=val_sites,
-            random_state=random_state,
-            resolution_m=resolution_m,
-        )
+    # (kfold manifests are written by prepare_direct_data when holdout_col is set)
+    if holdout_col is None:
+        manifest_path = split_manifest or os.path.join(output_dir, "spatial_split.json")
+        if not os.path.exists(manifest_path):
+            write_split_manifest(
+                manifest_path,
+                train_groups=train_sites,
+                test_groups=test_sites,
+                val_groups=val_sites,
+                random_state=random_state,
+                resolution_m=resolution_m,
+            )
 
     # ------------------------------------------------------------------
     # 2. Preprocessing
@@ -400,6 +409,7 @@ def train_and_evaluate(
         test_sites=test_sites,
         resolution_m=resolution_m,
         feature_importance=None,
+        holdout_col=holdout_col,
         extra_config={
             "obs_table": obs_table_path,
             "exclude_groups": exclude_groups,
@@ -551,6 +561,30 @@ if __name__ == "__main__":
         default=None,
         help="Weight for monotonicity physics penalty (default: 0).",
     )
+    parser.add_argument(
+        "--holdout-col",
+        type=str,
+        default=None,
+        help="Column for spatial holdout (e.g. 'MGRS_TILE'). Default: legacy coords.",
+    )
+    parser.add_argument(
+        "--n-folds",
+        type=int,
+        default=None,
+        help="Number of folds for hash-based splitting (default: 5).",
+    )
+    parser.add_argument(
+        "--test-fold",
+        type=int,
+        default=None,
+        help="Which fold to hold out as test (default: 0).",
+    )
+    parser.add_argument(
+        "--kfold",
+        action="store_true",
+        default=False,
+        help="Run full k-fold cross-validation instead of single holdout.",
+    )
     args = parser.parse_args()
 
     from map.config import feature_groups_to_exclude, load_config
@@ -568,33 +602,78 @@ if __name__ == "__main__":
     if config.get("feature_groups") is not None:
         exclude_groups = feature_groups_to_exclude(config["feature_groups"])
 
-    train_and_evaluate(
-        obs_table_path=config["obs_table"],
-        output_dir=config["output_dir"],
-        model_name=config["model_name"],
-        exclude_groups=exclude_groups,
-        test_size=config.get("test_size", 0.2),
-        val_size=config.get("val_size", 0.2),
-        random_state=config.get("random_state", 42),
-        resolution_m=config.get("resolution_m", 250),
-        split_manifest=config.get("split_manifest"),
-        batch_size=config.get("batch_size", 1024),
-        max_epochs=config.get("max_epochs", 200),
-        learning_rate=config.get("learning_rate", 1e-3),
-        weight_decay=config.get("weight_decay", 1e-5),
-        patience=config.get("patience", 20),
-        hidden_dim=config.get("hidden_dim", 256),
-        num_hidden_layers=config.get("num_hidden_layers", 3),
-        dropout=config.get("dropout", 0.2),
-        embedding_dim=config.get("embedding_dim", 16),
-        d_token=config.get("d_token", 192),
-        n_blocks=config.get("n_blocks", 3),
-        n_heads=config.get("n_heads", 8),
-        attn_dropout=config.get("attn_dropout", 0.2),
-        ff_dropout=config.get("ff_dropout", 0.1),
-        lambda_bound=config.get("lambda_bound", 0.0),
-        bound_lo=config.get("bound_lo", 0.0),
-        bound_hi=config.get("bound_hi", 7.0),
-        lambda_mono=config.get("lambda_mono", 0.0),
-        config_dict=config,
-    )
+    holdout_col = config.get("holdout_col")
+    n_folds = config.get("n_folds", 5)
+    do_kfold = args.kfold or config.get("kfold", False)
+
+    if do_kfold:
+        from map.learning.direct.crossval import run_kfold_cv
+
+        run_kfold_cv(
+            obs_table_path=config["obs_table"],
+            output_dir=config["output_dir"],
+            n_folds=n_folds,
+            holdout_col=holdout_col or "MGRS_TILE",
+            trainer_fn=train_and_evaluate,
+            trainer_kwargs={
+                "model_name": config["model_name"],
+                "exclude_groups": exclude_groups,
+                "test_size": config.get("test_size", 0.2),
+                "val_size": config.get("val_size", 0.2),
+                "random_state": config.get("random_state", 42),
+                "resolution_m": config.get("resolution_m", 250),
+                "batch_size": config.get("batch_size", 1024),
+                "max_epochs": config.get("max_epochs", 200),
+                "learning_rate": config.get("learning_rate", 1e-3),
+                "weight_decay": config.get("weight_decay", 1e-5),
+                "patience": config.get("patience", 20),
+                "hidden_dim": config.get("hidden_dim", 256),
+                "num_hidden_layers": config.get("num_hidden_layers", 3),
+                "dropout": config.get("dropout", 0.2),
+                "embedding_dim": config.get("embedding_dim", 16),
+                "d_token": config.get("d_token", 192),
+                "n_blocks": config.get("n_blocks", 3),
+                "n_heads": config.get("n_heads", 8),
+                "attn_dropout": config.get("attn_dropout", 0.2),
+                "ff_dropout": config.get("ff_dropout", 0.1),
+                "lambda_bound": config.get("lambda_bound", 0.0),
+                "bound_lo": config.get("bound_lo", 0.0),
+                "bound_hi": config.get("bound_hi", 7.0),
+                "lambda_mono": config.get("lambda_mono", 0.0),
+                "config_dict": config,
+            },
+        )
+    else:
+        train_and_evaluate(
+            obs_table_path=config["obs_table"],
+            output_dir=config["output_dir"],
+            model_name=config["model_name"],
+            exclude_groups=exclude_groups,
+            test_size=config.get("test_size", 0.2),
+            val_size=config.get("val_size", 0.2),
+            random_state=config.get("random_state", 42),
+            resolution_m=config.get("resolution_m", 250),
+            split_manifest=config.get("split_manifest"),
+            batch_size=config.get("batch_size", 1024),
+            max_epochs=config.get("max_epochs", 200),
+            learning_rate=config.get("learning_rate", 1e-3),
+            weight_decay=config.get("weight_decay", 1e-5),
+            patience=config.get("patience", 20),
+            hidden_dim=config.get("hidden_dim", 256),
+            num_hidden_layers=config.get("num_hidden_layers", 3),
+            dropout=config.get("dropout", 0.2),
+            embedding_dim=config.get("embedding_dim", 16),
+            d_token=config.get("d_token", 192),
+            n_blocks=config.get("n_blocks", 3),
+            n_heads=config.get("n_heads", 8),
+            attn_dropout=config.get("attn_dropout", 0.2),
+            ff_dropout=config.get("ff_dropout", 0.1),
+            lambda_bound=config.get("lambda_bound", 0.0),
+            bound_lo=config.get("bound_lo", 0.0),
+            bound_hi=config.get("bound_hi", 7.0),
+            lambda_mono=config.get("lambda_mono", 0.0),
+            holdout_col=holdout_col,
+            n_folds=n_folds,
+            test_fold=config.get("test_fold", 0),
+            config_dict=config,
+        )
