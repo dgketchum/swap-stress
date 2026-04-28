@@ -10,14 +10,21 @@ import pytest
 import torch
 
 from map.learning.direct.data import (
+    assign_mgrs_fold,
     assign_spatial_group,
-    create_site_split,
-    create_site_split_with_val,
+    apply_mgrs_split,
+    apply_mgrs_split_three,
     apply_site_split,
     apply_site_split_three,
-    write_split_manifest,
-    read_split_manifest,
+    create_mgrs_split,
+    create_mgrs_split_with_val,
+    create_site_split,
+    create_site_split_with_val,
     filter_complete_samples,
+    read_kfold_manifest,
+    read_split_manifest,
+    write_kfold_manifest,
+    write_split_manifest,
 )
 from map.learning.direct.metrics import (
     compute_metrics,
@@ -63,6 +70,19 @@ def tiny_df():
             "VH_mean": rng.uniform(-25, 0, n),
             "nlcd": rng.choice([11, 21, 41, 52, 71, 82], n),
             "depth_cm": rng.choice([5, 15, 30, 60], n),
+            "MGRS_TILE": rng.choice(
+                [
+                    "12TQK",
+                    "12TQL",
+                    "11SPA",
+                    "11SPB",
+                    "10TGK",
+                    "10TGL",
+                    "13TDE",
+                    "13TDF",
+                ],
+                n,
+            ),
         }
     )
     return df
@@ -167,6 +187,92 @@ class TestSplitManifest:
         write_split_manifest(path, {"a"}, {"b"}, random_state=7, resolution_m=250)
         loaded = read_split_manifest(path)
         assert loaded["val_groups"] is None
+
+
+class TestMGRSSplit:
+    def test_assign_mgrs_fold_deterministic(self, tiny_df):
+        """Same tile always maps to same fold regardless of input ordering."""
+        folds1 = assign_mgrs_fold(tiny_df, n_folds=5)
+        shuffled = tiny_df.sample(frac=1, random_state=99).reset_index(drop=True)
+        folds2 = assign_mgrs_fold(shuffled, n_folds=5)
+        # Compare tile->fold mapping, not row order
+        map1 = dict(zip(tiny_df["MGRS_TILE"], folds1))
+        map2 = dict(zip(shuffled["MGRS_TILE"], folds2))
+        assert map1 == map2
+
+    def test_assign_mgrs_fold_stable_across_data_changes(self, tiny_df):
+        """Adding rows doesn't change fold assignment of existing tiles."""
+        folds_before = assign_mgrs_fold(tiny_df, n_folds=5)
+        map_before = dict(zip(tiny_df["MGRS_TILE"], folds_before))
+        # Add new rows with a new tile
+        extra = pd.DataFrame(
+            {
+                "lat": [40.0, 41.0],
+                "lon": [-100.0, -101.0],
+                "MGRS_TILE": ["99XYZ", "99XYZ"],
+                "theta": [0.2, 0.3],
+                "log10_suction_cm": [2.0, 2.5],
+                "source": ["test", "test"],
+                "elevation": [500, 600],
+                "slope": [5, 10],
+                "clay_mean": [20, 30],
+                "B5_mean_gs": [1000, 2000],
+                "VH_mean": [-10, -15],
+                "nlcd": [41, 41],
+                "depth_cm": [15, 30],
+            }
+        )
+        bigger = pd.concat([tiny_df, extra], ignore_index=True)
+        folds_after = assign_mgrs_fold(bigger, n_folds=5)
+        map_after = dict(zip(bigger["MGRS_TILE"], folds_after))
+        for tile, fold in map_before.items():
+            assert map_after[tile] == fold
+
+    def test_create_mgrs_split_disjoint(self, tiny_df):
+        train, test = create_mgrs_split(tiny_df, n_folds=5, test_fold=0)
+        assert len(train & test) == 0
+        assert len(train) > 0
+        assert len(test) > 0
+
+    def test_mgrs_split_with_val_three_way_disjoint(self, tiny_df):
+        train, val, test = create_mgrs_split_with_val(tiny_df, n_folds=5, test_fold=0)
+        assert len(train & val) == 0
+        assert len(train & test) == 0
+        assert len(val & test) == 0
+        assert len(train) > 0
+        assert len(val) > 0
+        assert len(test) > 0
+
+    def test_kfold_all_data_covered(self, tiny_df):
+        """Union of all test folds covers all tiles exactly once."""
+        all_tiles = set(tiny_df["MGRS_TILE"].dropna().unique())
+        seen = set()
+        for k in range(5):
+            _, test_tiles = create_mgrs_split(tiny_df, n_folds=5, test_fold=k)
+            assert len(seen & test_tiles) == 0, f"Overlap at fold {k}"
+            seen |= test_tiles
+        assert seen == all_tiles
+
+    def test_apply_mgrs_split(self, tiny_df):
+        train_t, test_t = create_mgrs_split(tiny_df, n_folds=5, test_fold=0)
+        train_df, test_df = apply_mgrs_split(tiny_df, train_t, test_t)
+        assert len(train_df) + len(test_df) == len(tiny_df)
+        assert set(train_df["MGRS_TILE"].unique()) <= train_t
+        assert set(test_df["MGRS_TILE"].unique()) <= test_t
+
+    def test_apply_mgrs_split_three(self, tiny_df):
+        tr, va, te = create_mgrs_split_with_val(tiny_df, n_folds=5, test_fold=0)
+        tr_df, va_df, te_df = apply_mgrs_split_three(tiny_df, tr, va, te)
+        assert len(tr_df) + len(va_df) + len(te_df) == len(tiny_df)
+
+    def test_kfold_manifest_roundtrip(self, tmp_path):
+        tile_to_fold = {"12TQK": 0, "12TQL": 1, "11SPA": 2}
+        path = str(tmp_path / "kfold.json")
+        write_kfold_manifest(path, tile_to_fold, n_folds=5, holdout_col="MGRS_TILE")
+        loaded = read_kfold_manifest(path)
+        assert loaded["tile_to_fold"] == tile_to_fold
+        assert loaded["n_folds"] == 5
+        assert loaded["holdout_col"] == "MGRS_TILE"
 
 
 class TestFilterComplete:
