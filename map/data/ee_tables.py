@@ -22,7 +22,6 @@ CATEGORIES = [
 DROPCOLS_250M = [
     ".geo",
     "system:index",
-    "MGRS_TILE",
     "name",
     "has_swp",
     "source",
@@ -197,6 +196,8 @@ def convert_single_csv_to_parquet(
 
     coords["lat"] = pd.to_numeric(coords["lat"], errors="coerce")
     coords["lon"] = pd.to_numeric(coords["lon"], errors="coerce")
+    if "MGRS_TILE" in gdf.columns:
+        coords["MGRS_TILE"] = gdf["MGRS_TILE"]
     df = df.join(coords, how="left")
 
     df = df[sorted(df.columns.to_list())]
