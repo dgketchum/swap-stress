@@ -29,16 +29,41 @@ from map.config import load_config, write_provenance
 from map.data.ee_feature_list import label_feature
 
 _EXTRA_LABELS = {
-    "theta": r"$\theta$ (volumetric water content)",
+    "theta": r"$\theta$ (m$^3$ m$^{-3}$)",
     "depth_cm": "Measurement depth (cm)",
     "rosetta_level": "Rosetta depth level",
+}
+
+# Units not conveyed by label_feature(). SoilGrids uses g/kg for texture,
+# mmol(c)/kg for CEC, dg/kg for SOC. WorldClim stores temperature as
+# °C × 10 and precipitation as mm. ET0 is mm/year.
+_UNIT_SUFFIXES = {
+    "clay": "g/kg",
+    "sand": "g/kg",
+    "silt": "g/kg",
+    "cec": "mmol(c)/kg",
+    "soc": "dg/kg",
+    "ocd": "hg/m³",
+    "nitrogen": "cg/kg",
+    "bdod": "cg/cm³",
+    "cfvo": "cm³/dm³",
+    "phh2o": "pH × 10",
+    "wc_tmax": "°C × 10",
+    "wc_tmin": "°C × 10",
+    "wc_tavg": "°C × 10",
+    "wc_prec": "mm",
+    "eto": "mm",
 }
 
 
 def _label(feature_name: str) -> str:
     if feature_name in _EXTRA_LABELS:
         return _EXTRA_LABELS[feature_name]
-    return label_feature(feature_name)
+    lbl = label_feature(feature_name)
+    for prefix, unit in _UNIT_SUFFIXES.items():
+        if feature_name.startswith(prefix):
+            return f"{lbl} ({unit})"
+    return lbl
 
 
 # ---------------------------------------------------------------------------
@@ -289,6 +314,9 @@ def plot_2d(
 
     fig, ax = plt.subplots(figsize=(8, 6))
     XX, YY = np.meshgrid(gx, gy)
+    # sklearn returns average with shape (len(gx), len(gy)); contourf after
+    # meshgrid expects (len(gy), len(gx)), so transpose.
+    Z = Z.T
     cf = ax.contourf(XX, YY, Z, levels=20, cmap="plasma")
     cs = ax.contour(
         XX, YY, Z, levels=[1.5, 2.0, 2.5, 3.0, 3.5], colors="white", linewidths=0.8
