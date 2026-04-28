@@ -126,7 +126,18 @@ def build_smap_l3_vwc_clim(roi):
 
 
 def build_landcover(roi):
-    """Land cover composites: C3S, GLC10, GSW, NLCD, CDL (~8 bands)."""
+    """Land cover composites: global + CONUS layers (~8 bands).
+
+    Bundles all land cover layers for backward-compatible CONUS extraction.
+    For global extraction use build_landcover_global instead.
+    """
+    global_lc = build_landcover_global(roi)
+    conus_lc = build_landcover_conus(roi)
+    return ee.Image.cat([global_lc, conus_lc])
+
+
+def build_landcover_global(roi):
+    """Global land cover: GSW, C3S LCCS, GLC10 (3 bands)."""
     gsw = (
         ee.Image("JRC/GSW1_4/GlobalSurfaceWater")
         .select("occurrence")
@@ -146,6 +157,11 @@ def build_landcover(roi):
         .mosaic()
         .rename("glc10_lc")
     )
+    return ee.Image.cat([gsw, c3s, glc10])
+
+
+def build_landcover_conus(roi):
+    """CONUS-only land cover: NLCD, CDL composites (4 bands)."""
     nlcd = (
         ee.ImageCollection("USGS/NLCD_RELEASES/2019_REL/NLCD")
         .select("landcover")
@@ -182,7 +198,7 @@ def build_landcover(roi):
         .resample("bilinear")
     )
 
-    return ee.Image.cat([gsw, c3s, glc10, nlcd, cultivated, crop_mode, simple_crop])
+    return ee.Image.cat([nlcd, cultivated, crop_mode, simple_crop])
 
 
 def build_fao_hwsd(roi):
@@ -310,7 +326,10 @@ def build_polaris(roi):
 
 
 def build_terrain(roi):
-    """Terrain: elevation, slope, aspect, TPI, TWI, topoDiversity, lithology (~8 bands)."""
+    """Terrain: elevation, slope, aspect, TPI, TWI, topoDiversity, lithology (~8 bands).
+
+    Uses USGS 3DEP 10m DEM (CONUS only).
+    """
     dem = ee.Image("USGS/3DEP/10m")
     terrain = ee.Terrain.products(dem).select("elevation", "slope", "aspect")
     tpi_10000 = (
@@ -327,6 +346,31 @@ def build_terrain(roi):
     topo_div = ee.Image("CSP/ERGo/1_0/US/topoDiversity")
     us_lith = ee.Image("CSP/ERGo/1_0/US/lithology").rename("us_lith")
     return ee.Image.cat([terrain, tpi_10000, tpi_22500, twi, topo_div, us_lith])
+
+
+def build_terrain_global(roi):
+    """Terrain: elevation, slope, aspect, TPI (5 bands).
+
+    Uses ASTER GDEM for global coverage. Excludes TWI, topoDiversity,
+    and US lithology which are CONUS-only datasets.
+    """
+    dem = (
+        ee.Image("projects/sat-io/open-datasets/ASTER/GDEM")
+        .select("b1")
+        .rename("elevation")
+    )
+    terrain = ee.Terrain.products(dem).select("slope", "aspect").addBands(dem)
+    tpi_10000 = (
+        dem.subtract(dem.focal_mean(10000, "circle", "meters"))
+        .add(0.5)
+        .rename("tpi_10000")
+    )
+    tpi_22500 = (
+        dem.subtract(dem.focal_mean(22500, "circle", "meters"))
+        .add(0.5)
+        .rename("tpi_22500")
+    )
+    return ee.Image.cat([terrain, tpi_10000, tpi_22500])
 
 
 def build_sentinel1(roi):
@@ -355,6 +399,29 @@ def build_sentinel1(roi):
 # Feature group registry
 # ---------------------------------------------------------------------------
 
+# -- Global groups: available worldwide --
+GLOBAL_GROUPS = {
+    "soilgrids_shallow": (build_soilgrids_shallow, "soilgrids_9km"),
+    "worldclim": (build_worldclim, "worldclim_9km"),
+    "smap_l3_vwc_clim": (build_smap_l3_vwc_clim, "smap_l3_clim_9km"),
+    "landcover_global": (build_landcover_global, "landcover_global_9km"),
+    "fao_hwsd": (build_fao_hwsd, "fao_hwsd_9km"),
+    "landsat_bands": (build_landsat_bands, "landsat_bands_9km"),
+    "terrain_global": (build_terrain_global, "terrain_global_9km"),
+    "sentinel1": (build_sentinel1, "sentinel1_9km"),
+}
+
+# -- CONUS-only groups: require US-specific datasets --
+CONUS_GROUPS = {
+    "landcover_conus": (build_landcover_conus, "landcover_conus_9km"),
+    "prism": (build_prism, "prism_normals_9km"),
+    "ssurgo": (build_ssurgo, "ssurgo_9km"),
+    "polaris": (build_polaris, "polaris_9km"),
+    "terrain": (build_terrain, "terrain_9km"),
+}
+
+# All groups for CONUS extraction (backward-compatible).
+# Uses build_landcover (global + CONUS combined) instead of the split versions.
 FEATURE_GROUPS = {
     "soilgrids_shallow": (build_soilgrids_shallow, "soilgrids_9km"),
     "worldclim": (build_worldclim, "worldclim_9km"),
@@ -440,17 +507,20 @@ def export_points(groups, shapefile, index_col, bucket, prefix):
 # ---------------------------------------------------------------------------
 
 
+_ALL_GROUPS = {**FEATURE_GROUPS, **GLOBAL_GROUPS, **CONUS_GROUPS}
+
+
 def _resolve_groups(group_str):
-    """Parse --groups flag into a dict subset of FEATURE_GROUPS."""
+    """Parse --groups flag into a dict subset of known groups."""
     if group_str == "all":
         return dict(FEATURE_GROUPS)
     names = [g.strip() for g in group_str.split(",")]
     resolved = {}
     for n in names:
-        if n not in FEATURE_GROUPS:
-            available = ", ".join(FEATURE_GROUPS.keys())
+        if n not in _ALL_GROUPS:
+            available = ", ".join(sorted(_ALL_GROUPS.keys()))
             raise ValueError(f"Unknown group '{n}'. Available: {available}")
-        resolved[n] = FEATURE_GROUPS[n]
+        resolved[n] = _ALL_GROUPS[n]
     return resolved
 
 
@@ -461,6 +531,13 @@ def main():
     parser.add_argument("--mode", required=True, choices=["rasters", "points"])
     parser.add_argument(
         "--groups", default="all", help="Comma-separated group names or 'all'"
+    )
+    parser.add_argument(
+        "--region",
+        default="conus",
+        choices=["conus", "global"],
+        help="Region scope: 'conus' uses all groups incl. CONUS-only datasets; "
+        "'global' excludes CONUS-only groups and uses ASTER terrain.",
     )
     parser.add_argument(
         "--shapefile", help="Point shapefile (required for points mode)"
@@ -479,7 +556,14 @@ def main():
     print(f"Data root: {DATA_ROOT}")
 
     is_authorized(project=args.project)
-    groups = _resolve_groups(args.groups)
+
+    if args.groups == "all":
+        groups = (
+            dict(GLOBAL_GROUPS) if args.region == "global" else dict(FEATURE_GROUPS)
+        )
+    else:
+        groups = _resolve_groups(args.groups)
+    print(f"Region: {args.region}")
     print(f"Groups: {', '.join(groups.keys())}")
 
     if args.mode == "rasters":
