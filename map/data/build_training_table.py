@@ -434,15 +434,17 @@ def load_source_observations(
     # CSV identifiers are like 'US-CDM_1', 'IN-Martell_ControlDH'
     # EE table has site-only like 'US_CDM', 'IN_Martell'
     if source.name == "reesh" and source.index_col == "site_id":
-        # Extract site portion: take first part before underscore, normalize hyphens
+        # Extract site portion: take first part before underscore, normalize hyphens.
+        # Case-fold both sides because the raw CSV Site column (used for preprocessed
+        # filenames) and the shapefile site_id (used for EE extraction) sometimes
+        # differ in capitalization (e.g. US-HA1 vs US_Ha1).
         def extract_reesh_site(identifier):
-            # Split on underscore and take first part (the site code)
             parts = str(identifier).split("_")
             site = parts[0]
-            # Normalize hyphen to underscore to match EE table format
-            return site.replace("-", "_")
+            return site.replace("-", "_").upper()
 
         obs_df[source.index_col] = obs_df[source.index_col].apply(extract_reesh_site)
+        ee_df[source.index_col] = ee_df[source.index_col].str.upper()
 
     # Merge observations with EE features (replicates features for each observation)
     merged = obs_df.merge(
