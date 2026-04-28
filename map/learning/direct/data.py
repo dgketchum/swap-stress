@@ -7,6 +7,7 @@ identical data with identical holdout partitions.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from typing import Dict, List, Optional, Set, Tuple
@@ -328,6 +329,210 @@ def upgrade_legacy_split_manifest(
 
 
 # ---------------------------------------------------------------------------
+# MGRS-tile hash-based spatial splitting
+# ---------------------------------------------------------------------------
+
+
+def _tile_to_fold(tile_id: str, n_folds: int) -> int:
+    """Map a tile ID to a fold index via MD5 hash."""
+    h = hashlib.md5(str(tile_id).encode()).hexdigest()
+    return int(h, 16) % n_folds
+
+
+def assign_mgrs_fold(
+    df: pd.DataFrame,
+    n_folds: int = 5,
+    holdout_col: str = "MGRS_TILE",
+) -> pd.Series:
+    """Assign each row to a fold based on hash of its spatial-block ID.
+
+    Uses MD5 for uniform, deterministic, session-independent assignment.
+    The same tile always maps to the same fold regardless of what other
+    data is present.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Must contain *holdout_col*.
+    n_folds : int
+        Number of folds.
+    holdout_col : str
+        Column containing spatial unit IDs.
+
+    Returns
+    -------
+    pd.Series
+        Integer fold index (0 to n_folds-1).  NaN where holdout_col is missing.
+    """
+    result = pd.Series(np.nan, index=df.index)
+    valid = df[holdout_col].notna()
+    result[valid] = df.loc[valid, holdout_col].map(lambda t: _tile_to_fold(t, n_folds))
+    return result
+
+
+def create_mgrs_split(
+    df: pd.DataFrame,
+    n_folds: int = 5,
+    test_fold: int = 0,
+    holdout_col: str = "MGRS_TILE",
+) -> Tuple[Set[str], Set[str]]:
+    """Create train/test split by hashing spatial-block IDs to folds.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Must contain *holdout_col*.
+    n_folds : int
+        Number of folds.
+    test_fold : int
+        Which fold (0-based) to hold out as test.
+    holdout_col : str
+        Column with spatial unit IDs.
+
+    Returns
+    -------
+    tuple of (set, set)
+        (train_tiles, test_tiles)
+    """
+    tiles = df[holdout_col].dropna().unique()
+    test_tiles = {t for t in tiles if _tile_to_fold(t, n_folds) == test_fold}
+    train_tiles = set(tiles) - test_tiles
+    return train_tiles, test_tiles
+
+
+def create_mgrs_split_with_val(
+    df: pd.DataFrame,
+    n_folds: int = 5,
+    test_fold: int = 0,
+    val_fold: int | None = None,
+    holdout_col: str = "MGRS_TILE",
+) -> Tuple[Set[str], Set[str], Set[str]]:
+    """Three-way split from hash-based fold assignment.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Must contain *holdout_col*.
+    n_folds : int
+        Number of folds.
+    test_fold : int
+        Fold held out for testing.
+    val_fold : int or None
+        Fold held out for validation.  Defaults to ``(test_fold + 1) % n_folds``.
+    holdout_col : str
+        Column with spatial unit IDs.
+
+    Returns
+    -------
+    tuple of (set, set, set)
+        (train_tiles, val_tiles, test_tiles)
+    """
+    if val_fold is None:
+        val_fold = (test_fold + 1) % n_folds
+    tiles = df[holdout_col].dropna().unique()
+    test_tiles: Set[str] = set()
+    val_tiles: Set[str] = set()
+    train_tiles: Set[str] = set()
+    for t in tiles:
+        f = _tile_to_fold(t, n_folds)
+        if f == test_fold:
+            test_tiles.add(t)
+        elif f == val_fold:
+            val_tiles.add(t)
+        else:
+            train_tiles.add(t)
+    return train_tiles, val_tiles, test_tiles
+
+
+def apply_mgrs_split(
+    df: pd.DataFrame,
+    train_tiles: Set[str],
+    test_tiles: Set[str],
+    holdout_col: str = "MGRS_TILE",
+) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """Apply pre-computed MGRS tile split."""
+    return (
+        df[df[holdout_col].isin(train_tiles)].copy(),
+        df[df[holdout_col].isin(test_tiles)].copy(),
+    )
+
+
+def apply_mgrs_split_three(
+    df: pd.DataFrame,
+    train_tiles: Set[str],
+    val_tiles: Set[str],
+    test_tiles: Set[str],
+    holdout_col: str = "MGRS_TILE",
+) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Apply pre-computed three-way MGRS tile split."""
+    return (
+        df[df[holdout_col].isin(train_tiles)].copy(),
+        df[df[holdout_col].isin(val_tiles)].copy(),
+        df[df[holdout_col].isin(test_tiles)].copy(),
+    )
+
+
+# ---------------------------------------------------------------------------
+# K-fold manifest I/O
+# ---------------------------------------------------------------------------
+
+
+def write_kfold_manifest(
+    path: str,
+    tile_to_fold: Dict[str, int],
+    n_folds: int,
+    holdout_col: str = "MGRS_TILE",
+) -> str:
+    """Save a k-fold spatial split manifest to JSON.
+
+    Parameters
+    ----------
+    path : str
+        Output file path.
+    tile_to_fold : dict
+        Mapping of tile ID → fold index.
+    n_folds : int
+        Number of folds.
+    holdout_col : str
+        Column name used for grouping.
+
+    Returns
+    -------
+    str
+        Path written.
+    """
+    doc = {
+        "split_type": "kfold_mgrs",
+        "n_folds": n_folds,
+        "holdout_col": holdout_col,
+        "n_tiles": len(tile_to_fold),
+        "tile_to_fold": dict(sorted(tile_to_fold.items())),
+    }
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    with open(path, "w") as f:
+        json.dump(doc, f, indent=2)
+    print(f"Wrote k-fold manifest to {path}")
+    return path
+
+
+def read_kfold_manifest(path: str) -> Dict:
+    """Load a k-fold spatial split manifest.
+
+    Returns
+    -------
+    dict
+        Keys: tile_to_fold (dict), n_folds (int), holdout_col (str).
+    """
+    with open(path) as f:
+        doc = json.load(f)
+    return {
+        "tile_to_fold": doc["tile_to_fold"],
+        "n_folds": doc["n_folds"],
+        "holdout_col": doc.get("holdout_col", "MGRS_TILE"),
+    }
+
+
+# ---------------------------------------------------------------------------
 # Filtering
 # ---------------------------------------------------------------------------
 
@@ -421,6 +626,9 @@ def prepare_direct_data(
     val_size: float | None = None,
     random_state: int = 42,
     split_manifest: str | None = None,
+    holdout_col: str | None = None,
+    n_folds: int = 5,
+    test_fold: int = 0,
 ) -> Dict:
     """Load data, discover features, build spatial split — shared by RF and NN.
 
@@ -435,22 +643,31 @@ def prepare_direct_data(
     drop_blocking_features : bool
         Remove features 100% missing for any source.
     resolution_m : float
-        Spatial grouping grid cell size.
+        Spatial grouping grid cell size (legacy coordinate-based split).
     test_size : float
-        Fraction of groups for test.
+        Fraction of groups for test (legacy coordinate-based split).
     val_size : float or None
         If not None, fraction of non-test groups for validation (NN).
     random_state : int
-        Random seed.
+        Random seed (legacy coordinate-based split).
     split_manifest : str or None
         Path to existing split manifest JSON.  If provided, the split is
         loaded instead of created.
+    holdout_col : str or None
+        Column for spatial holdout (e.g. ``"MGRS_TILE"``).  When set, uses
+        hash-based deterministic fold assignment instead of coordinate
+        quantization.  None preserves legacy behavior.
+    n_folds : int
+        Number of folds for hash-based splitting (default 5).
+    test_fold : int
+        Which fold to hold out as test (0-based).
 
     Returns
     -------
     dict with keys:
         df, feature_cols, all_features, train_df, test_df,
-        train_sites, test_sites, val_df (if val_size), val_sites (if val_size)
+        train_sites, test_sites, val_df (if val_size), val_sites (if val_size),
+        holdout_col, n_folds, test_fold
     """
     os.makedirs(output_dir, exist_ok=True)
 
@@ -478,8 +695,60 @@ def prepare_direct_data(
     all_features = feature_cols + ["theta"]
     print(f"  Using {len(feature_cols)} features + theta")
 
-    # Spatial split
-    if split_manifest and os.path.exists(split_manifest):
+    # --- Spatial split ---
+    if holdout_col is not None:
+        # Hash-based MGRS tile split
+        if holdout_col not in df.columns:
+            raise ValueError(
+                f"holdout_col '{holdout_col}' not found in data. "
+                f"Available columns: {sorted(df.columns[:20].tolist())}..."
+            )
+        n_missing = df[holdout_col].isna().sum()
+        if n_missing:
+            print(
+                f"  Warning: {n_missing} rows missing {holdout_col}, "
+                f"will be excluded from train/test"
+            )
+
+        print(
+            f"Creating hash-based split on {holdout_col} "
+            f"(fold {test_fold}/{n_folds})..."
+        )
+        if val_size is not None:
+            train_sites, val_sites, test_sites = create_mgrs_split_with_val(
+                df,
+                n_folds=n_folds,
+                test_fold=test_fold,
+                holdout_col=holdout_col,
+            )
+        else:
+            train_sites, test_sites = create_mgrs_split(
+                df,
+                n_folds=n_folds,
+                test_fold=test_fold,
+                holdout_col=holdout_col,
+            )
+            val_sites = None
+
+        # Write kfold manifest
+        manifest_path = os.path.join(output_dir, "spatial_split.json")
+        tiles = df[holdout_col].dropna().unique()
+        tile_to_fold = {t: _tile_to_fold(t, n_folds) for t in tiles}
+        write_kfold_manifest(manifest_path, tile_to_fold, n_folds, holdout_col)
+
+        # Apply split
+        if val_sites is not None:
+            train_df, val_df, test_df = apply_mgrs_split_three(
+                df, train_sites, val_sites, test_sites, holdout_col=holdout_col
+            )
+        else:
+            train_df, test_df = apply_mgrs_split(
+                df, train_sites, test_sites, holdout_col=holdout_col
+            )
+            val_df = None
+
+    elif split_manifest and os.path.exists(split_manifest):
+        # Load existing legacy manifest
         print(f"Loading split manifest from {split_manifest}")
         manifest = read_split_manifest(split_manifest)
         if val_size is not None and manifest.get("val_groups") is None:
@@ -492,7 +761,18 @@ def prepare_direct_data(
         train_sites = manifest["train_groups"]
         test_sites = manifest["test_groups"]
         val_sites = manifest.get("val_groups")
+
+        if val_sites is not None:
+            train_df, val_df, test_df = apply_site_split_three(
+                df, train_sites, val_sites, test_sites, resolution_m=resolution_m
+            )
+        else:
+            train_df, test_df = apply_site_split(
+                df, train_sites, test_sites, "sample_id", resolution_m=resolution_m
+            )
+            val_df = None
     else:
+        # Legacy coordinate-based split
         print("Creating spatial-group split...")
         if val_size is not None:
             train_sites, val_sites, test_sites = create_site_split_with_val(
@@ -512,23 +792,15 @@ def prepare_direct_data(
             )
             val_sites = None
 
-    if val_sites is not None:
-        train_df, val_df, test_df = apply_site_split_three(
-            df,
-            train_sites,
-            val_sites,
-            test_sites,
-            resolution_m=resolution_m,
-        )
-    else:
-        train_df, test_df = apply_site_split(
-            df,
-            train_sites,
-            test_sites,
-            "sample_id",
-            resolution_m=resolution_m,
-        )
-        val_df = None
+        if val_sites is not None:
+            train_df, val_df, test_df = apply_site_split_three(
+                df, train_sites, val_sites, test_sites, resolution_m=resolution_m
+            )
+        else:
+            train_df, test_df = apply_site_split(
+                df, train_sites, test_sites, "sample_id", resolution_m=resolution_m
+            )
+            val_df = None
 
     # Drop rows missing theta or target
     train_df = train_df.dropna(subset=["theta", "log10_suction_cm"])
@@ -553,6 +825,9 @@ def prepare_direct_data(
         "test_df": test_df,
         "train_sites": train_sites,
         "test_sites": test_sites,
+        "holdout_col": holdout_col,
+        "n_folds": n_folds,
+        "test_fold": test_fold,
     }
     if val_df is not None:
         result["val_df"] = val_df

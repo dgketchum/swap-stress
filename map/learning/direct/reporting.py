@@ -38,6 +38,7 @@ def evaluate_and_report(
     model_name: str | None = None,
     validation_metrics: Dict[str, float] | None = None,
     training_summary: Dict[str, Any] | None = None,
+    holdout_col: str | None = None,
 ) -> Dict:
     """Run standard evaluation and write all artifacts.
 
@@ -100,7 +101,10 @@ def evaluate_and_report(
             )
 
     # Site-level metrics
-    spatial_groups = assign_spatial_group(test_df, resolution_m=resolution_m).values
+    if holdout_col and holdout_col in test_df.columns:
+        spatial_groups = test_df[holdout_col].values
+    else:
+        spatial_groups = assign_spatial_group(test_df, resolution_m=resolution_m).values
     site_metrics, site_summary = compute_metrics_by_site(y_test, y_pred, spatial_groups)
     print(
         f"\nSite-weighted: mean R2={site_summary['mean_r2']:.4f}, "
