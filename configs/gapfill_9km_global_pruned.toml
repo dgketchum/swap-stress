@@ -5,6 +5,6 @@ output_dir = "/nas/soils/swapstress/inference/predictions/direct_rf_9km_global_p
 
 prefix = "suction"
 band_description = "log10_suction_cm"
-start_date = "20240101"
-end_date = "20241231"
+start_date = "20150401"
+end_date = "20260415"
 overwrite = false
