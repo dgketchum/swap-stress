@@ -319,6 +319,12 @@ def standardize_lacadian(df, depth_col=None):
             dropped_reasons.append(f"KPA>{KPA_MAX}: {mask_high_kpa.sum()}")
             d = d[~mask_high_kpa]
 
+        # -0.1 kPa is the sensor floor (lower detection limit); drop clamped readings
+        mask_floor = d["KPA"].astype(float) >= -0.15
+        if mask_floor.sum() > 0:
+            dropped_reasons.append(f"KPA_floor(-0.1kPa): {mask_floor.sum()}")
+            d = d[~mask_floor]
+
         d["suction"] = np.abs(d["KPA"].astype(float).values * 10.19716)
         d["theta"] = d["VWC"].astype(float).values
     elif "suction_cm" in d.columns and "theta" in d.columns:
@@ -509,9 +515,9 @@ if __name__ == "__main__":
     run_gshp = False
     run_rosetta = False
     run_mt_mesonet = False
-    run_reesh = True
+    run_reesh = False
     run_ncss = False
-    run_lacadian = False
+    run_lacadian = True
 
     if run_gshp:
         gshp_dir_ = os.path.join("/nas", "soils", "soil_potential_obs", "gshp")
