@@ -263,6 +263,70 @@ def read_split_manifest(
     return result
 
 
+def upgrade_legacy_split_manifest(
+    path: str,
+    manifest: Dict,
+    val_size: float,
+    random_state: int,
+) -> Dict:
+    """Upgrade a legacy two-way manifest to include validation groups.
+
+    Preserves the existing test groups and splits the old train groups into
+    train/val using the provided ``val_size`` and ``random_state``.
+
+    Parameters
+    ----------
+    path : str
+        Manifest path to rewrite in place.
+    manifest : dict
+        Parsed manifest from ``read_split_manifest``.
+    val_size : float
+        Fraction of non-test groups to allocate to validation.
+    random_state : int
+        Fallback seed if the manifest does not record one.
+
+    Returns
+    -------
+    dict
+        Upgraded manifest in the same shape returned by
+        ``read_split_manifest()``.
+    """
+    if manifest.get("val_groups") is not None:
+        return manifest
+
+    legacy_train_groups = sorted(manifest["train_groups"])
+    if len(legacy_train_groups) < 2:
+        raise ValueError(
+            "Cannot upgrade legacy split manifest with fewer than 2 train groups"
+        )
+
+    split_seed = manifest.get("random_state", random_state)
+    train_groups, val_groups = train_test_split(
+        legacy_train_groups,
+        test_size=val_size,
+        random_state=split_seed,
+    )
+
+    upgraded = {
+        "train_groups": set(train_groups),
+        "val_groups": set(val_groups),
+        "test_groups": set(manifest["test_groups"]),
+        "random_state": split_seed,
+        "resolution_m": manifest["resolution_m"],
+    }
+
+    write_split_manifest(
+        path,
+        train_groups=upgraded["train_groups"],
+        test_groups=upgraded["test_groups"],
+        val_groups=upgraded["val_groups"],
+        random_state=upgraded["random_state"],
+        resolution_m=upgraded["resolution_m"],
+    )
+    print(f"Upgraded legacy two-way split manifest to three-way: {path}")
+    return upgraded
+
+
 # ---------------------------------------------------------------------------
 # Filtering
 # ---------------------------------------------------------------------------
@@ -418,6 +482,13 @@ def prepare_direct_data(
     if split_manifest and os.path.exists(split_manifest):
         print(f"Loading split manifest from {split_manifest}")
         manifest = read_split_manifest(split_manifest)
+        if val_size is not None and manifest.get("val_groups") is None:
+            manifest = upgrade_legacy_split_manifest(
+                split_manifest,
+                manifest,
+                val_size=val_size,
+                random_state=random_state,
+            )
         train_sites = manifest["train_groups"]
         test_sites = manifest["test_groups"]
         val_sites = manifest.get("val_groups")
