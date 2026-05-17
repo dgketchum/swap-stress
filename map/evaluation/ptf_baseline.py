@@ -1,68 +1,43 @@
 """
 Compare our direct SWP model against PTF-derived baselines (Rosetta, POLARIS).
 
-For each day with SMAP L3 theta, inverts the van Genuchten equation using
-Rosetta and POLARIS surface-layer parameters to compute suction, then compares
-those physics-based estimates against our model's predictions pixel-by-pixel.
+For each (theta, suction) observation at rosetta_level=2 in the training table,
+computes suction from the van Genuchten equation using Rosetta and POLARIS
+surface-layer parameters sampled at each site, then compares those physics-based
+estimates against the observed suction and our model's predictions.
 
 Subcommands
 -----------
-prep      Reproject Rosetta L2 to EASE-Grid2; export POLARIS 0-5 cm from EE.
-evaluate  Run daily three-way comparison over a date range.
-summarize Aggregate daily results into spatial maps and summary metrics.
+prep      Extract Rosetta L2 and POLARIS 0-5 cm vG parameters at training sites.
+evaluate  Compare PTF-derived suction against observed and model-predicted values.
 
 Usage:
     python -m map.evaluation.ptf_baseline prep \
-        --rosetta-tif /nas/soils/rosetta/geotiff/US_R3H3_L2_VG.tiff \
-        --output-dir /nas/soils/swapstress/inference/conus_features
+        --training-table /nas/soils/swapstress/training/obs_level_training_9km_global.parquet \
+        --output /nas/soils/swapstress/evaluation/ptf_baseline/site_vg_params.parquet
 
     python -m map.evaluation.ptf_baseline evaluate \
-        --pred-dir /nas/soils/swapstress/inference/predictions/direct_qrf_9km_global \
-        --smap-dir /nas/soils/smap/SPL3SMP_E/daily_tif \
-        --static-dir /nas/soils/swapstress/inference/conus_features \
-        --output /nas/soils/swapstress/evaluation/ptf_baseline \
-        --start-date 20230701 --end-date 20230731
-
-    python -m map.evaluation.ptf_baseline summarize \
-        --eval-dir /nas/soils/swapstress/evaluation/ptf_baseline
+        --training-table /nas/soils/swapstress/training/obs_level_training_9km_global.parquet \
+        --vg-params /nas/soils/swapstress/evaluation/ptf_baseline/site_vg_params.parquet \
+        --output /nas/soils/swapstress/evaluation/ptf_baseline
 """
 
 import argparse
+import csv
 import os
-import re
-from datetime import datetime
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 import rasterio
 
-from map.data.reproject_to_ease2 import reproject_raster
-from map.data.smap_download import (
-    EASE2_CRS,
-    MAP_SCALE,
-    _conus_slice,
-    _conus_transform,
+DEFAULT_TRAINING_TABLE = (
+    "/nas/soils/swapstress/training/obs_level_training_9km_global.parquet"
 )
-
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
-
-SMAP_FILENAME_RE = re.compile(r"^smap_sm_(\d{8})\.tif$")
-PRED_FILENAME_RE = re.compile(r"^suction_(\d{8})\.tif$")
-NODATA = -9999.0
-
-# Both Rosetta and POLARIS rasters use the same 4-band order:
-#   1=theta_r  2=theta_s  3=alpha (log10 1/cm)  4=n
-# Rosetta stores n as log10; POLARIS stores n in natural scale.
-
-DEFAULT_SMAP_DIR = "/nas/soils/smap/SPL3SMP_E/daily_tif"
-DEFAULT_STATIC_DIR = "/nas/soils/swapstress/inference/conus_features"
-DEFAULT_PRED_DIR = "/nas/soils/swapstress/inference/predictions/direct_qrf_9km_global"
-DEFAULT_OUTPUT_DIR = "/nas/soils/swapstress/evaluation/ptf_baseline"
 DEFAULT_ROSETTA_TIF = "/nas/soils/rosetta/geotiff/US_R3H3_L2_VG.tiff"
+DEFAULT_OUTPUT_DIR = "/nas/soils/swapstress/evaluation/ptf_baseline"
 
-_SE_EPS = 1e-6  # clamp effective saturation to (eps, 1-eps)
+_SE_EPS = 1e-6
 
 
 # ---------------------------------------------------------------------------
@@ -110,7 +85,6 @@ def vg_suction(theta, theta_r, theta_s, alpha, n):
     se = np.clip(se, _SE_EPS, 1.0 - _SE_EPS)
 
     m = np.where(valid, 1.0 - 1.0 / n, np.nan)
-    # h = (1/alpha) * (Se^(-1/m) - 1)^(1/n)
     h = np.where(
         valid,
         (1.0 / alpha) * (se ** (-1.0 / m) - 1.0) ** (1.0 / n),
@@ -121,187 +95,211 @@ def vg_suction(theta, theta_r, theta_s, alpha, n):
 
 
 # ---------------------------------------------------------------------------
-# Grid helpers
+# Prep: extract vG parameters at training sites
 # ---------------------------------------------------------------------------
 
 
-def _ease2_grid():
-    """Return (transform, width, height) for the CONUS EASE-Grid2 subset."""
-    row_sl, col_sl = _conus_slice()
-    transform = _conus_transform(row_sl, col_sl)
-    width = col_sl.stop - col_sl.start
-    height = row_sl.stop - row_sl.start
-    return transform, width, height
+def _get_sites(training_table, rosetta_level=2):
+    """Load unique site locations at the target rosetta level.
+
+    Returns a DataFrame with columns: sample_id, lat, lon, source
+    (one row per unique sample_id).
+    """
+    df = pd.read_parquet(
+        training_table,
+        columns=["sample_id", "rosetta_level", "lat", "lon", "source"],
+    )
+    rl = df[df["rosetta_level"] == rosetta_level].dropna(subset=["lat", "lon"])
+    sites = (
+        rl.groupby("sample_id")
+        .agg({"lat": "first", "lon": "first", "source": "first"})
+        .reset_index()
+    )
+    return sites
 
 
-def _read_band(path, band_idx):
-    """Read a single band from a GeoTIFF, replacing nodata with NaN."""
-    with rasterio.open(path) as src:
-        data = src.read(band_idx).astype(np.float64)
-        if src.nodata is not None and not np.isnan(src.nodata):
-            data[data == src.nodata] = np.nan
-    return data
+def _sample_rosetta_at_sites(rosetta_tif, lats, lons):
+    """Sample the Rosetta L2 5-band GeoTIFF at (lat, lon) coordinates.
+
+    Returns dict with keys: ros_theta_r, ros_theta_s, ros_alpha, ros_n.
+    Alpha and n are returned in natural (linear) scale.
+    """
+    from pyproj import Transformer
+
+    transformer = Transformer.from_crs("EPSG:4326", "EPSG:5070", always_xy=True)
+    xs, ys = transformer.transform(
+        np.asarray(lons, dtype=np.float64),
+        np.asarray(lats, dtype=np.float64),
+    )
+
+    n = len(lats)
+    theta_r = np.full(n, np.nan)
+    theta_s = np.full(n, np.nan)
+    alpha = np.full(n, np.nan)
+    n_param = np.full(n, np.nan)
+
+    with rasterio.open(rosetta_tif) as src:
+        nodata = src.nodata
+        for i, (x, y) in enumerate(zip(xs, ys)):
+            try:
+                row, col = src.index(x, y)
+            except Exception:
+                continue
+            if 0 <= row < src.height and 0 <= col < src.width:
+                window = rasterio.windows.Window(col, row, 1, 1)
+                vals = src.read(window=window).squeeze()
+                if nodata is not None and np.any(vals == nodata):
+                    continue
+                theta_r[i] = vals[0]
+                theta_s[i] = vals[1]
+                alpha[i] = 10.0 ** vals[2]  # log10(1/cm) -> 1/cm
+                n_param[i] = 10.0 ** vals[3]  # log10 -> natural
+
+    return {
+        "ros_theta_r": theta_r,
+        "ros_theta_s": theta_s,
+        "ros_alpha": alpha,
+        "ros_n": n_param,
+    }
 
 
-# ---------------------------------------------------------------------------
-# Prep subcommand
-# ---------------------------------------------------------------------------
+def _sample_polaris_at_sites(lats, lons, sample_ids):
+    """Sample POLARIS 0-5 cm vG parameters from EE at (lat, lon) coordinates.
 
-
-def prep_rosetta(rosetta_tif, output_dir, overwrite=False):
-    """Reproject Rosetta L2 VG raster to the SMAP EASE-Grid2 CONUS grid."""
-    dst_path = os.path.join(output_dir, "rosetta_l2_ease2.tif")
-    if os.path.exists(dst_path) and not overwrite:
-        print(f"Rosetta EASE2 raster exists: {dst_path} (use --overwrite)")
-        return dst_path
-
-    transform, width, height = _ease2_grid()
-    print(f"Reprojecting {rosetta_tif} -> {dst_path}")
-    print(f"  Target: {width}x{height}, EPSG:6933, {MAP_SCALE:.3f} m")
-
-    # reproject_raster picks bilinear by default (continuous data)
-    reproject_raster(rosetta_tif, dst_path, EASE2_CRS, transform, width, height)
-
-    # Add band descriptions
-    descs = ["theta_r", "theta_s", "log10_alpha", "log10_n", "log10_Ks"]
-    with rasterio.open(dst_path, "r+") as ds:
-        for i, d in enumerate(descs[: ds.count]):
-            ds.set_band_description(i + 1, d)
-
-    print(f"  Wrote {dst_path}")
-    return dst_path
-
-
-def prep_polaris_ee(output_dir, overwrite=False):
-    """Export POLARIS 0-5 cm vG parameters from EE, reproject to EASE-Grid2.
-
-    Exports a 4-band raster (theta_r, theta_s, alpha, n) from the POLARIS
-    0-5 cm depth layer on Google Earth Engine.  The EE export writes to a
-    local intermediate file in EPSG:5070 at 9 km, then reprojection produces
-    the final EASE-Grid2 file.
+    Returns dict with keys: pol_theta_r, pol_theta_s, pol_alpha, pol_n.
+    Alpha is converted from log10(1/cm) to 1/cm; n is in natural scale.
     """
     import ee
 
-    dst_path = os.path.join(output_dir, "polaris_0_5cm_ease2.tif")
-    intermediate = os.path.join(output_dir, "polaris_0_5cm_9km.tif")
+    ee.Initialize(project="ee-dgketchum")
 
-    if os.path.exists(dst_path) and not overwrite:
-        print(f"POLARIS 0-5 cm EASE2 raster exists: {dst_path} (use --overwrite)")
-        return dst_path
-
-    if os.path.exists(intermediate) and not overwrite:
-        print(f"Intermediate exists, skipping EE export: {intermediate}")
-    else:
-        ee.Initialize(project="ee-dgketchum")
-
-        root = "projects/sat-io/open-datasets/polaris"
-        params = [
-            ("theta_r", f"{root}/theta_r_mean/theta_r_0_5"),
-            ("theta_s", f"{root}/theta_s_mean/theta_s_0_5"),
-            ("alpha", f"{root}/alpha_mean/alpha_0_5"),
-            ("n", f"{root}/n_mean/n_0_5"),
+    root = "projects/sat-io/open-datasets/polaris"
+    stack = ee.Image.cat(
+        [
+            ee.Image(f"{root}/theta_r_mean/theta_r_0_5").rename("theta_r"),
+            ee.Image(f"{root}/theta_s_mean/theta_s_0_5").rename("theta_s"),
+            ee.Image(f"{root}/alpha_mean/alpha_0_5").rename("alpha"),
+            ee.Image(f"{root}/n_mean/n_0_5").rename("n"),
         ]
+    )
 
-        bands = []
-        for name, asset in params:
-            bands.append(ee.Image(asset).rename(name))
-        stack = ee.Image.cat(bands)
+    features = []
+    for sid, lat, lon in zip(sample_ids, lats, lons):
+        pt = ee.Geometry.Point([float(lon), float(lat)])
+        features.append(ee.Feature(pt, {"sample_id": str(sid)}))
+    # Sample in batches to avoid payload limits
+    batch_size = 500
+    all_results = []
 
-        # CONUS bounding box
-        roi = ee.Geometry.Rectangle([-125, 24, -66, 50])
+    for start in range(0, len(features), batch_size):
+        end = min(start + batch_size, len(features))
+        batch_features = [features[i] for i in range(start, end)]
+        batch_fc = ee.FeatureCollection(batch_features)
 
-        desc = "polaris_0_5cm_vg_9km"
-        task = ee.batch.Export.image.toDrive(
-            image=stack.clip(roi),
-            description=desc,
-            folder="swap_stress_polaris",
-            fileNamePrefix=desc,
-            scale=9000,
-            crs="EPSG:5070",
-            maxPixels=1e9,
+        sampled = stack.sampleRegions(
+            collection=batch_fc,
+            properties=["sample_id"],
+            scale=250,
         )
-        task.start()
-        print(f"Started EE export task: {desc} (id: {task.id})")
-        print("Download the result from Google Drive and place it at:")
-        print(f"  {intermediate}")
-        print("Then re-run this command to reproject to EASE-Grid2.")
-        return None
+        results = sampled.getInfo()
+        for feat in results.get("features", []):
+            props = feat["properties"]
+            all_results.append(props)
 
-    # Reproject intermediate to EASE-Grid2
-    transform, width, height = _ease2_grid()
-    print(f"Reprojecting {intermediate} -> {dst_path}")
-    reproject_raster(intermediate, dst_path, EASE2_CRS, transform, width, height)
+        print(
+            f"  POLARIS EE batch {start}-{end}: {len(results.get('features', []))} sampled"
+        )
 
-    descs = ["theta_r", "theta_s", "alpha", "n"]
-    with rasterio.open(dst_path, "r+") as ds:
-        for i, d in enumerate(descs[: ds.count]):
-            ds.set_band_description(i + 1, d)
+    # Build output arrays indexed by sample_id
+    result_map = {}
+    for r in all_results:
+        sid = r.get("sample_id")
+        if sid is not None:
+            result_map[sid] = r
 
-    print(f"  Wrote {dst_path}")
-    return dst_path
+    n = len(sample_ids)
+    theta_r = np.full(n, np.nan)
+    theta_s = np.full(n, np.nan)
+    alpha = np.full(n, np.nan)
+    n_param = np.full(n, np.nan)
+
+    for i, sid in enumerate(sample_ids):
+        r = result_map.get(str(sid))
+        if r is None:
+            continue
+        tr = r.get("theta_r")
+        ts = r.get("theta_s")
+        a = r.get("alpha")
+        nv = r.get("n")
+        if tr is not None:
+            theta_r[i] = tr
+        if ts is not None:
+            theta_s[i] = ts
+        if a is not None:
+            alpha[i] = 10.0**a  # log10(1/cm) -> 1/cm
+        if nv is not None:
+            n_param[i] = nv  # already natural scale
+
+    return {
+        "pol_theta_r": theta_r,
+        "pol_theta_s": theta_s,
+        "pol_alpha": alpha,
+        "pol_n": n_param,
+    }
 
 
 def run_prep(args):
-    """Execute the prep subcommand."""
-    output_dir = args.output_dir
-    os.makedirs(output_dir, exist_ok=True)
-    overwrite = args.overwrite
+    """Extract Rosetta and POLARIS vG params at training table sites."""
+    output_path = Path(args.output)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    if args.rosetta:
-        prep_rosetta(args.rosetta_tif, output_dir, overwrite)
+    if output_path.exists() and not args.overwrite:
+        print(f"Output exists: {output_path} (use --overwrite)")
+        return
 
-    if args.polaris:
-        prep_polaris_ee(output_dir, overwrite)
+    print("Loading training table sites at rosetta_level=2 ...")
+    sites = _get_sites(args.training_table)
+    print(f"  {len(sites)} unique sites")
+    print(f"  Sources: {sites['source'].value_counts().to_dict()}")
+
+    # Rosetta: sample local GeoTIFF
+    print(f"\nSampling Rosetta L2 at {len(sites)} sites ...")
+    ros = _sample_rosetta_at_sites(
+        args.rosetta_tif,
+        sites["lat"].values,
+        sites["lon"].values,
+    )
+    for k, v in ros.items():
+        sites[k] = v
+    n_ros = int(np.isfinite(sites["ros_alpha"]).sum())
+    print(f"  {n_ros}/{len(sites)} sites with valid Rosetta params")
+
+    # POLARIS: sample from EE (CONUS only)
+    conus = (
+        (sites["lon"] >= -125)
+        & (sites["lon"] <= -66)
+        & (sites["lat"] >= 24)
+        & (sites["lat"] <= 50)
+    )
+    conus_sites = sites[conus]
+    print(f"\nSampling POLARIS 0-5 cm from EE at {len(conus_sites)} CONUS sites ...")
+    pol = _sample_polaris_at_sites(
+        conus_sites["lat"].values,
+        conus_sites["lon"].values,
+        conus_sites["sample_id"].values,
+    )
+    for k, v in pol.items():
+        sites.loc[conus, k] = v
+    n_pol = int(np.isfinite(sites.get("pol_alpha", pd.Series(dtype=float))).sum())
+    print(f"  {n_pol}/{len(conus_sites)} CONUS sites with valid POLARIS params")
+
+    sites.to_parquet(str(output_path), index=False)
+    print(f"\nWrote {output_path}")
 
 
 # ---------------------------------------------------------------------------
-# Evaluate subcommand
+# Evaluate: compare PTF suction against observed and model predictions
 # ---------------------------------------------------------------------------
-
-
-def _load_vg_params(raster_path, log10_alpha=False, log10_n=False):
-    """Load vG parameters from a 4+ band raster.
-
-    Returns (theta_r, theta_s, alpha, n) as 2-D float64 arrays.
-    Alpha and n are returned in natural (linear) scale.
-    """
-    theta_r = _read_band(raster_path, 1)
-    theta_s = _read_band(raster_path, 2)
-    alpha = _read_band(raster_path, 3)
-    n = _read_band(raster_path, 4)
-
-    if log10_alpha:
-        alpha = np.power(10.0, alpha)
-    if log10_n:
-        n = np.power(10.0, n)
-
-    return theta_r, theta_s, alpha, n
-
-
-def _iter_date_files(smap_dir, pred_dir, start_date, end_date):
-    """Yield (date, smap_path, pred_path) for days with both files present."""
-    smap_path = Path(smap_dir)
-    pred_path = Path(pred_dir)
-
-    smap_dates = {}
-    for p in sorted(smap_path.glob("smap_sm_*.tif")):
-        m = SMAP_FILENAME_RE.match(p.name)
-        if m:
-            smap_dates[m.group(1)] = p
-
-    for p in sorted(pred_path.glob("suction_*.tif")):
-        m = PRED_FILENAME_RE.match(p.name)
-        if not m:
-            continue
-        datestr = m.group(1)
-        if datestr not in smap_dates:
-            continue
-        dt = datetime.strptime(datestr, "%Y%m%d")
-        if start_date and dt < start_date:
-            continue
-        if end_date and dt > end_date:
-            continue
-        yield datestr, smap_dates[datestr], p
 
 
 def _metrics(a, b):
@@ -321,272 +319,112 @@ def _metrics(a, b):
 
 
 def run_evaluate(args):
-    """Execute the evaluate subcommand."""
-    static_dir = args.static_dir
-    smap_dir = args.smap_dir
-    pred_dir = args.pred_dir
-    output_dir = args.output
-    os.makedirs(output_dir, exist_ok=True)
+    """Compare PTF-derived suction against observed values."""
+    output_dir = Path(args.output)
+    output_dir.mkdir(parents=True, exist_ok=True)
 
-    start = datetime.strptime(args.start_date, "%Y%m%d") if args.start_date else None
-    end = datetime.strptime(args.end_date, "%Y%m%d") if args.end_date else None
-
-    # Load Rosetta vG params (log10 alpha and n)
-    ros_path = os.path.join(static_dir, "rosetta_l2_ease2.tif")
-    if not os.path.exists(ros_path):
-        raise FileNotFoundError(
-            f"Rosetta EASE2 raster not found: {ros_path}\n"
-            "Run the 'prep' subcommand first."
-        )
-    ros_tr, ros_ts, ros_a, ros_n = _load_vg_params(
-        ros_path,
-        log10_alpha=True,
-        log10_n=True,
+    # Load training observations at rosetta_level=2
+    print("Loading training table (rosetta_level=2) ...")
+    obs = pd.read_parquet(
+        args.training_table,
+        columns=["sample_id", "rosetta_level", "theta", "log10_suction_cm", "source"],
     )
-    grid_shape = ros_tr.shape
-    print(f"Rosetta L2 loaded: {grid_shape}")
+    obs = obs[obs["rosetta_level"] == 2].dropna(subset=["theta", "log10_suction_cm"])
+    print(f"  {len(obs)} observations across {obs['sample_id'].nunique()} sites")
 
-    # Load POLARIS 0-5 cm vG params
-    pol_path = os.path.join(static_dir, "polaris_0_5cm_ease2.tif")
-    pol_available = os.path.exists(pol_path)
-    if pol_available:
-        pol_tr, pol_ts, pol_a, pol_n = _load_vg_params(
-            pol_path,
-            log10_alpha=True,
-            log10_n=False,
-        )
-        print(f"POLARIS 0-5 cm loaded: {pol_tr.shape}")
-    else:
-        print(f"POLARIS 0-5 cm raster not found: {pol_path} (skipping POLARIS)")
+    # Load site-level vG params
+    vg = pd.read_parquet(args.vg_params)
+    print(f"  {len(vg)} sites with vG params")
 
-    # Accumulators for per-pixel statistics
-    n_days = np.zeros(grid_shape, dtype=np.int32)
-    sum_model = np.zeros(grid_shape, dtype=np.float64)
-    sum_ros = np.zeros(grid_shape, dtype=np.float64)
-    sum_diff_model_ros = np.zeros(grid_shape, dtype=np.float64)
-    sum_sq_diff_model_ros = np.zeros(grid_shape, dtype=np.float64)
-    if pol_available:
-        sum_pol = np.zeros(grid_shape, dtype=np.float64)
-        sum_diff_model_pol = np.zeros(grid_shape, dtype=np.float64)
-        sum_sq_diff_model_pol = np.zeros(grid_shape, dtype=np.float64)
-        sum_diff_ros_pol = np.zeros(grid_shape, dtype=np.float64)
-        sum_sq_diff_ros_pol = np.zeros(grid_shape, dtype=np.float64)
+    # Join
+    df = obs.merge(
+        vg[
+            [
+                "sample_id",
+                "source",
+                "ros_theta_r",
+                "ros_theta_s",
+                "ros_alpha",
+                "ros_n",
+                "pol_theta_r",
+                "pol_theta_s",
+                "pol_alpha",
+                "pol_n",
+            ]
+        ],
+        on=["sample_id", "source"],
+        how="left",
+    )
 
-    # All pixel-day values for global metrics
-    all_model = []
-    all_ros = []
-    all_pol = []
+    observed = df["log10_suction_cm"].values
 
-    day_count = 0
-    for datestr, smap_file, pred_file in _iter_date_files(
-        smap_dir,
-        pred_dir,
-        start,
-        end,
-    ):
-        # Load SMAP theta
-        with rasterio.open(smap_file) as src:
-            theta = src.read(1).astype(np.float64)
-            if src.nodata is not None and not np.isnan(src.nodata):
-                theta[theta == src.nodata] = np.nan
+    # Rosetta suction
+    ros_h = vg_suction(
+        df["theta"].values,
+        df["ros_theta_r"].values,
+        df["ros_theta_s"].values,
+        df["ros_alpha"].values,
+        df["ros_n"].values,
+    )
+    ros_log10 = np.where(ros_h > 0, np.log10(ros_h), np.nan)
 
-        # Load model prediction (log10_suction_cm)
-        with rasterio.open(pred_file) as src:
-            model_log10 = src.read(1).astype(np.float64)
-            if src.nodata is not None and not np.isnan(src.nodata):
-                model_log10[model_log10 == src.nodata] = np.nan
+    # POLARIS suction
+    pol_h = vg_suction(
+        df["theta"].values,
+        df["pol_theta_r"].values,
+        df["pol_theta_s"].values,
+        df["pol_alpha"].values,
+        df["pol_n"].values,
+    )
+    pol_log10 = np.where(pol_h > 0, np.log10(pol_h), np.nan)
 
-        # Compute Rosetta suction
-        ros_h = vg_suction(theta, ros_tr, ros_ts, ros_a, ros_n)
-        ros_log10 = np.where(ros_h > 0, np.log10(ros_h), np.nan)
+    # Compute metrics
+    pairs = {
+        "rosetta_vs_observed": (ros_log10, observed),
+        "polaris_vs_observed": (pol_log10, observed),
+        "rosetta_vs_polaris": (ros_log10, pol_log10),
+    }
 
-        # Compute POLARIS suction
-        if pol_available:
-            pol_h = vg_suction(theta, pol_tr, pol_ts, pol_a, pol_n)
-            pol_log10 = np.where(pol_h > 0, np.log10(pol_h), np.nan)
-
-        # Find pixels valid across model + rosetta (+ polaris if available)
-        valid = np.isfinite(model_log10) & np.isfinite(ros_log10)
-        if pol_available:
-            valid_all = valid & np.isfinite(pol_log10)
-        else:
-            valid_all = valid
-
-        n_days[valid_all] += 1
-        sum_model[valid_all] += model_log10[valid_all]
-        sum_ros[valid_all] += ros_log10[valid_all]
-        diff_mr = model_log10 - ros_log10
-        sum_diff_model_ros[valid_all] += diff_mr[valid_all]
-        sum_sq_diff_model_ros[valid_all] += (diff_mr[valid_all]) ** 2
-
-        if pol_available:
-            sum_pol[valid_all] += pol_log10[valid_all]
-            diff_mp = model_log10 - pol_log10
-            sum_diff_model_pol[valid_all] += diff_mp[valid_all]
-            sum_sq_diff_model_pol[valid_all] += (diff_mp[valid_all]) ** 2
-            diff_rp = ros_log10 - pol_log10
-            sum_diff_ros_pol[valid_all] += diff_rp[valid_all]
-            sum_sq_diff_ros_pol[valid_all] += (diff_rp[valid_all]) ** 2
-
-        # Collect for global metrics
-        all_model.append(model_log10[valid_all])
-        all_ros.append(ros_log10[valid_all])
-        if pol_available:
-            all_pol.append(pol_log10[valid_all])
-
-        day_count += 1
-        n_valid = int(valid_all.sum())
-        print(f"  {datestr}: {n_valid} valid pixels")
-
-    if day_count == 0:
-        print("No matching date pairs found.")
-        return
-
-    print(f"\nProcessed {day_count} days")
-
-    # --- Global metrics across all pixel-days ---
-
-    all_model_arr = np.concatenate(all_model)
-    all_ros_arr = np.concatenate(all_ros)
-
-    pairs = {"model_vs_rosetta": (all_model_arr, all_ros_arr)}
-    if pol_available:
-        all_pol_arr = np.concatenate(all_pol)
-        pairs["model_vs_polaris"] = (all_model_arr, all_pol_arr)
-        pairs["rosetta_vs_polaris"] = (all_ros_arr, all_pol_arr)
-
-    print("\n--- Global metrics (log10 suction cm) ---")
-    for label, (a, b) in pairs.items():
-        m = _metrics(a, b)
+    print("\n--- Metrics (log10 suction cm) ---")
+    rows = []
+    for label, (pred, ref) in pairs.items():
+        m = _metrics(pred, ref)
+        rows.append({"comparison": label, **m})
         print(
             f"  {label}: n={m['n']:,}  RMSE={m['rmse']:.4f}  "
             f"bias={m['bias']:.4f}  R2={m['r2']:.4f}"
         )
 
-    # --- Spatial summary maps ---
-
-    has_data = n_days > 0
-    mean_model = np.where(has_data, sum_model / n_days, np.nan)
-    mean_ros = np.where(has_data, sum_ros / n_days, np.nan)
-    mean_diff_mr = np.where(has_data, sum_diff_model_ros / n_days, np.nan)
-    rmse_mr = np.where(
-        has_data,
-        np.sqrt(sum_sq_diff_model_ros / n_days),
-        np.nan,
-    )
-
-    bands_out = [
-        ("mean_model_log10_suction", mean_model),
-        ("mean_rosetta_log10_suction", mean_ros),
-        ("mean_diff_model_minus_rosetta", mean_diff_mr),
-        ("rmse_model_vs_rosetta", rmse_mr),
-        ("n_days", n_days.astype(np.float32)),
-    ]
-
-    if pol_available:
-        mean_pol = np.where(has_data, sum_pol / n_days, np.nan)
-        mean_diff_mp = np.where(has_data, sum_diff_model_pol / n_days, np.nan)
-        rmse_mp = np.where(
-            has_data,
-            np.sqrt(sum_sq_diff_model_pol / n_days),
-            np.nan,
-        )
-        mean_diff_rp = np.where(has_data, sum_diff_ros_pol / n_days, np.nan)
-        rmse_rp = np.where(
-            has_data,
-            np.sqrt(sum_sq_diff_ros_pol / n_days),
-            np.nan,
-        )
-        bands_out.extend(
-            [
-                ("mean_polaris_log10_suction", mean_pol),
-                ("mean_diff_model_minus_polaris", mean_diff_mp),
-                ("rmse_model_vs_polaris", rmse_mp),
-                ("mean_diff_rosetta_minus_polaris", mean_diff_rp),
-                ("rmse_rosetta_vs_polaris", rmse_rp),
-            ]
-        )
-
-    # Write summary raster
-    transform, width, height = _ease2_grid()
-    out_tif = os.path.join(output_dir, "ptf_comparison_summary.tif")
-
-    with rasterio.open(
-        out_tif,
-        "w",
-        driver="GTiff",
-        height=height,
-        width=width,
-        count=len(bands_out),
-        dtype="float32",
-        crs=EASE2_CRS,
-        transform=transform,
-        nodata=np.nan,
-        compress="zstd",
-    ) as dst:
-        for i, (desc, data) in enumerate(bands_out, 1):
-            dst.write(data.astype(np.float32), i)
-            dst.set_band_description(i, desc)
-
-    print(f"\nWrote summary raster: {out_tif}")
-    print(f"  {len(bands_out)} bands, {width}x{height}, EPSG:6933")
-
-    # Write metrics CSV
-    import csv
-
-    csv_path = os.path.join(output_dir, "ptf_comparison_metrics.csv")
-    with open(csv_path, "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=["comparison", "n", "rmse", "bias", "r2"])
-        writer.writeheader()
-        for label, (a, b) in pairs.items():
-            row = {"comparison": label}
-            row.update(_metrics(a, b))
-            writer.writerow(row)
-    print(f"Wrote metrics: {csv_path}")
-
-
-# ---------------------------------------------------------------------------
-# Summarize subcommand
-# ---------------------------------------------------------------------------
-
-
-def run_summarize(args):
-    """Print summary from a completed evaluation directory."""
-    import csv
-
-    csv_path = os.path.join(args.eval_dir, "ptf_comparison_metrics.csv")
-    tif_path = os.path.join(args.eval_dir, "ptf_comparison_summary.tif")
-
-    if not os.path.exists(csv_path):
-        print(f"No metrics file found: {csv_path}")
-        return
-
-    print("--- PTF Baseline Comparison Metrics ---\n")
-    with open(csv_path) as f:
-        reader = csv.DictReader(f)
-        for row in reader:
+    # Per-source breakdown
+    print("\n--- By source ---")
+    for src in sorted(df["source"].unique()):
+        mask = df["source"].values == src
+        for label, (pred, ref) in pairs.items():
+            m = _metrics(pred[mask], ref[mask])
+            tag = f"{label}_{src}"
+            rows.append({"comparison": tag, **m})
             print(
-                f"  {row['comparison']}: n={int(row['n']):,}  "
-                f"RMSE={float(row['rmse']):.4f}  "
-                f"bias={float(row['bias']):.4f}  "
-                f"R2={float(row['r2']):.4f}"
+                f"  {tag}: n={m['n']:,}  RMSE={m['rmse']:.4f}  "
+                f"bias={m['bias']:.4f}  R2={m['r2']:.4f}"
             )
 
-    if os.path.exists(tif_path):
-        with rasterio.open(tif_path) as src:
-            print(f"\nSummary raster: {tif_path}")
-            print(f"  Bands: {src.count}")
-            for i in range(1, src.count + 1):
-                desc = src.descriptions[i - 1] or f"band_{i}"
-                data = src.read(i)
-                valid = data[np.isfinite(data)]
-                if len(valid):
-                    print(
-                        f"    {desc}: min={valid.min():.3f} "
-                        f"max={valid.max():.3f} mean={valid.mean():.3f}"
-                    )
-                else:
-                    print(f"    {desc}: no valid data")
+    # Write metrics CSV
+    csv_path = output_dir / "ptf_comparison_metrics.csv"
+    with open(csv_path, "w", newline="") as f:
+        writer = csv.DictWriter(
+            f,
+            fieldnames=["comparison", "n", "rmse", "bias", "r2"],
+        )
+        writer.writeheader()
+        writer.writerows(rows)
+    print(f"\nWrote {csv_path}")
+
+    # Write merged observation table for downstream analysis
+    df["ros_log10_suction"] = ros_log10
+    df["pol_log10_suction"] = pol_log10
+    obs_path = output_dir / "ptf_comparison_observations.parquet"
+    df.to_parquet(str(obs_path), index=False)
+    print(f"Wrote {obs_path}")
 
 
 # ---------------------------------------------------------------------------
@@ -601,60 +439,49 @@ def build_parser():
     sub = parser.add_subparsers(dest="command", required=True)
 
     # --- prep ---
-    p_prep = sub.add_parser("prep", help="Prepare PTF rasters on EASE-Grid2")
+    p_prep = sub.add_parser(
+        "prep",
+        help="Extract vG params at training sites",
+    )
+    p_prep.add_argument(
+        "--training-table",
+        default=DEFAULT_TRAINING_TABLE,
+        help="Path to training parquet",
+    )
     p_prep.add_argument(
         "--rosetta-tif",
         default=DEFAULT_ROSETTA_TIF,
         help="Path to Rosetta L2 VG GeoTIFF (100 m, EPSG:5070)",
     )
     p_prep.add_argument(
-        "--output-dir",
-        default=DEFAULT_STATIC_DIR,
-        help="Output directory for reprojected rasters",
-    )
-    p_prep.add_argument("--rosetta", action="store_true", help="Prep Rosetta raster")
-    p_prep.add_argument(
-        "--polaris",
-        action="store_true",
-        help="Export POLARIS 0-5 cm from EE",
+        "--output",
+        default=os.path.join(DEFAULT_OUTPUT_DIR, "site_vg_params.parquet"),
+        help="Output parquet for site-level vG params",
     )
     p_prep.add_argument("--overwrite", action="store_true")
     p_prep.set_defaults(func=run_prep)
 
     # --- evaluate ---
-    p_eval = sub.add_parser("evaluate", help="Run daily three-way comparison")
-    p_eval.add_argument(
-        "--pred-dir",
-        default=DEFAULT_PRED_DIR,
-        help="Model prediction directory",
+    p_eval = sub.add_parser(
+        "evaluate",
+        help="Compare PTF suction against observations",
     )
     p_eval.add_argument(
-        "--smap-dir",
-        default=DEFAULT_SMAP_DIR,
-        help="SMAP daily GeoTIFF directory",
+        "--training-table",
+        default=DEFAULT_TRAINING_TABLE,
+        help="Path to training parquet",
     )
     p_eval.add_argument(
-        "--static-dir",
-        default=DEFAULT_STATIC_DIR,
-        help="Directory with PTF EASE2 rasters",
+        "--vg-params",
+        default=os.path.join(DEFAULT_OUTPUT_DIR, "site_vg_params.parquet"),
+        help="Site-level vG params from prep step",
     )
     p_eval.add_argument(
         "--output",
         default=DEFAULT_OUTPUT_DIR,
-        help="Output directory for results",
+        help="Output directory for metrics and observation table",
     )
-    p_eval.add_argument("--start-date", default=None, help="YYYYMMDD")
-    p_eval.add_argument("--end-date", default=None, help="YYYYMMDD")
     p_eval.set_defaults(func=run_evaluate)
-
-    # --- summarize ---
-    p_sum = sub.add_parser("summarize", help="Print summary from evaluation results")
-    p_sum.add_argument(
-        "--eval-dir",
-        default=DEFAULT_OUTPUT_DIR,
-        help="Evaluation output directory",
-    )
-    p_sum.set_defaults(func=run_summarize)
 
     return parser
 
