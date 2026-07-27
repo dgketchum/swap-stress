@@ -20,6 +20,7 @@ from datetime import date, timedelta
 import numpy as np
 
 from map.evaluation import flux_beta_models as fbm
+from swapstress.swrc import log10_psi_from_theta
 
 
 # ---------------------------------------------------------------------------
@@ -32,11 +33,15 @@ def _consecutive_dates(n, start=date(2016, 1, 1)):
 
 
 def _vg_invert(theta, theta_r, theta_s, alpha, n_vg):
-    """θ → ψ (log10 cm), matching quartile_binned_mlr._vg_invert."""
-    se = np.clip((theta - theta_r) / (theta_s - theta_r), 1e-3, 1 - 1e-3)
-    m = 1.0 - 1.0 / n_vg
-    psi_cm = (1.0 / alpha) * (se ** (-1.0 / m) - 1.0) ** (1.0 / n_vg)
-    return np.log10(np.maximum(psi_cm, 0.01))
+    """θ → ψ (log10 cm), matching quartile_binned_mlr._vg_invert.
+
+    Only generates synthetic θ→ψ maps for the fixtures below; nothing here is
+    asserted against, so delegating keeps the "matching" claim true by
+    construction rather than by copy.
+    """
+    return log10_psi_from_theta(
+        theta, theta_r, theta_s, alpha, n_vg, se_eps=1e-3, psi_floor_cm=0.01
+    )
 
 
 def _logistic(x_eff, x0, k, bmax):

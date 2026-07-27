@@ -24,6 +24,8 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+from swapstress.swrc import theta_from_psi, valid_params
+
 # ---------------------------------------------------------------------------
 # Priestley–Taylor reference ET (shared)
 # ---------------------------------------------------------------------------
@@ -101,11 +103,13 @@ def vg_theta_from_psi(
     n: float,
 ) -> np.ndarray:
     """Forward van Genuchten: θ(ψ). ``psi_log10_cm`` is log10(cm H2O); alpha in
-    1/cm, n > 1 (natural scale)."""
+    1/cm, n > 1 (natural scale).
+
+    Thin adapter over :func:`swapstress.swrc.theta_from_psi` for the log10 input
+    convention used throughout the flux analyses.
+    """
     psi_cm = np.power(10.0, np.asarray(psi_log10_cm, dtype=np.float64))
-    m = 1.0 - 1.0 / n
-    se = 1.0 / np.power(1.0 + np.power(alpha * psi_cm, n), m)
-    return theta_r + (theta_s - theta_r) * se
+    return theta_from_psi(psi_cm, theta_r, theta_s, alpha, n)
 
 
 # ψ thresholds in log10(cm H2O): field capacity −33 kPa ≈ 336 cm; permanent
@@ -126,12 +130,7 @@ def rew_physical(
     ``REW = (θ − θ_wilt) / (θ_fc − θ_wilt)`` clipped [0, 1], with θ_fc = θ(−33 kPa)
     and θ_wilt = θ(−1.5 MPa) from the site's VG curve. NaN where params invalid.
     """
-    if not (
-        np.isfinite([theta_r, theta_s, alpha, n]).all()
-        and n > 1.0
-        and alpha > 0.0
-        and theta_s > theta_r
-    ):
+    if not valid_params(theta_r, theta_s, alpha, n):
         return np.full(np.shape(theta), np.nan)
     theta_fc = vg_theta_from_psi(PSI_FC_LOG10, theta_r, theta_s, alpha, n)
     theta_wilt = vg_theta_from_psi(PSI_WILT_LOG10, theta_r, theta_s, alpha, n)

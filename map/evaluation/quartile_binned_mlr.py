@@ -24,6 +24,8 @@ import numpy as np
 import pandas as pd
 from scipy import stats as sp_stats
 
+from swapstress.swrc import log10_psi_from_theta
+
 # ---------------------------------------------------------------------------
 # Priestley-Taylor ET0
 # ---------------------------------------------------------------------------
@@ -644,11 +646,16 @@ def _load_vg_params() -> dict[str, dict]:
 def _vg_invert(
     theta: np.ndarray, theta_r: float, theta_s: float, alpha: float, n_vg: float
 ) -> np.ndarray:
-    """Van Genuchten inversion: theta -> psi (log10 cm)."""
-    se = np.clip((theta - theta_r) / (theta_s - theta_r), 0.001, 0.999)
-    m = 1.0 - 1.0 / n_vg
-    psi_cm = (1.0 / alpha) * (se ** (-1.0 / m) - 1.0) ** (1.0 / n_vg)
-    return np.log10(np.maximum(psi_cm, 0.01))
+    """Van Genuchten inversion: theta -> psi (log10 cm).
+
+    The guard configuration here is the one the flux analyses were published
+    with -- a looser Se clip than the PTF baseline's, plus a 0.01 cm floor -- so
+    it is named once rather than repeated at each call site. Reproduces the
+    pre-consolidation implementation bit for bit.
+    """
+    return log10_psi_from_theta(
+        theta, theta_r, theta_s, alpha, n_vg, se_eps=1e-3, psi_floor_cm=0.01
+    )
 
 
 def _load_ameriflux_site(site_id: str) -> pd.DataFrame | None:
