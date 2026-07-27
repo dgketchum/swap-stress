@@ -6,6 +6,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 from retention_curve.swrc import SWRC
+from swapstress.swrc import theta_from_psi
 
 
 def get_station_files(in_dirs):
@@ -15,15 +16,6 @@ def get_station_files(in_dirs):
             files.extend([p for p in glob(os.path.join(d, "*.csv"))])
             files.extend([p for p in glob(os.path.join(d, "*.parquet"))])
     return files
-
-
-def _van_genuchten_model(psi, theta_r, theta_s, alpha, n):
-    if n <= 1:
-        return np.full_like(psi, np.nan)
-    m = 1 - 1 / n
-    psi_safe = np.maximum(psi, 1e-9)
-    term = 1 + (alpha * psi_safe) ** n
-    return theta_r + (theta_s - theta_r) / (term) ** m
 
 
 def _bayes_summary_row(station, depth, trace):
@@ -113,7 +105,7 @@ def test_fit_methods_across_stations(station_files, results_dir, plots_dir):
                     nn = row.get("n")
                     if pd.isna(th_r) or pd.isna(th_s) or pd.isna(al) or pd.isna(nn):
                         continue
-                    theta_pred = _van_genuchten_model(psi_smooth, th_r, th_s, al, nn)
+                    theta_pred = theta_from_psi(psi_smooth, th_r, th_s, al, nn)
                     ax.plot(
                         theta_pred, psi_smooth, lw=2, alpha=0.9, label=row["method"]
                     )
@@ -126,7 +118,7 @@ def test_fit_methods_across_stations(station_files, results_dir, plots_dir):
                 ts = float(post["theta_s"].values.mean())
                 al = float(post["alpha"].values.mean())
                 nn = float(post["n"].values.mean())
-                theta_pred = _van_genuchten_model(psi_smooth, tr, ts, al, nn)
+                theta_pred = theta_from_psi(psi_smooth, tr, ts, al, nn)
                 ax.plot(theta_pred, psi_smooth, lw=2, alpha=0.9, label="bayesian")
 
             ax.set_yscale("log")

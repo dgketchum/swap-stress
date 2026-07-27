@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 from lmfit import Model
 
 from retention_curve.swrc import SWRC
+from swapstress.swrc import theta_from_psi
 
 
 class InverseTest(SWRC):
@@ -29,6 +30,12 @@ class InverseTest(SWRC):
     @staticmethod
     def _inverse_van_genuchten_model(theta, theta_r, theta_s, alpha, n):
         # inverse of VG: psi(theta) with m = 1 - 1/n
+        #
+        # Deliberately NOT swapstress.swrc.psi_from_theta. This is an lmfit
+        # residual model: the optimizer walks through invalid parameter space,
+        # so it must coerce to the nearest valid point and always return a
+        # finite number. The canonical implementation returns NaN there, which
+        # is right for analysis and fatal for a fitter.
         n = np.maximum(n, 1.001)
         alpha = np.maximum(alpha, 1e-9)
         theta = np.clip(theta, 0.0, 1.0)
@@ -80,15 +87,6 @@ class InverseTest(SWRC):
             if report and result is not None:
                 print(result.fit_report())
         return self.fit_results
-
-
-def _van_genuchten_model(psi, theta_r, theta_s, alpha, n):
-    if n <= 1:
-        return np.full_like(psi, np.nan)
-    m = 1 - 1 / n
-    psi_safe = np.maximum(psi, 1e-9)
-    term = 1 + (alpha * psi_safe) ** n
-    return theta_r + (theta_s - theta_r) / (term**m)
 
 
 def _load_forward_fit_json(p):
@@ -163,7 +161,7 @@ def plot_inverse_vs_forward(station_key, reesh_csv_dir, forward_json_path, out_d
         psi_min = max(1e-3, float(d_obs["suction"].min()))
         psi_max = float(d_obs["suction"].max())
         psi_grid = np.logspace(np.log10(psi_min), np.log10(psi_max), 200)
-        theta_pred = _van_genuchten_model(
+        theta_pred = theta_from_psi(
             psi_grid,
             params_fwd["theta_r"],
             params_fwd["theta_s"],

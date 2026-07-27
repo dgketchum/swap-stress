@@ -7,21 +7,13 @@ import matplotlib.pyplot as plt
 
 from retention_curve import ROSETTA_LEVEL_DEPTHS, POLARIS_DEPTH_RANGES
 from viz.inferences.compare_gshp_rosetta_params import find_rosetta_param_columns
+from swapstress.swrc import theta_from_psi
 
 """Compare GSHP SWRC fits to Rosetta curves.
 
 Reads GSHP lab data, plots published curves alongside Rosetta level curves
 for the same profile. Saves per-profile comparison figures.
 """
-
-
-def vg_theta(psi_cm, theta_r, theta_s, alpha, n):
-    if n <= 1:
-        return np.full_like(psi_cm, np.nan, dtype=float)
-    m = 1.0 - 1.0 / n
-    psi_safe = np.maximum(psi_cm, 1e-9)
-    term = 1.0 + (alpha * psi_safe) ** n
-    return theta_r + (theta_s - theta_r) / (term**m)
 
 
 def plot_curves(
@@ -191,7 +183,7 @@ def plot_curves(
                 if not (
                     np.isnan(tr) or np.isnan(ts) or np.isnan(a_pub) or np.isnan(n_pub)
                 ):
-                    theta_pub = vg_theta(psi, tr, ts, a_pub, n_pub)
+                    theta_pub = theta_from_psi(psi, tr, ts, a_pub, n_pub)
                     ax.plot(
                         theta_pub,
                         psi,
@@ -242,7 +234,7 @@ def plot_curves(
                     or np.isnan(ts_ros)
                 ):
                     rosetta_found = True
-                    theta_ros = vg_theta(psi, tr_ros, ts_ros, a_ros, n_ros)
+                    theta_ros = theta_from_psi(psi, tr_ros, ts_ros, a_ros, n_ros)
                     rng = ROSETTA_LEVEL_DEPTHS.get(level)
                     if rng:
                         lbl = f"Rosetta L{level} ({rng[0]:.0f}-{rng[1]:.0f} cm)"

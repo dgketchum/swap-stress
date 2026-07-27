@@ -9,18 +9,7 @@ import matplotlib.pyplot as plt
 from sklearn.metrics import r2_score, mean_squared_error
 
 from retention_curve import EMPIRICAL_TO_ROSETTA_LEVEL_MAP
-
-
-def van_genuchten(suction, theta_r, theta_s, alpha, n):
-    """Van Genuchten-Mualem soil water retention curve function."""
-    # Ensure parameters are within a valid physical range
-    n = np.maximum(n, 1.001)
-    alpha = np.maximum(alpha, 1e-9)
-    theta_s = np.maximum(theta_r, theta_s)
-
-    m = 1 - 1 / n
-    psi_safe = np.maximum(suction, 1e-9)
-    return theta_r + (theta_s - theta_r) / (1 + (alpha * psi_safe) ** n) ** m
+from swapstress.swrc import theta_from_psi
 
 
 def plot_station_comparison(station_id, station_df, output_dir):
@@ -45,14 +34,14 @@ def plot_station_comparison(station_id, station_df, output_dir):
         # Plot fitted curve
         fit_params = row.get("fit_params")
         if fit_params:
-            fit_curve = van_genuchten(suction_range, **fit_params)
+            fit_curve = theta_from_psi(suction_range, **fit_params)
             ax.plot(fit_curve, suction_range, label="Fitted", color="blue", zorder=5)
 
         # Plot Rosetta curve
         rosetta_params = row.get("rosetta_params")
         if rosetta_params:
             _ = rosetta_params.pop("Ks", None)
-            ros_curve = van_genuchten(suction_range, **rosetta_params)
+            ros_curve = theta_from_psi(suction_range, **rosetta_params)
             ax.plot(
                 ros_curve,
                 suction_range,
@@ -65,7 +54,7 @@ def plot_station_comparison(station_id, station_df, output_dir):
         # Plot inferred curve
         inferred_params = row.get("inferred_params")
         if inferred_params:
-            inf_curve = van_genuchten(suction_range, **inferred_params)
+            inf_curve = theta_from_psi(suction_range, **inferred_params)
             ax.plot(
                 inf_curve,
                 suction_range,

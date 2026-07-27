@@ -3,14 +3,7 @@ import json
 import numpy as np
 import matplotlib.pyplot as plt
 
-
-def _van_genuchten_model(psi, theta_r, theta_s, alpha, n):
-    if n <= 1:
-        return np.full_like(psi, np.nan)
-    m = 1 - 1 / n
-    psi_safe = np.maximum(psi, 1e-9)
-    term = 1 + (alpha * psi_safe) ** n
-    return theta_r + (theta_s - theta_r) / (term) ** m
+from swapstress.swrc import theta_from_psi
 
 
 def _get_param_value(p):
@@ -48,7 +41,7 @@ def plot_swrc_icon(
         psi_min, psi_max = 1e-3, 1e6  # likely error if no data present
 
     psi_smooth = np.logspace(np.log10(psi_min), np.log10(psi_max), 300)
-    theta_fit = _van_genuchten_model(psi_smooth, theta_r, theta_s, alpha, n)
+    theta_fit = theta_from_psi(psi_smooth, theta_r, theta_s, alpha, n)
 
     fig, ax = plt.subplots(figsize=(4.5, 4.5), dpi=300)
 
@@ -64,10 +57,10 @@ def plot_swrc_icon(
             psi_p90 = float(np.percentile(psi_obs[finite], 90))
             psi_p10 = float(np.percentile(psi_obs[finite], 10))
             theta_p90 = float(
-                _van_genuchten_model(np.array([psi_p90]), theta_r, theta_s, alpha, n)[0]
+                theta_from_psi(np.array([psi_p90]), theta_r, theta_s, alpha, n)[0]
             )
             theta_p10 = float(
-                _van_genuchten_model(np.array([psi_p10]), theta_r, theta_s, alpha, n)[0]
+                theta_from_psi(np.array([psi_p10]), theta_r, theta_s, alpha, n)[0]
             )
             ax.plot(theta_p90, psi_p90, "o", ms=8.0, color="black")
             ax.annotate(
