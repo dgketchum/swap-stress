@@ -9,8 +9,8 @@ correlated observations.
 
 Usage:
     python -m map.learning.decision_tree.train_direct \\
-        --obs-table ~/data/.../obs_level_training_emb_250m.parquet \\
-        --output-dir ~/data/.../direct_model_results
+        --obs-table /nas/soils/swapstress/training/obs_level_training_9km_global.parquet \\
+        --output-dir /nas/soils/swapstress/models/direct_rf_9km_global_pruned
 
     # Exclude feature groups
     python -m map.learning.decision_tree.train_direct \\
@@ -25,6 +25,11 @@ from typing import Dict, List, Optional
 
 import numpy as np
 from sklearn.ensemble import RandomForestRegressor
+
+try:
+    from quantile_forest import RandomForestQuantileRegressor
+except ImportError:
+    RandomForestQuantileRegressor = None
 
 from map.learning.direct.data import (
     prepare_direct_data,
@@ -48,6 +53,8 @@ def train_and_evaluate(
     holdout_col: Optional[str] = None,
     n_folds: int = 5,
     test_fold: int = 0,
+    n_jobs: int = -1,
+    quantile: bool = False,
 ) -> Dict:
     """
     Train direct RF model and evaluate with site-level holdout.
@@ -140,15 +147,25 @@ def train_and_evaluate(
     )
 
     # Train
-    print(f"Training RF with {n_estimators} trees...")
-    model = RandomForestRegressor(
-        n_estimators=n_estimators,
-        n_jobs=-1,
-        random_state=random_state,
-    )
+    if quantile:
+        if RandomForestQuantileRegressor is None:
+            raise ImportError("quantile-forest is required: uv add quantile-forest")
+        print(f"Training QRF with {n_estimators} trees (n_jobs={n_jobs})...")
+        model = RandomForestQuantileRegressor(
+            n_estimators=n_estimators,
+            n_jobs=n_jobs,
+            random_state=random_state,
+        )
+    else:
+        print(f"Training RF with {n_estimators} trees (n_jobs={n_jobs})...")
+        model = RandomForestRegressor(
+            n_estimators=n_estimators,
+            n_jobs=n_jobs,
+            random_state=random_state,
+        )
     model.fit(X_train, y_train)
 
-    # Predict
+    # Predict (QRF .predict() returns the mean, same as standard RF)
     y_pred = model.predict(X_test)
 
     # Feature importance (MDI)
@@ -314,6 +331,18 @@ if __name__ == "__main__":
         default=False,
         help="Run full k-fold cross-validation instead of single holdout.",
     )
+    parser.add_argument(
+        "--n-jobs",
+        type=int,
+        default=None,
+        help="Number of parallel jobs for RF (-1 = all cores, default: -1).",
+    )
+    parser.add_argument(
+        "--quantile",
+        action="store_true",
+        default=False,
+        help="Use RandomForestQuantileRegressor (enables quantile prediction at inference).",
+    )
     args = parser.parse_args()
 
     from map.config import feature_groups_to_exclude, load_config
@@ -332,6 +361,7 @@ if __name__ == "__main__":
 
     holdout_col = config.get("holdout_col")
     n_folds = config.get("n_folds", 5)
+    n_jobs = config.get("n_jobs", -1)
     do_kfold = args.kfold or config.get("kfold", False)
 
     if do_kfold:
@@ -351,6 +381,7 @@ if __name__ == "__main__":
                 "random_state": config.get("random_state", 42),
                 "drop_blocking_features": True,
                 "resolution_m": config.get("resolution_m", 250),
+                "n_jobs": n_jobs,
                 "config_dict": config,
             },
         )
@@ -369,4 +400,6 @@ if __name__ == "__main__":
             holdout_col=holdout_col,
             n_folds=n_folds,
             test_fold=config.get("test_fold", 0),
+            n_jobs=n_jobs,
+            quantile=config.get("quantile", False),
         )
