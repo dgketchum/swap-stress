@@ -278,11 +278,11 @@ def train_and_evaluate(
         else None
     )
 
-    # Extract best epoch from checkpoint filename (pattern: best-{epoch:03d}-...)
+    # Extract best epoch from checkpoint filename (pattern: best-epoch=007-...)
     best_ckpt_path = checkpoint_cb.best_model_path
     import re
 
-    _epoch_match = re.search(r"best-(\d+)-", os.path.basename(best_ckpt_path or ""))
+    _epoch_match = re.search(r"epoch=(\d+)", os.path.basename(best_ckpt_path or ""))
     best_epoch_num = int(_epoch_match.group(1)) if _epoch_match else stopped_epoch
     # Lightning epochs are 0-indexed; refit needs epoch *count*
     refit_epochs = best_epoch_num + 1
