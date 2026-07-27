@@ -32,6 +32,8 @@ _EXTRA_LABELS = {
     "theta": r"$\theta$ (m$^3$ m$^{-3}$)",
     "depth_cm": "Measurement depth (cm)",
     "rosetta_level": "Rosetta depth level",
+    "sand_0-5cm_mean": "Sand Fraction (g/kg)",
+    "clay_0-5cm_mean": "Clay Fraction (g/kg)",
 }
 
 # Units not conveyed by label_feature(). SoilGrids uses g/kg for texture,
@@ -220,10 +222,10 @@ def plot_1d_grid(
 ) -> str:
     """Plot all 1D PDPs in a 2-column grid."""
     n = len(pdp_results)
-    ncols = 2
+    ncols = min(n, 3)
     nrows = (n + ncols - 1) // ncols
-    fig, axes = plt.subplots(nrows, ncols, figsize=(12, 3.8 * nrows))
-    axes = axes.flatten()
+    fig, axes = plt.subplots(nrows, ncols, figsize=(4.5 * ncols, 3.8 * nrows))
+    axes = np.atleast_1d(axes).flatten()
 
     for i, res in enumerate(pdp_results):
         ax = axes[i]
@@ -283,15 +285,60 @@ def plot_ice(
 
     fig, ax = plt.subplots(figsize=(10, 6))
     for row in ice_sub:
-        ax.plot(grid, row, color="#bdc3c7", alpha=0.06, linewidth=0.5)
+        ax.plot(grid, row, color="#6baed6", alpha=0.25, linewidth=0.5)
     ax.plot(grid, pdp, color="#2c3e50", linewidth=2.5, label="PDP (average)")
 
+    ax.set_title("Individual Conditional Expectation", fontsize=14)
     ax.set_xlabel(_label(feat), fontsize=11)
     ax.set_ylabel(r"Predicted log$_{10}$ suction (cm H$_2$O)", fontsize=11)
     ax.legend(fontsize=10, framealpha=0.8)
     ax.tick_params(labelsize=9)
 
     fig.tight_layout()
+    fig.savefig(output_path, dpi=300, bbox_inches="tight", facecolor="white")
+    plt.close(fig)
+    return output_path
+
+
+def plot_ice_grid(
+    ice_results: list[dict],
+    output_path: str,
+    max_curves: int = 300,
+    random_state: int = 42,
+) -> str:
+    """Plot multiple ICE features as a single-row panel figure."""
+    n = len(ice_results)
+    fig, axes = plt.subplots(1, n, figsize=(5 * n, 5))
+    axes = np.atleast_1d(axes).flatten()
+
+    rng = np.random.RandomState(random_state)
+
+    for i, res in enumerate(ice_results):
+        ax = axes[i]
+        grid = res["grid"]
+        ice = res["ice"]
+        pdp = res["pdp"]
+        feat = res["feature"]
+
+        ns = ice.shape[0]
+        if ns > max_curves:
+            idx = rng.choice(ns, size=max_curves, replace=False)
+            ice_sub = ice[idx]
+        else:
+            ice_sub = ice
+
+        for row in ice_sub:
+            ax.plot(grid, row, color="#6baed6", alpha=0.25, linewidth=0.5)
+        ax.plot(grid, pdp, color="#2c3e50", linewidth=2.5, label="PDP (average)")
+
+        ax.set_xlabel(_label(feat), fontsize=11)
+        if i == 0:
+            ax.set_ylabel(r"Predicted log$_{10}$ suction (cm H$_2$O)", fontsize=11)
+        ax.legend(fontsize=9, framealpha=0.8)
+        ax.tick_params(labelsize=9)
+
+    fig.suptitle("Individual Conditional Expectation", fontsize=14)
+    fig.tight_layout(rect=[0, 0, 1, 0.95])
     fig.savefig(output_path, dpi=300, bbox_inches="tight", facecolor="white")
     plt.close(fig)
     return output_path
@@ -387,12 +434,14 @@ def run_pdp_analysis(config: dict) -> dict:
         }
 
     # --- ICE ---
+    all_ice_results = []
     for feat in ice_features:
         if feat not in feature_names:
             raise ValueError(f"ICE feature not in model: {feat}")
 
         print(f"Computing ICE for {feat} ...")
         ice_result = compute_ice(model, X, feature_names, feat, grid_resolution)
+        all_ice_results.append(ice_result)
         path = os.path.join(output_dir, f"ice_{feat}.png")
         plot_ice(ice_result, path, random_state=random_state)
         print(f"  Saved {path}")
@@ -402,6 +451,11 @@ def run_pdp_analysis(config: dict) -> dict:
             "pdp": ice_result["pdp"].tolist(),
             "n_curves": ice_result["ice"].shape[0],
         }
+
+    if len(all_ice_results) > 1:
+        grid_path = os.path.join(output_dir, "ice_grid.png")
+        plot_ice_grid(all_ice_results, grid_path, random_state=random_state)
+        print(f"  Saved {grid_path}")
 
     # --- 2D PDPs ---
     for pair in features_2d:
