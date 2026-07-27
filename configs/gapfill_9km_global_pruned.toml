@@ -1,7 +1,7 @@
 run_type = "gapfill"
 
-source_dir = "/nas/soils/swapstress/inference/predictions/direct_rf_9km_global_pruned"
-output_dir = "/nas/soils/swapstress/inference/predictions/direct_rf_9km_global_pruned_gapfilled"
+source_dir = "/nas/soils/swapstress/releases/global_pruned_refresh_20260520/inference"
+output_dir = "/nas/soils/swapstress/releases/global_pruned_refresh_20260520/gapfill"
 
 prefix = "suction"
 band_description = "log10_suction_cm"

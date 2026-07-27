@@ -1,9 +1,9 @@
 run_type = "predict"
 
 model_dir = "/nas/soils/swapstress/models/direct_rf_9km_global_pruned"
-static_dir = "/nas/soils/swapstress/inference/conus_features"
+static_dir = "/nas/soils/swapstress/inference/global_features/rasters_ease2"
 smap_dir = "/nas/soils/smap/SPL3SMP_E/daily_tif"
-output_dir = "/nas/soils/swapstress/inference/predictions/direct_rf_9km_global_pruned"
+output_dir = "/nas/soils/swapstress/releases/global_pruned_refresh_20260520/inference"
 
 start_date = "20240101"
 end_date = "20241231"
