@@ -213,3 +213,35 @@ __marimo__/
 /poster/poster/
 /logs/
 notes/
+
+# --- swap-stress project rules ---
+
+# JetBrains (template rule above is commented out)
+.idea/
+
+# Agent configuration -- must never be tracked
+CLAUDE.md
+AGENTS.md
+agent_policy.json
+
+# Working scratch files (see CLAUDE.md conventions)
+commands.sh
+commits.sh
+zh_commands.sh
+
+# Lightning run logs, wherever they land (the /lightning_logs/ rule above is
+# root-anchored and misses map/learning/tabular_nn/lightning_logs/)
+**/lightning_logs/
+
+# Large generated figure and animation archives -- kept on disk, never tracked
+figs/legacy/
+figs/poster/poster/
+
+# Stray nested output dirs created by scripts writing to relative paths
+notebooks/notebooks/
+
+# Flattened repo dump used as LLM context
+swap_repo.txt
+
+# Reference PDFs kept at repo root
+/*.pdf
