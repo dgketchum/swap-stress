@@ -5,17 +5,10 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
+from swapstress.swrc import theta_from_psi
+
 
 TARGET_DEPTHS = (5, 10)
-
-
-def _van_genuchten_model(psi, theta_r, theta_s, alpha, n):
-    if n <= 1:
-        return np.full_like(psi, np.nan)
-    m = 1 - 1 / n
-    psi_safe = np.maximum(psi, 1e-9)
-    term = 1 + (alpha * psi_safe) ** n
-    return theta_r + (theta_s - theta_r) / term**m
 
 
 def _param_value(params, key):
@@ -74,7 +67,7 @@ def plot_station_swrc_5_10cm(
         if not np.isfinite(psi_min) or not np.isfinite(psi_max) or psi_min >= psi_max:
             continue
         psi_smooth = np.logspace(np.log10(psi_min), np.log10(psi_max), 200)
-        theta_fit = _van_genuchten_model(psi_smooth, tr, ts, al, nn)
+        theta_fit = theta_from_psi(psi_smooth, tr, ts, al, nn)
         ax.plot(
             theta_fit, psi_smooth, "-", color=color, lw=2, label=f"Depth {depth} cm"
         )

@@ -25,18 +25,16 @@ import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 
 from retention_curve.depth_utils import depth_to_rosetta_level
+from swapstress.swrc import psi_from_theta
 
 
-def van_genuchten(theta, theta_r, theta_s, alpha, n):
-    """Compute suction (cm) from theta using van Genuchten model (inverse)."""
-    if n <= 1:
-        return np.full_like(theta, np.nan)
-    m = 1 - 1 / n
-    # Avoid division by zero
-    theta_safe = np.clip(theta, theta_r + 1e-9, theta_s - 1e-9)
-    Se = (theta_safe - theta_r) / (theta_s - theta_r)
-    Se = np.clip(Se, 1e-9, 1 - 1e-9)
-    psi = (1 / alpha) * (Se ** (-1 / m) - 1) ** (1 / n)
+def _vg_suction(theta, theta_r, theta_s, alpha, n):
+    """Inverse van Genuchten for plotting: theta -> suction (cm).
+
+    Uses a looser Se clip and a 1e-3 cm floor than the PTF baseline, matching
+    what these figures were drawn with.
+    """
+    psi = psi_from_theta(theta, theta_r, theta_s, alpha, n, se_eps=1e-9)
     return np.maximum(psi, 1e-3)
 
 
@@ -426,7 +424,7 @@ def plot_composite_swrc(
             # 2) Plot fitted VG curve (dashed)
             params = fitted_data[depth_cm].get("params", {})
             if all(k in params for k in ["theta_r", "theta_s", "alpha", "n"]):
-                suction_fit = van_genuchten(theta_grid, **params)
+                suction_fit = _vg_suction(theta_grid, **params)
                 valid = np.isfinite(suction_fit) & (suction_fit > 0)
                 ax.plot(
                     theta_grid[valid],
@@ -442,7 +440,7 @@ def plot_composite_swrc(
         # 3) Plot Rosetta VG curve
         rosetta_params = get_rosetta_params_for_level(rosetta_df, level, site_id)
         if rosetta_params and all(np.isfinite(v) for v in rosetta_params.values()):
-            suction_ros = van_genuchten(theta_grid, **rosetta_params)
+            suction_ros = _vg_suction(theta_grid, **rosetta_params)
             valid = np.isfinite(suction_ros) & (suction_ros > 0)
             ax.plot(
                 theta_grid[valid],
@@ -458,7 +456,7 @@ def plot_composite_swrc(
         # 4) Plot ML-predicted VG curve
         ml_params = get_ml_params_for_level(ml_pred_df, level, site_id)
         if ml_params and all(np.isfinite(v) for v in ml_params.values()):
-            suction_ml = van_genuchten(theta_grid, **ml_params)
+            suction_ml = _vg_suction(theta_grid, **ml_params)
             valid = np.isfinite(suction_ml) & (suction_ml > 0)
             ax.plot(
                 theta_grid[valid],

@@ -8,6 +8,7 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 
 from retention_curve import PARAM_SYMBOLS
+from swapstress.swrc import theta_from_psi
 
 
 def _load_results_to_df(results_dir):
@@ -81,15 +82,6 @@ def plot_parameter_histograms(results_dir, output_dir):
     print("Histogram plots complete.")
 
 
-def _van_genuchten_model_local(psi, theta_r, theta_s, alpha, n):
-    if n <= 1:
-        return np.full_like(psi, np.nan)
-    m = 1 - (1 / n)
-    psi_safe = np.maximum(psi, 1e-9)
-    term = 1 + (alpha * psi_safe) ** n
-    return theta_r + (theta_s - theta_r) / (term) ** m
-
-
 def plot_parameter_influence(results_dir, output_dir):
     """
     Demonstrates the influence of each fitted van Genuchten parameter on the SWRC shape.
@@ -136,7 +128,7 @@ def plot_parameter_influence(results_dir, output_dir):
             current_params = base_params.copy()
             current_params[p_influence] = param_stats[p_influence][percentile_key]
 
-            vwc_curve = _van_genuchten_model_local(
+            vwc_curve = theta_from_psi(
                 psi_range,
                 theta_r=current_params["theta_r"],
                 theta_s=current_params["theta_s"],

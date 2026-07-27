@@ -3,14 +3,7 @@ import json
 import numpy as np
 import matplotlib.pyplot as plt
 
-
-def _van_genuchten_model(psi, theta_r, theta_s, alpha, n):
-    if n <= 1:
-        return np.full_like(psi, np.nan)
-    m = 1 - 1 / n
-    psi_safe = np.maximum(psi, 1e-9)
-    term = 1 + (alpha * psi_safe) ** n
-    return theta_r + (theta_s - theta_r) / (term) ** m
+from swapstress.swrc import theta_from_psi
 
 
 def plot_reesh_site_overlays(
@@ -90,7 +83,7 @@ def plot_reesh_site_overlays(
             else:
                 psi_min, psi_max = 1e-3, 1e7
             psi_smooth = np.logspace(np.log10(psi_min), np.log10(psi_max), 200)
-            theta_pred = _van_genuchten_model(
+            theta_pred = theta_from_psi(
                 psi_smooth, float(tr), float(ts), float(al), float(nn)
             )
             ax.plot(theta_pred, psi_smooth, "-", color=c, lw=2)
