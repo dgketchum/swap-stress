@@ -31,68 +31,13 @@ import numpy as np
 import pandas as pd
 import rasterio
 
+from swapstress.swrc import psi_from_theta
+
 DEFAULT_TRAINING_TABLE = (
     "/nas/soils/swapstress/training/obs_level_training_9km_global.parquet"
 )
 DEFAULT_ROSETTA_TIF = "/nas/soils/rosetta/geotiff/US_R3H3_L2_VG.tiff"
 DEFAULT_OUTPUT_DIR = "/nas/soils/swapstress/evaluation/ptf_baseline"
-
-_SE_EPS = 1e-6
-
-
-# ---------------------------------------------------------------------------
-# Van Genuchten inverse: theta -> suction (cm)
-# ---------------------------------------------------------------------------
-
-
-def vg_suction(theta, theta_r, theta_s, alpha, n):
-    """Compute suction (cm H2O) from theta via the inverse van Genuchten eq.
-
-    Parameters
-    ----------
-    theta, theta_r, theta_s : array-like
-        Volumetric water content, residual, and saturated (m3/m3).
-    alpha : array-like
-        VG alpha in 1/cm (natural scale, not log10).
-    n : array-like
-        VG shape parameter (natural scale, must be > 1).
-
-    Returns
-    -------
-    np.ndarray
-        Suction in cm H2O.  NaN where inputs are invalid.
-    """
-    theta = np.asarray(theta, dtype=np.float64)
-    theta_r = np.asarray(theta_r, dtype=np.float64)
-    theta_s = np.asarray(theta_s, dtype=np.float64)
-    alpha = np.asarray(alpha, dtype=np.float64)
-    n = np.asarray(n, dtype=np.float64)
-
-    out = np.full(theta.shape, np.nan, dtype=np.float64)
-
-    valid = (
-        np.isfinite(theta)
-        & np.isfinite(theta_r)
-        & np.isfinite(theta_s)
-        & np.isfinite(alpha)
-        & np.isfinite(n)
-        & (n > 1.0)
-        & (alpha > 0.0)
-        & (theta_s > theta_r)
-    )
-
-    se = np.where(valid, (theta - theta_r) / (theta_s - theta_r), np.nan)
-    se = np.clip(se, _SE_EPS, 1.0 - _SE_EPS)
-
-    m = np.where(valid, 1.0 - 1.0 / n, np.nan)
-    h = np.where(
-        valid,
-        (1.0 / alpha) * (se ** (-1.0 / m) - 1.0) ** (1.0 / n),
-        np.nan,
-    )
-    out[valid] = h[valid]
-    return out
-
 
 # ---------------------------------------------------------------------------
 # Prep: extract vG parameters at training sites
@@ -423,7 +368,7 @@ def run_evaluate(args):
     model_log10 = df["swap_log10_suction"].values
 
     # Rosetta suction
-    ros_h = vg_suction(
+    ros_h = psi_from_theta(
         df["theta"].values,
         df["ros_theta_r"].values,
         df["ros_theta_s"].values,
@@ -433,7 +378,7 @@ def run_evaluate(args):
     ros_log10 = np.where(ros_h > 0, np.log10(ros_h), np.nan)
 
     # POLARIS suction
-    pol_h = vg_suction(
+    pol_h = psi_from_theta(
         df["theta"].values,
         df["pol_theta_r"].values,
         df["pol_theta_s"].values,

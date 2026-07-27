@@ -28,7 +28,8 @@ import pandas as pd
 import rasterio
 from pyproj import Transformer
 
-from map.evaluation.ptf_baseline import vg_suction, _sample_rosetta_at_sites
+from map.evaluation.ptf_baseline import _sample_rosetta_at_sites
+from swapstress.swrc import psi_from_theta
 from map.inference.predict_rasters import (
     ModelArtifacts,
     StaticRasterStack,
@@ -497,7 +498,7 @@ def add_ptf_suction(
         ("theta_smos", "suction_ptf_smos"),
     ]
     for theta_col, suction_col in sensor_cols:
-        psi_cm = vg_suction(
+        psi_cm = psi_from_theta(
             merged[theta_col].values,
             merged["ros_theta_r"].values,
             merged["ros_theta_s"].values,
