@@ -11,8 +11,8 @@ Two complementary analyses:
 
 Usage:
     python -m map.learning.decision_tree.feature_importance \\
-        --obs-table ~/data/.../obs_level_training_emb_250m.parquet \\
-        --output-dir ~/data/.../feature_importance
+        --obs-table /nas/soils/swapstress/training/obs_level_training_9km_global.parquet \\
+        --output-dir /nas/soils/swapstress/releases/global_pruned_refresh_20260520/feature_importance
 """
 
 import argparse

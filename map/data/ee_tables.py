@@ -234,9 +234,9 @@ if __name__ == "__main__":
     parser.add_argument(
         "--scale",
         type=str,
-        default="250m",
+        default="9km_global",
         choices=VALID_SCALES,
-        help="Resolution scale (default: 250m).",
+        help="Resolution scale (default: 9km_global). 250m is historical only.",
     )
     parser.add_argument(
         "--data-root",

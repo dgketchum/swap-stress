@@ -7,9 +7,9 @@ predicted retention curve for each depth.
 
 Usage:
     python -m viz.inferences.plot_holdout_swrc \
-        --obs-table ~/data/.../obs_level_training_emb_250m.parquet \
-        --model-dir ~/data/.../direct_spatial_split/ \
-        --out-dir ~/data/.../holdout_swrc_plots/ \
+        --obs-table /nas/soils/swapstress/training/obs_level_training_9km_global.parquet \
+        --model-dir /nas/soils/swapstress/models/direct_rf_9km_global_pruned \
+        --out-dir /nas/soils/swapstress/releases/global_pruned_refresh_20260520/figures/ \
         --sources mt_mesonet reesh
 """
 

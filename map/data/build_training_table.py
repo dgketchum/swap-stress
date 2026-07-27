@@ -344,7 +344,7 @@ def load_source_observations(
     fit_method: str = "bayes",
     prefer_preprocessed: bool = True,
     include_embeddings: bool = False,
-    scale: str = "250m",
+    scale: str = "9km_global",
 ) -> pd.DataFrame:
     """
     Load and join EE features with raw observations for a single source.
@@ -493,7 +493,7 @@ def build_unified_table(
     include_embeddings: bool = False,
     prefer_preprocessed: bool = True,
     amsr_vod_path: Optional[str] = None,
-    scale: str = "250m",
+    scale: str = "9km_global",
 ) -> pd.DataFrame:
     """
     Build a unified observation-level training table from multiple data sources.
@@ -634,9 +634,9 @@ if __name__ == "__main__":
     parser.add_argument(
         "--scale",
         type=str,
-        default="250m",
+        default="9km_global",
         choices=VALID_SCALES,
-        help="Resolution scale (default: 250m).",
+        help="Resolution scale (default: 9km_global). 250m is historical only.",
     )
     parser.add_argument(
         "--data-root",

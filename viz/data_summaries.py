@@ -81,7 +81,7 @@ def plot_data_count_histogram(training_path, output_path):
 
 if __name__ == "__main__":
     default_training = (
-        "/nas/soils/swapstress/training/unified_training_emb_250m.parquet"
+        "/nas/soils/swapstress/training/obs_level_training_9km_global.parquet"
     )
     default_output = "/nas/soils/swapstress/training/data_ct_histogram.png"
 

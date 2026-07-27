@@ -271,6 +271,7 @@ def list_sources() -> None:
         )
 
 
+# "250m" retained for historical reproducibility; active releases use 9km scales.
 VALID_SCALES = ("250m", "9km_conus", "9km_global")
 
 
@@ -281,7 +282,7 @@ class DataPaths:
     Centralizes path construction to avoid hardcoded paths throughout codebase.
     """
 
-    def __init__(self, data_root: str, source: DataSource, scale: str = "250m"):
+    def __init__(self, data_root: str, source: DataSource, scale: str = "9km_global"):
         """
         Initialize path resolver.
 
@@ -292,7 +293,7 @@ class DataPaths:
         source : DataSource
             Source configuration.
         scale : str
-            Resolution scale: "250m", "9km_conus", or "9km_global".
+            Resolution scale: "9km_global" (default), "9km_conus", or "250m" (historical).
         """
         if scale not in VALID_SCALES:
             raise ValueError(f"Invalid scale '{scale}'. Must be one of {VALID_SCALES}")

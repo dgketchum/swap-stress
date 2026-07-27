@@ -331,17 +331,12 @@ def compare_station_params_vs_rosetta(
 
 
 if __name__ == "__main__":
-    # training_pq_ = os.path.join('/nas', 'soils', 'swapstress', 'training',
-    #                              'stations_training_table_250m.parquet')
-    # polaris_pq_ = os.path.join('/nas', 'soils', 'polaris', 'polaris_stations.parquet')
-    # id_col_ = 'profile_id'
-
     training_pq_ = os.path.join(
         "/nas",
         "soils",
         "swapstress",
         "training",
-        "gshp_training_data_emb_250m.parquet",
+        "obs_level_training_9km_global.parquet",
     )
     polaris_pq_ = os.path.join("/nas", "soils", "polaris", "polaris_gshp.parquet")
     id_col_ = "profile_id"
