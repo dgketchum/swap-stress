@@ -323,20 +323,83 @@ def run_evaluate(args):
     output_dir = Path(args.output)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Load training observations at rosetta_level=2
+    # Load full training table for model predictions, then subset
     print("Loading training table (rosetta_level=2) ...")
-    obs = pd.read_parquet(
-        args.training_table,
-        columns=["sample_id", "rosetta_level", "theta", "log10_suction_cm", "source"],
+    full_df = pd.read_parquet(args.training_table)
+    rl2 = full_df[full_df["rosetta_level"] == 2].dropna(
+        subset=["theta", "log10_suction_cm"],
     )
-    obs = obs[obs["rosetta_level"] == 2].dropna(subset=["theta", "log10_suction_cm"])
-    print(f"  {len(obs)} observations across {obs['sample_id'].nunique()} sites")
+    print(f"  {len(rl2)} observations across {rl2['sample_id'].nunique()} sites")
 
-    # Load site-level vG params
+    # Run SWAP model: use k-fold out-of-fold predictions if available
+    model_log10 = np.full(len(rl2), np.nan)
+    if args.model_dir:
+        import json
+
+        import joblib
+
+        model_path = Path(args.model_dir)
+
+        # Check for k-fold structure
+        kfold_summary = model_path / "kfold_summary.json"
+        fold_0_split = model_path / "fold_0" / "spatial_split.json"
+
+        if kfold_summary.exists() and fold_0_split.exists():
+            print(f"\nRunning k-fold out-of-fold predictions from {model_path} ...")
+            with open(fold_0_split) as f:
+                split_info = json.load(f)
+            tile_to_fold = split_info["tile_to_fold"]
+            n_folds = split_info["n_folds"]
+
+            # Assign each rl2 row to its fold via MGRS_TILE
+            rl2_tiles = rl2["MGRS_TILE"].values
+            rl2_fold = np.array(
+                [
+                    tile_to_fold.get(str(t), -1) if pd.notna(t) else -1
+                    for t in rl2_tiles
+                ],
+                dtype=int,
+            )
+
+            for fold_i in range(n_folds):
+                fold_dir = model_path / f"fold_{fold_i}"
+                with open(fold_dir / "direct_rf_features.json") as f:
+                    feature_names = json.load(f)
+                fold_model = joblib.load(fold_dir / "direct_rf_model.joblib")
+                fold_imputer = joblib.load(fold_dir / "direct_rf_imputer.joblib")
+
+                test_mask = rl2_fold == fold_i
+                if not test_mask.any():
+                    continue
+                X = rl2.loc[test_mask, feature_names].values.astype(np.float32)
+                X = fold_imputer.transform(X)
+                pred = fold_model.predict(X)
+                model_log10[test_mask] = pred.astype(np.float64)
+                print(f"  fold {fold_i}: {int(test_mask.sum())} test rows")
+
+        else:
+            # Single model: predict on all rows (includes training data)
+            print(f"\nRunning SWAP model from {model_path} ...")
+            with open(model_path / "direct_rf_features.json") as f:
+                feature_names = json.load(f)
+            model = joblib.load(model_path / "direct_rf_model.joblib")
+            imputer = joblib.load(model_path / "direct_rf_imputer.joblib")
+
+            X = rl2[feature_names].values.astype(np.float32)
+            X = imputer.transform(X)
+            pred = model.predict(X)
+            model_log10 = pred.astype(np.float64)
+
+        n_model = int(np.isfinite(model_log10).sum())
+        print(f"  {n_model}/{len(rl2)} observations with model predictions")
+
+    # Load site-level vG params and join
     vg = pd.read_parquet(args.vg_params)
     print(f"  {len(vg)} sites with vG params")
 
-    # Join
+    obs = rl2[["sample_id", "source", "theta", "log10_suction_cm"]].copy()
+    obs["swap_log10_suction"] = model_log10
+
     df = obs.merge(
         vg[
             [
@@ -357,6 +420,7 @@ def run_evaluate(args):
     )
 
     observed = df["log10_suction_cm"].values
+    model_log10 = df["swap_log10_suction"].values
 
     # Rosetta suction
     ros_h = vg_suction(
@@ -384,6 +448,10 @@ def run_evaluate(args):
         "polaris_vs_observed": (pol_log10, observed),
         "rosetta_vs_polaris": (ros_log10, pol_log10),
     }
+    if args.model_dir:
+        pairs["swap_vs_observed"] = (model_log10, observed)
+        pairs["swap_vs_rosetta"] = (model_log10, ros_log10)
+        pairs["swap_vs_polaris"] = (model_log10, pol_log10)
 
     print("\n--- Metrics (log10 suction cm) ---")
     rows = []
@@ -475,6 +543,11 @@ def build_parser():
         "--vg-params",
         default=os.path.join(DEFAULT_OUTPUT_DIR, "site_vg_params.parquet"),
         help="Site-level vG params from prep step",
+    )
+    p_eval.add_argument(
+        "--model-dir",
+        default=None,
+        help="Path to saved SWAP model directory (adds model predictions to comparison)",
     )
     p_eval.add_argument(
         "--output",
