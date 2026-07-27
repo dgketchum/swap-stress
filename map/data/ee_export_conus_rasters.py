@@ -1,16 +1,19 @@
 """
 Export static covariate rasters and point extractions from Google Earth Engine.
 
-Exports feature groups as separate GeoTIFFs aligned to the SMAP 9 km EASE-Grid2
-(EPSG:6933), or samples the same images at training site locations producing CSVs
-with values matching the raster exports exactly.
+Exports feature groups as separate GeoTIFFs at 9 km resolution, or samples the
+same images at training site locations producing CSVs.
+
+Supports CONUS (EPSG:5070) and global (EPSG:4326) region scopes.
 
 Usage:
-    # Export all raster groups
-    python -m map.data.ee_export_conus_rasters --mode rasters --groups all
+    # Export CONUS raster groups (legacy)
+    python -m map.data.ee_export_conus_rasters --mode rasters --region conus --groups all
 
-    # Export specific raster groups
-    python -m map.data.ee_export_conus_rasters --mode rasters --groups soilgrids_shallow,worldclim
+    # Export global raster groups for the active release
+    python -m map.data.ee_export_conus_rasters --mode rasters --region global \
+        --groups soilgrids_shallow,worldclim,fao_hwsd,landsat_bands \
+        --prefix global_features/rasters_raw/staging
 
     # Extract point values at 9km resolution
     python -m map.data.ee_export_conus_rasters --mode points \
@@ -442,25 +445,51 @@ FEATURE_GROUPS = {
 # ---------------------------------------------------------------------------
 
 
-def export_rasters(groups, bucket, prefix):
-    """Submit EE Export.image tasks for each feature group."""
-    roi = _conus_roi()
+def _global_roi():
+    """Global land bounding box as ee.Geometry in WGS84."""
+    return ee.Geometry.Rectangle(
+        [-180.0, -85.0, 180.0, 85.0],
+        proj="EPSG:4326",
+        geodesic=False,
+    )
+
+
+def _resolve_roi(region):
+    """Return (roi, crs, scale, description_prefix) for the given region."""
+    if region == "global":
+        return _global_roi(), "EPSG:4326", EXPORT_SCALE, "global"
+    return _conus_roi(), EXPORT_CRS, EXPORT_SCALE, "conus"
+
+
+def export_rasters(groups, bucket, prefix, region="conus"):
+    """Submit EE Export.image tasks for each feature group.
+
+    Parameters
+    ----------
+    region : str
+        "conus" or "global". Controls ROI, CRS, and task naming.
+    """
+    roi, crs, scale, desc_prefix = _resolve_roi(region)
+    task_ids = {}
 
     for name, (build_fn, filename) in groups.items():
         image = build_fn(roi)
         task = ee.batch.Export.image.toCloudStorage(
             image=image.clip(roi).toFloat(),
-            description=f"conus_{name}_9km",
+            description=f"{desc_prefix}_{name}_9km",
             bucket=bucket,
             fileNamePrefix=f"{prefix}/{filename}",
-            crs=EXPORT_CRS,
-            scale=EXPORT_SCALE,
+            crs=crs,
+            scale=scale,
             region=roi,
             maxPixels=int(1e13),
             fileFormat="GeoTIFF",
         )
         task.start()
+        task_ids[name] = task.id
         print(f"Started raster export: {prefix}/{filename} (task: {task.id})")
+
+    return task_ids
 
 
 def export_points(groups, shapefile, index_col, bucket, prefix):
@@ -567,7 +596,7 @@ def main():
     print(f"Groups: {', '.join(groups.keys())}")
 
     if args.mode == "rasters":
-        export_rasters(groups, args.bucket, args.prefix)
+        export_rasters(groups, args.bucket, args.prefix, region=args.region)
     else:
         export_points(groups, args.shapefile, args.index_col, args.bucket, args.prefix)
 

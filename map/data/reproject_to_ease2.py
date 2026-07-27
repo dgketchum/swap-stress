@@ -1,24 +1,28 @@
 """
-Reproject EE-exported covariate rasters from EPSG:5070 to SMAP EASE-Grid2.
+Reproject EE-exported covariate rasters to a SMAP EASE-Grid2 target grid.
 
 EE cannot export in EPSG:6933, so covariates are exported in EPSG:5070
-(Conus Albers) at 9000 m. This script reprojects each GeoTIFF to the exact
-SMAP 9 km EASE-Grid2 grid defined by smap_download.py, ensuring pixel-perfect
-alignment with the daily SMAP soil moisture GeoTIFFs.
+(Conus Albers) at 9000 m. This script reprojects each GeoTIFF to either the
+full global SMAP 9 km EASE-Grid2 grid or the CONUS subset defined by
+``smap_download.py``, ensuring pixel-perfect alignment with the daily SMAP
+soil moisture GeoTIFFs.
 
 Usage:
-    # Reproject all *_9km.tif files in place (writes *_ease2.tif alongside)
+    # Reproject all *_9km.tif files to the CONUS subset in place
     python -m map.data.reproject_to_ease2 \
         --input-dir /nas/soils/swapstress/inference/conus_features
 
-    # Reproject specific files
+    # Reproject raw global exports to a dedicated output directory
     python -m map.data.reproject_to_ease2 \
-        --input-dir /nas/soils/swapstress/inference/conus_features \
-        --files soilgrids_9km.tif,worldclim_9km.tif
+        --input-dir /nas/soils/swapstress/inference/global_features/rasters_raw \
+        --output-dir /nas/soils/swapstress/inference/global_features/rasters_ease2 \
+        --grid-scope global
 
-    # Verify alignment against a SMAP daily GeoTIFF
+    # Verify alignment against a SMAP daily GeoTIFF on the same target grid
     python -m map.data.reproject_to_ease2 \
-        --input-dir /nas/soils/swapstress/inference/conus_features \
+        --input-dir /nas/soils/swapstress/inference/global_features/rasters_raw \
+        --output-dir /nas/soils/swapstress/inference/global_features/rasters_ease2 \
+        --grid-scope global \
         --verify /path/to/smap_sm_20200101.tif
 """
 
@@ -33,8 +37,7 @@ from rasterio.warp import Resampling, reproject
 from map.data.smap_download import (
     EASE2_CRS,
     MAP_SCALE,
-    _conus_slice,
-    _conus_transform,
+    resolve_ease2_grid,
 )
 
 # Groups that need nearest-neighbor resampling (categorical/discrete values)
@@ -51,7 +54,7 @@ def _resampling_for(filename):
 
 
 def reproject_raster(src_path, dst_path, dst_crs, dst_transform, dst_width, dst_height):
-    """Reproject a single raster to the SMAP EASE-Grid2 CONUS grid."""
+    """Reproject a single raster to the requested SMAP EASE-Grid2 grid."""
     resampling = _resampling_for(os.path.basename(src_path))
 
     with rasterio.open(src_path) as src:
@@ -131,9 +134,20 @@ def main():
         help="Directory containing *_9km.tif files from EE export",
     )
     parser.add_argument(
+        "--output-dir",
+        default=None,
+        help="Directory to receive *_ease2.tif outputs (default: same as --input-dir)",
+    )
+    parser.add_argument(
         "--files",
         default=None,
         help="Comma-separated filenames to reproject (default: all *_9km.tif)",
+    )
+    parser.add_argument(
+        "--grid-scope",
+        default="conus",
+        choices=["conus", "global"],
+        help="Target SMAP EASE-Grid2 window (default: conus)",
     )
     parser.add_argument(
         "--verify",
@@ -152,16 +166,20 @@ def main():
         print(f"Error: {input_dir} is not a directory")
         sys.exit(1)
 
+    output_dir = args.output_dir or input_dir
+    os.makedirs(output_dir, exist_ok=True)
+
     # Compute target grid from smap_download constants
-    row_sl, col_sl = _conus_slice()
-    dst_transform = _conus_transform(row_sl, col_sl)
+    row_sl, col_sl, dst_transform = resolve_ease2_grid(args.grid_scope)
     dst_width = col_sl.stop - col_sl.start
     dst_height = row_sl.stop - row_sl.start
 
+    print(f"Target scope: {args.grid_scope}")
     print(f"Target grid: {dst_width} x {dst_height} pixels")
     print("  CRS: EPSG:6933 (EASE-Grid2)")
     print(f"  Pixel size: {MAP_SCALE:.3f} m")
     print(f"  Transform: {dst_transform}")
+    print(f"Output dir: {output_dir}")
     print()
 
     # Find files to reproject
@@ -178,7 +196,7 @@ def main():
     for fname in filenames:
         src_path = os.path.join(input_dir, fname)
         dst_name = fname.replace("_9km.tif", "_ease2.tif")
-        dst_path = os.path.join(input_dir, dst_name)
+        dst_path = os.path.join(output_dir, dst_name)
 
         if not os.path.exists(src_path):
             print(f"  SKIP {fname} (not found)")
@@ -201,12 +219,12 @@ def main():
     if args.verify:
         print(f"\nVerification against {args.verify}:")
         ease2_files = sorted(
-            f for f in os.listdir(input_dir) if f.endswith("_ease2.tif")
+            f for f in os.listdir(output_dir) if f.endswith("_ease2.tif")
         )
         all_ok = True
         for fname in ease2_files:
             print(f"\n  {fname}:")
-            ok = verify_alignment(os.path.join(input_dir, fname), args.verify)
+            ok = verify_alignment(os.path.join(output_dir, fname), args.verify)
             if not ok:
                 all_ok = False
 
