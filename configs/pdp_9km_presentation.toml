@@ -1,0 +1,17 @@
+run_type = "pdp"
+
+model_dir = "/nas/soils/swapstress/models/direct_rf_9km_global_pruned"
+output_dir = "/nas/soils/swapstress/releases/global_pruned_refresh_20260520/feature_importance"
+
+max_samples = 5000
+grid_resolution = 100
+random_state = 42
+
+features_1d = []
+features_2d = []
+
+ice_features = [
+    "theta",
+    "sand_0-5cm_mean",
+    "clay_0-5cm_mean",
+]
