@@ -51,7 +51,15 @@ def find_replicate_vg_files(vg_dir: str, site_id: str) -> Dict[str, str]:
     return out
 
 
-def select_params_from_bayes_json(data: Dict) -> Dict[str, float]:
+def select_params_from_bayes_json(
+    data: Dict, depth_cm: Optional[float] = None
+) -> Dict[str, float]:
+    """Select VG parameters from a Bayes JSON fit at a single depth.
+
+    If *depth_cm* is given, picks the nearest successful depth.
+    Otherwise defaults to the shallowest available depth.
+    Returns a flat dict: {theta_r, theta_s, alpha, n, depth_cm}.
+    """
     depths: Dict[float, Dict[str, float]] = {}
     for k, v in (data or {}).items():
         if k == "metadata" or not isinstance(v, dict):
@@ -71,10 +79,13 @@ def select_params_from_bayes_json(data: Dict) -> Dict[str, float]:
     if not depths:
         raise ValueError("No successful parameter set found in Bayes JSON")
 
-    return depths
+    dsel = min(depths.keys())
+    if depth_cm is not None and len(depths) > 1:
+        dsel = min(depths.keys(), key=lambda x: abs(x - float(depth_cm)))
 
-
-# load_vg_fit removed; replicates are handled by find_replicate_vg_files
+    out = depths[dsel].copy()
+    out["depth_cm"] = float(dsel)
+    return out
 
 
 def _parse_datetime_index(
@@ -275,7 +286,7 @@ def build_site_dataset(
     # Choose first replicate deterministically for this generic path
     rep0 = sorted(vg_files.keys())[0]
     with open(vg_files[rep0], "r") as f:
-        vg = select_params_from_bayes_json(json.load(f))
+        vg = select_params_from_bayes_json(json.load(f), depth_cm=vwc_depth_cm)
 
     theta = load_vwc_series(site_id, vwc_dir_or_file, preferred_depth_cm=vwc_depth_cm)
     psi = theta_to_psi_cm(theta, vg["theta_r"], vg["theta_s"], vg["alpha"], vg["n"])
@@ -517,14 +528,23 @@ def build_site_dataset_from_ameriflux(
     site_id: str,
     amf_root_or_file: str,
     vg_dir: str,
+    swc_columns: Optional[List[str]] = None,
+    depth_cm: Optional[float] = None,
 ) -> pd.DataFrame:
     """Build daily dataset using AmeriFlux BASE HH data and empirical vG parameters.
 
+    Parameters
+    ----------
+    swc_columns : list of str, optional
+        If given, only these SWC columns are averaged into theta.
+        Otherwise all SWC columns are used.
+    depth_cm : float, optional
+        HYPROP depth (cm) to use for VG fits. Defaults to shallowest (0).
+
     Returns a wide DataFrame with:
-      - All daily SWC columns as theta_<name>
-      - Corresponding psi_cm_<name> via vG inversion
+      - theta (mean of selected SWC columns)
+      - Corresponding psi_cm_<replicate> via vG inversion
       - ET (from LE) and optional GPP (if present)
-      - Also includes simple aggregates: theta (mean across SWC) and psi_cm (mean across psi columns)
     """
     vg_files = find_replicate_vg_files(vg_dir, site_id)
 
@@ -543,11 +563,18 @@ def build_site_dataset_from_ameriflux(
         print(f"No SWC daily data for {site_id} at {amf_fp}")
         return None
 
+    if swc_columns is not None:
+        available = [c for c in swc_columns if c in daily_vwc.columns]
+        if not available:
+            print(f"None of {swc_columns} found in {daily_vwc.columns.tolist()}")
+            return None
+        daily_vwc = daily_vwc[available]
+
     theta_mean = daily_vwc.mean(axis=1)
     out["theta"] = theta_mean
     for rep, fp in vg_files.items():
         with open(fp, "r") as f:
-            vg = select_params_from_bayes_json(json.load(f))
+            vg = select_params_from_bayes_json(json.load(f), depth_cm=depth_cm)
         out[f"psi_cm_{rep}"] = theta_to_psi_cm(
             theta_mean, vg["theta_r"], vg["theta_s"], vg["alpha"], vg["n"]
         )
