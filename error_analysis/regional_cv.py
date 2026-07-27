@@ -40,6 +40,7 @@ def run_regional_cv(
     random_state: int = 42,
     min_samples: int = 100,
     level: str = "major",
+    n_jobs: int = -1,
 ) -> pd.DataFrame:
     """Run leave-one-climate-region-out CV using Beck et al. (2018) Koppen.
 
@@ -100,7 +101,7 @@ def run_regional_cv(
         X_test = imputer.transform(X_test)
 
         rf = RandomForestRegressor(
-            n_estimators=n_estimators, n_jobs=-1, random_state=random_state
+            n_estimators=n_estimators, n_jobs=n_jobs, random_state=random_state
         )
         rf.fit(X_train, y_train)
         y_pred = rf.predict(X_test)
@@ -206,6 +207,12 @@ def main():
         default="both",
         help="Holdout level: major (A-E), subclass (Cfa, BSk, ...), or both.",
     )
+    parser.add_argument(
+        "--n-jobs",
+        type=int,
+        default=-1,
+        help="Number of parallel RF workers (default: -1 = all cores).",
+    )
     args = parser.parse_args()
 
     model_path = Path(args.model_dir)
@@ -236,6 +243,7 @@ def main():
             random_state=config.get("random_state", 42),
             min_samples=args.min_samples,
             level=level,
+            n_jobs=args.n_jobs,
         )
         results_df["level"] = level
 
