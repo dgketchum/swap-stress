@@ -15,6 +15,8 @@ import numpy as np
 import rasterio
 from scipy.stats import gaussian_kde
 
+from swapstress.swrc import psi_from_theta
+
 FITS_DIR = Path("/nas/soils/soil_potential_obs/curve_fits/reesh/bayes")
 SMAP_DIR = "/nas/soils/smap/SPL3SMP_E/daily_tif"
 
@@ -34,11 +36,13 @@ SMAP_P99 = 0.582
 XLIM = (0.0, 0.75)
 
 
-def van_genuchten(theta_grid, theta_r, theta_s, alpha, n):
-    m = 1.0 - 1.0 / n
-    Se = (theta_grid - theta_r) / (theta_s - theta_r)
-    Se = np.clip(Se, 1e-9, 1.0 - 1e-9)
-    psi = (1.0 / alpha) * (Se ** (-1.0 / m) - 1.0) ** (1.0 / n)
+def _vg_suction(theta, theta_r, theta_s, alpha, n):
+    """Inverse van Genuchten for plotting: theta -> suction (cm).
+
+    Uses a looser Se clip and a 1e-3 cm floor than the PTF baseline, matching
+    what these figures were drawn with.
+    """
+    psi = psi_from_theta(theta, theta_r, theta_s, alpha, n, se_eps=1e-9)
     return np.maximum(psi, 1e-3)
 
 
@@ -87,7 +91,7 @@ def main(output_dir):
     for jf, dk, label, color, site in SAMPLES:
         params = load_vg_params(jf, dk)
         tg = np.linspace(params["theta_r"] + 0.001, params["theta_s"] - 0.001, 300)
-        psi = van_genuchten(tg, **params)
+        psi = _vg_suction(tg, **params)
         ax_b.plot(tg, psi, color=color, lw=1.8, label=label, zorder=3)
         tx, ty = site_positions[site]
         ax_b.text(

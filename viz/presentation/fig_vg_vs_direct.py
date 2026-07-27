@@ -26,6 +26,8 @@ from sklearn.ensemble import RandomForestRegressor
 from sklearn.impute import SimpleImputer
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
+from swapstress.swrc import psi_from_theta
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -112,13 +114,6 @@ def _train_rf(X, y, n_estimators=250, seed=42):
     return rf
 
 
-def van_genuchten(theta, theta_r, theta_s, alpha, n_param):
-    """Inverse VG: (theta, params) -> suction [cm H2O]."""
-    Se = np.clip((theta - theta_r) / (theta_s - theta_r), 1e-10, 1 - 1e-10)
-    m = 1 - 1 / n_param
-    return (1.0 / alpha) * (Se ** (-1.0 / m) - 1) ** (1.0 / n_param)
-
-
 def _metrics(y_true, y_pred):
     mask = np.isfinite(y_true) & np.isfinite(y_pred)
     yt, yp = y_true[mask], y_pred[mask]
@@ -199,12 +194,16 @@ def run_holdout(obs_path: str, vg_path: str):
             pred = 10**pred
         params[param] = pred
 
-    psi = van_genuchten(
+    # se_eps=1e-10 is the clip this figure was produced with; it is deliberately
+    # tighter than the PTF baseline's so the VG-inversion arm is shown at its
+    # most favourable, not handicapped by a coarse guard.
+    psi = psi_from_theta(
         test_obs["theta"].values,
         params["theta_r"],
         params["theta_s"],
         params["alpha"],
         params["n"],
+        se_eps=1e-10,
     )
     y_pred_vg = np.log10(np.clip(psi, 1e-6, 1e10))
 

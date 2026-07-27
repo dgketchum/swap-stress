@@ -17,6 +17,8 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 
+from swapstress.swrc import psi_from_theta
+
 FITS_DIR = Path("/nas/soils/soil_potential_obs/curve_fits/reesh/bayes")
 
 # (json_file, depth_key, label, color, site_note)
@@ -34,12 +36,13 @@ FC_LO, FC_HI = 100.0, 330.0  # field capacity band (-10 to -33 kPa)
 PWP_LO, PWP_HI = 10200.0, 20400.0  # wilting point band (-1000 to -2000 kPa)
 
 
-def van_genuchten(theta_grid, theta_r, theta_s, alpha, n):
-    """Compute suction (cm) from theta via the inverse van Genuchten equation."""
-    m = 1.0 - 1.0 / n
-    Se = (theta_grid - theta_r) / (theta_s - theta_r)
-    Se = np.clip(Se, 1e-9, 1.0 - 1e-9)
-    psi = (1.0 / alpha) * (Se ** (-1.0 / m) - 1.0) ** (1.0 / n)
+def _vg_suction(theta, theta_r, theta_s, alpha, n):
+    """Inverse van Genuchten for plotting: theta -> suction (cm).
+
+    Uses a looser Se clip and a 1e-3 cm floor than the PTF baseline, matching
+    what these figures were drawn with.
+    """
+    psi = psi_from_theta(theta, theta_r, theta_s, alpha, n, se_eps=1e-9)
     return np.maximum(psi, 1e-3)
 
 
@@ -73,7 +76,7 @@ def main(output_dir):
         theta_grid = np.linspace(
             params["theta_r"] + 0.001, params["theta_s"] - 0.001, 300
         )
-        suction = van_genuchten(theta_grid, **params)
+        suction = _vg_suction(theta_grid, **params)
 
         ax.plot(theta_grid, suction, color=color, linewidth=1.8, label=label, zorder=3)
 
