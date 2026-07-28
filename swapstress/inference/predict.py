@@ -240,6 +240,32 @@ def build_feature_matrix(
     return matrix
 
 
+def report_imputer_fill(feature_names: list[str], feature_matrix: np.ndarray) -> None:
+    """Print how many cells the imputer will fill, per feature.
+
+    The imputer substitutes a training-set value wherever a covariate is
+    missing, which is silent at the raster level: a feature absent over a whole
+    region still yields a prediction. Printing the per-feature counts makes a
+    coverage gap in the static stack visible before it reaches the product.
+    """
+    nan_counts = np.isnan(feature_matrix).sum(axis=0)
+    has_nans = np.flatnonzero(nan_counts)
+    total_cells = feature_matrix.shape[0]
+    print(
+        f"Imputer fill report ({len(has_nans)} of {len(feature_names)} "
+        f"features have NaNs):"
+    )
+    if not has_nans.size:
+        print("  (none)")
+        return
+    for col_idx in has_nans[np.argsort(nan_counts[has_nans])[::-1]]:
+        n = nan_counts[col_idx]
+        print(
+            f"  {feature_names[col_idx]:<45s}  {n:>9,} / {total_cells:,}  "
+            f"({100 * n / total_cells:.1f}%)"
+        )
+
+
 def predict_in_batches(
     model_artifacts: ModelArtifacts,
     feature_matrix: np.ndarray,
@@ -370,6 +396,7 @@ def _predict_one_day(
     overwrite: bool,
     write_linear: bool,
     quantiles: tuple[float, ...] | None,
+    imputer_fill_report: bool = False,
 ) -> bool:
     """Predict suction for a single day. Returns True if a raster was written."""
     out_name = f"suction_{date.strftime('%Y%m%d')}.tif"
@@ -397,6 +424,9 @@ def _predict_one_day(
             depth_cm=depth_cm,
             rosetta_level=rosetta_level,
         )
+        if imputer_fill_report:
+            print(f"\n{date.date()}  valid theta px: {valid_idx.size:,}")
+            report_imputer_fill(model_artifacts.feature_names, feature_matrix)
         predictions = predict_in_batches(
             model_artifacts=model_artifacts,
             feature_matrix=feature_matrix,
@@ -457,6 +487,7 @@ def run_prediction(
     config_dict: dict | None = None,
     quantiles: tuple[float, ...] | None = None,
     n_jobs: int = 1,
+    imputer_fill_report: bool = False,
 ) -> None:
     """Run daily predictions over the requested SMAP date range."""
     if batch_size <= 0:
@@ -508,6 +539,7 @@ def run_prediction(
         overwrite=overwrite,
         write_linear=write_linear,
         quantiles=quantiles,
+        imputer_fill_report=imputer_fill_report,
     )
 
     if n_jobs == 1:
@@ -637,6 +669,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Number of parallel workers for daily prediction (default: 1).",
     )
+    parser.add_argument(
+        "--imputer-fill-report",
+        action="store_true",
+        help="Print per-feature counts of cells the imputer fills, per day.",
+    )
     return parser
 
 
@@ -663,6 +700,7 @@ def main() -> None:
         config_dict=config,
         quantiles=tuple(config["quantiles"]) if config.get("quantiles") else None,
         n_jobs=config.get("n_jobs", 1),
+        imputer_fill_report=config.get("imputer_fill_report", False),
     )
 
 
