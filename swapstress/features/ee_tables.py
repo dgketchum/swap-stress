@@ -220,36 +220,18 @@ _ROSETTA_SUBPATHS = {
 }
 
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(
-        description="Convert EE CSV extracts to training parquets.",
-    )
-    parser.add_argument(
-        "--source",
-        type=str,
-        nargs="+",
-        required=True,
-        help="Source name(s) to process (e.g., gshp ncss mt_mesonet reesh lacadian).",
-    )
-    parser.add_argument(
-        "--scale",
-        type=str,
-        default="9km_global",
-        choices=VALID_SCALES,
-        help="Resolution scale (default: 9km_global). 250m is historical only.",
-    )
-    parser.add_argument(
-        "--data-root",
-        type=str,
-        default="/nas/soils",
-        help="Root data directory (default: /nas/soils).",
-    )
-    args = parser.parse_args()
+def build_tables(sources, scale="9km_global", data_root="/nas/soils"):
+    """Fold each source's Earth Engine exports into one features parquet.
 
-    for source_name in args.source:
-        print(f"\n=== Processing {source_name} at {args.scale} ===")
+    Returns the tables written. A source whose export has not landed yet is
+    reported and skipped rather than raising, so a partially-extracted run can
+    be resumed by re-running the whole stage.
+    """
+    written = []
+    for source_name in sources:
+        print(f"\n=== Processing {source_name} at {scale} ===")
         source = get_source(source_name)
-        paths = DataPaths(args.data_root, source, scale=args.scale)
+        paths = DataPaths(data_root, source, scale=scale)
 
         if paths.is_single_csv:
             csv_path = paths.ee_csv_file
@@ -272,12 +254,10 @@ if __name__ == "__main__":
         else:
             rosetta_subpath = _ROSETTA_SUBPATHS.get(source_name)
             rosetta_pqt = (
-                os.path.join(args.data_root, rosetta_subpath)
-                if rosetta_subpath
-                else None
+                os.path.join(data_root, rosetta_subpath) if rosetta_subpath else None
             )
             mappings_json = os.path.join(
-                args.data_root,
+                data_root,
                 "swapstress",
                 "training",
                 f"{source_name}_categorical_mappings_250m.json",
@@ -292,5 +272,44 @@ if __name__ == "__main__":
                 categories=CATEGORIES,
                 dropcols=DROPCOLS_250M,
             )
+        written.append(paths.ee_table)
+    return written
+
+
+def build_parser():
+    parser = argparse.ArgumentParser(
+        prog="swapstress-extract --step tables",
+        description="Convert EE CSV extracts to training parquets.",
+    )
+    parser.add_argument(
+        "--source",
+        type=str,
+        nargs="+",
+        required=True,
+        help="Source name(s) to process (e.g., gshp ncss mt_mesonet reesh lacadian).",
+    )
+    parser.add_argument(
+        "--scale",
+        type=str,
+        default="9km_global",
+        choices=VALID_SCALES,
+        help="Resolution scale (default: 9km_global). 250m is historical only.",
+    )
+    parser.add_argument(
+        "--data-root",
+        type=str,
+        default="/nas/soils",
+        help="Root data directory (default: /nas/soils).",
+    )
+    return parser
+
+
+def main(argv=None):
+    args = build_parser().parse_args(argv)
+    build_tables(args.source, scale=args.scale, data_root=args.data_root)
+
+
+if __name__ == "__main__":
+    main()
 
 # ========================= EOF ====================================================================

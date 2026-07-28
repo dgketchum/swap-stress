@@ -187,227 +187,143 @@ def get_bands(
     print(f"{empty_tiles} tiles missing")
 
 
+# Stage 01: swapstress-extract
+#
+# Two steps. 'export' starts one Earth Engine batch task per MGRS tile, writing
+# CSVs to Cloud Storage; those have to be synced down before 'tables' folds them
+# into per-source parquets. They are one stage because neither is useful alone,
+# but they are separately runnable because the wait between them is manual.
+#
+# Everything that used to be hardcoded per source -- shapefile, MGRS index,
+# region, tile splitting, output prefix -- now comes from the registry.
+
+
+def build_parser():
+    import argparse
+
+    from swapstress.cli import add_common_args
+    from swapstress.sources.registry import DEFAULT_SOURCES, SOURCES, VALID_SCALES
+
+    parser = argparse.ArgumentParser(
+        prog="swapstress-extract",
+        description="Stage 01: sample the covariate stack at every site, then "
+        "fold the exports into per-source feature tables.",
+    )
+    add_common_args(parser)
+    parser.add_argument(
+        "--step",
+        choices=["export", "tables", "all"],
+        default=None,
+        help="'export' starts the Earth Engine tasks; 'tables' converts the "
+        "downloaded CSVs (default: export).",
+    )
+    parser.add_argument(
+        "--sources",
+        type=str,
+        nargs="+",
+        default=None,
+        choices=sorted(SOURCES),
+        help=f"Sources to extract (default: {' '.join(DEFAULT_SOURCES)}).",
+    )
+    parser.add_argument(
+        "--data-root",
+        type=str,
+        default=None,
+        help="Root data directory (default: /nas/soils).",
+    )
+    parser.add_argument(
+        "--scale",
+        type=str,
+        default=None,
+        choices=VALID_SCALES,
+        help="Resolution scale for the tables step (default: 9km_global).",
+    )
+    parser.add_argument(
+        "--resolution",
+        type=int,
+        default=None,
+        help="Sampling resolution in metres (default: 250).",
+    )
+    parser.add_argument(
+        "--bucket",
+        type=str,
+        default=None,
+        help="Cloud Storage bucket to export to (default: wudr).",
+    )
+    parser.add_argument(
+        "--diagnose",
+        action="store_true",
+        help="Probe one point band by band and report nulls instead of exporting.",
+    )
+    return parser
+
+
+def main(argv=None):
+    from swapstress.cli import report_paths, resolve, stage_provenance
+    from swapstress.features.ee_tables import build_tables
+    from swapstress.sources.registry import DEFAULT_SOURCES, DataPaths, get_source
+
+    config = resolve(build_parser(), argv)
+    config.setdefault("step", "export")
+    config.setdefault("sources", DEFAULT_SOURCES)
+    config.setdefault("data_root", "/nas/soils")
+    config.setdefault("scale", "9km_global")
+    config.setdefault("resolution", 250)
+    config.setdefault("bucket", "wudr")
+
+    do_export = config["step"] in ("export", "all")
+    do_tables = config["step"] in ("tables", "all")
+
+    if config["dry_run"]:
+        for name in config["sources"]:
+            paths = DataPaths(config["data_root"], get_source(name), config["scale"])
+            report_paths(
+                f"01 extract [{name}]",
+                {"sites": paths.shapefile, "mgrs index": paths.mgrs_shapefile},
+                {
+                    "gcs prefix": f"gs://{config['bucket']}/"
+                    f"{paths.ee_output_prefix(config['resolution'])}",
+                    "local extracts": paths.ee_extracts_dir,
+                    "features table": paths.ee_table,
+                },
+            )
+        return
+
+    if do_export:
+        is_authorized()
+        for name in config["sources"]:
+            source = get_source(name)
+            paths = DataPaths(config["data_root"], source, config["scale"])
+            print(f"\n=== Exporting {name} at {config['resolution']} m ===")
+            get_bands(
+                shapefile_path=paths.shapefile,
+                mgrs_shp_path=paths.mgrs_shapefile,
+                bucket=config["bucket"],
+                file_prefix=paths.ee_output_prefix(config["resolution"]),
+                resolution=config["resolution"],
+                index_col=source.index_col,
+                split_tiles=source.ee_split_tiles,
+                check_dir=paths.ee_extracts_dir,
+                region=source.ee_region,
+                diagnose=config["diagnose"],
+            )
+
+    if do_tables:
+        tables = build_tables(
+            config["sources"],
+            scale=config["scale"],
+            data_root=config["data_root"],
+        )
+        if tables:
+            stage_provenance(
+                os.path.dirname(tables[0]),
+                config,
+                run_type="extract",
+                extras={"outputs": tables},
+            )
+
+
 if __name__ == "__main__":
-    """"""
-    run_mt_mesonet_workflow = False
-    run_rosetta_workflow = False
-    run_gshp_workflow = False
-    run_ncss_workflow = False
-    run_reesh_workflow = True
-    run_ismn_workflow = False
-    run_lacadian_workflow = False
+    main()
 
-    resolution_ = 250
-
-    root_ = "/nas"
-    gcs_bucket_ = "wudr"
-
-    if run_mt_mesonet_workflow:
-        # TODO: re-run MT Mesonet extract with the clean file (has many extra columns right now)
-        extracts_dir_ = os.path.join(
-            root_,
-            "soils",
-            "swapstress",
-            "extracts",
-            f"mt_mesonet_extracts_{resolution_}m",
-        )
-        shapefile_ = os.path.join(
-            root_,
-            "soils",
-            "soil_potential_obs",
-            "mt_mesonet",
-            "station_metadata_clean_mgrs.shp",
-        )
-        index_ = "station"
-        output_prefix_ = f"swapstress/mesonet_training_data_{resolution_}m"
-        mgrs_shapefile_ = os.path.join(root_, "boundaries", "mgrs", "mgrs_wgs.shp")
-
-        is_authorized()
-        get_bands(
-            shapefile_path=shapefile_,
-            mgrs_shp_path=mgrs_shapefile_,
-            bucket=gcs_bucket_,
-            file_prefix=output_prefix_,
-            resolution=resolution_,
-            index_col=index_,
-            split_tiles=False,
-            check_dir=extracts_dir_,
-            region="global",
-        )
-
-    elif run_rosetta_workflow:
-        extracts_dir_ = os.path.join(
-            root_, "soils", "swapstress", "extracts", "conus_extracts"
-        )
-        shapefile_ = os.path.join(
-            root_, "soils", "gis", "pretraining-roi-10000_mgrs.shp"
-        )
-        index_ = "site_id"
-        output_prefix_ = "swapstress/training_data"
-        mgrs_shapefile_ = os.path.join(root_, "boundaries", "mgrs", "mgrs_wgs.shp")
-
-        is_authorized()
-        get_bands(
-            shapefile_path=shapefile_,
-            mgrs_shp_path=mgrs_shapefile_,
-            bucket=gcs_bucket_,
-            file_prefix=output_prefix_,
-            resolution=resolution_,
-            index_col=index_,
-            split_tiles=True,
-            check_dir=extracts_dir_,
-        )
-
-    elif run_gshp_workflow:
-        extracts_dir_ = os.path.join(
-            root_, "soils", "swapstress", "extracts", f"gshp_extracts_{resolution_}m"
-        )
-        shapefile_ = os.path.join(
-            root_, "soils", "soil_potential_obs", "gshp", "wrc_aggregated_mgrs.shp"
-        )
-        index_ = "profile_id"
-        output_prefix_ = f"swapstress/gshp_training_data_{resolution_}m"
-        mgrs_shapefile_ = os.path.join(
-            root_, "boundaries", "mgrs", "mgrs_world_attr.shp"
-        )
-
-        is_authorized()
-        get_bands(
-            shapefile_path=shapefile_,
-            mgrs_shp_path=mgrs_shapefile_,
-            bucket=gcs_bucket_,
-            file_prefix=output_prefix_,
-            resolution=resolution_,
-            index_col=index_,
-            split_tiles=False,
-            diagnose=False,
-            check_dir=extracts_dir_,
-            region="global",
-        )
-
-    elif run_ncss_workflow:
-        extracts_dir_ = os.path.join(
-            root_, "soils", "swapstress", "extracts", f"ncss_extracts_{resolution_}m"
-        )
-        shapefile_ = os.path.join(
-            root_,
-            "soils",
-            "soil_potential_obs",
-            "ncss_labdatasqlite",
-            "ncss_profiles.shp",
-        )
-        # out_shp = os.path.join(root_, 'soils', 'soil_potential_obs', 'ncss_labdatasqlite',  'ncss_profiles.shp')
-        index_ = "profile_id"
-        output_prefix_ = f"swapstress/ncss_training_data_{resolution_}m"
-        mgrs_shapefile_ = os.path.join(
-            root_, "boundaries", "mgrs", "mgrs_world_attr.shp"
-        )
-
-        is_authorized()
-        get_bands(
-            shapefile_path=shapefile_,
-            mgrs_shp_path=mgrs_shapefile_,
-            bucket=gcs_bucket_,
-            file_prefix=output_prefix_,
-            resolution=resolution_,
-            index_col=index_,
-            split_tiles=False,
-            diagnose=False,
-            check_dir=extracts_dir_,
-            region="global",
-        )
-
-    elif run_reesh_workflow:
-        extracts_dir_ = os.path.join(
-            root_, "soils", "swapstress", "extracts", f"reesh_extracts_{resolution_}m"
-        )
-        shapefile_ = os.path.join(
-            root_,
-            "soils",
-            "soil_potential_obs",
-            "reesh",
-            "shapefile",
-            "reesh_sites_mgrs.shp",
-        )
-        index_ = "site_id"
-        output_prefix_ = f"swapstress/reesh_training_data_{resolution_}m"
-        mgrs_shapefile_ = os.path.join(
-            root_, "boundaries", "mgrs", "mgrs_world_attr.shp"
-        )
-
-        is_authorized()
-        get_bands(
-            shapefile_path=shapefile_,
-            mgrs_shp_path=mgrs_shapefile_,
-            bucket=gcs_bucket_,
-            file_prefix=output_prefix_,
-            resolution=resolution_,
-            index_col=index_,
-            split_tiles=False,
-            diagnose=False,
-            check_dir=extracts_dir_,
-            region="global",
-        )
-
-    elif run_lacadian_workflow:
-        extracts_dir_ = os.path.join(
-            root_,
-            "soils",
-            "swapstress",
-            "extracts",
-            f"lacadian_extracts_{resolution_}m",
-        )
-        shapefile_ = os.path.join(
-            root_,
-            "soils",
-            "soil_potential_obs",
-            "lacadian",
-            "lacadian_stations_mgrs.shp",
-        )
-        index_ = "station"
-        output_prefix_ = f"swapstress/lacadian_training_data_{resolution_}m"
-        mgrs_shapefile_ = os.path.join(
-            root_, "boundaries", "mgrs", "mgrs_world_attr.shp"
-        )
-
-        is_authorized()
-        get_bands(
-            shapefile_path=shapefile_,
-            mgrs_shp_path=mgrs_shapefile_,
-            bucket=gcs_bucket_,
-            file_prefix=output_prefix_,
-            resolution=resolution_,
-            index_col=index_,
-            split_tiles=False,
-            diagnose=False,
-            check_dir=extracts_dir_,
-            region="global",
-        )
-
-    elif run_ismn_workflow:
-        extracts_dir_ = os.path.join(
-            root_, "sfofifls", "swapstress", "extracts", f"ismn_extracts_{resolution_}m"
-        )
-        shapefile_ = os.path.join(
-            root_, "soils", "vwc_timeseries", "ismn", "ismn_stations_mgrs.shp"
-        )
-        index_ = "station_ui"
-        output_prefix_ = f"swapstress/ismn_training_data_{resolution_}m"
-        mgrs_shapefile_ = os.path.join(
-            root_, "boundaries", "mgrs", "mgrs_world_attr.shp"
-        )
-
-        is_authorized()
-        get_bands(
-            shapefile_path=shapefile_,
-            mgrs_shp_path=mgrs_shapefile_,
-            bucket=gcs_bucket_,
-            file_prefix=output_prefix_,
-            resolution=resolution_,
-            index_col=index_,
-            split_tiles=False,
-            diagnose=False,
-            check_dir=extracts_dir_,
-            region="global",
-        )
 # ========================= EOF ====================================================================

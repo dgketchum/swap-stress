@@ -1,6 +1,8 @@
-import pandas as pd
+import argparse
 import os
+
 import numpy as np
+import pandas as pd
 from swapstress.sources.gshp import sanitize_profile_id
 from swapstress.sources.ncss import ncss_to_standardized, load_ncss_parquet
 
@@ -516,97 +518,127 @@ def write_standardized_ncss(parquet_path, out_dir, minimum_points):
         )
 
 
+# Stage 00: swapstress-standardize
+#
+# Each source arrives in its own shape -- one wide CSV, a station table plus an
+# observation table, a directory of per-plot files -- so the writers below do not
+# share a signature. _RECIPES names the inputs each one wants; every path comes
+# from the registry, so adding a source is a registry edit plus one entry here.
+
+_RECIPES = {
+    "gshp": lambda paths, cfg: write_standardized_gshp(
+        paths.raw_file("curves"),
+        paths.preprocessed_dir,
+        minimum_points=cfg["minimum_points"],
+    ),
+    "ncss": lambda paths, cfg: write_standardized_ncss(
+        paths.raw_file("curves"),
+        paths.preprocessed_dir,
+        minimum_points=cfg["minimum_points"],
+    ),
+    "mt_mesonet": lambda paths, cfg: write_standardized_mt_mesonet(
+        paths.raw_file("swp"),
+        paths.raw_file("metadata"),
+        paths.preprocessed_dir,
+        profile_key="station",
+    ),
+    "lacadian": lambda paths, cfg: write_standardized_lacadian(
+        paths.raw_file("swp"),
+        paths.raw_file("metadata"),
+        paths.preprocessed_dir,
+        profile_key="station",
+    ),
+    "reesh": lambda paths, cfg: write_standardized_reesh(
+        paths.raw_dir,
+        paths.preprocessed_dir,
+        profile_key="Plot",
+    ),
+    "rosetta": lambda paths, cfg: write_standardized_rosetta(
+        paths.raw_file("curves"),
+        paths.preprocessed_dir,
+        profile_key="Index",
+    ),
+}
+
+# What each recipe reads, for the dry run. reesh takes a directory, not files.
+_RECIPE_INPUTS = {
+    "gshp": ["curves"],
+    "ncss": ["curves"],
+    "mt_mesonet": ["swp", "metadata"],
+    "lacadian": ["swp", "metadata"],
+    "reesh": [],
+    "rosetta": ["curves"],
+}
+
+
+def build_parser():
+    from swapstress.cli import add_common_args
+    from swapstress.sources.registry import DEFAULT_SOURCES
+
+    parser = argparse.ArgumentParser(
+        prog="swapstress-standardize",
+        description="Stage 00: harmonize raw source observations to "
+        "(theta, suction_cm, depth_cm).",
+    )
+    add_common_args(parser)
+    parser.add_argument(
+        "--sources",
+        type=str,
+        nargs="+",
+        default=None,
+        choices=sorted(_RECIPES),
+        help=f"Sources to standardize (default: {' '.join(DEFAULT_SOURCES)}).",
+    )
+    parser.add_argument(
+        "--data-root",
+        type=str,
+        default=None,
+        help="Root data directory (default: /nas/soils).",
+    )
+    parser.add_argument(
+        "--minimum-points",
+        type=int,
+        default=None,
+        help="Minimum retention points per depth to keep a curve (default: 4). "
+        "Applies to the lab sources, gshp and ncss.",
+    )
+    return parser
+
+
+def main(argv=None):
+    from swapstress.cli import report_paths, resolve, stage_provenance
+    from swapstress.sources.registry import DEFAULT_SOURCES, DataPaths, get_source
+
+    config = resolve(build_parser(), argv)
+    config.setdefault("sources", DEFAULT_SOURCES)
+    config.setdefault("data_root", "/nas/soils")
+    config.setdefault("minimum_points", 4)
+
+    for name in config["sources"]:
+        paths = DataPaths(config["data_root"], get_source(name))
+        inputs = {role: paths.raw_file(role) for role in _RECIPE_INPUTS[name]}
+        if not inputs:
+            inputs = {"directory": paths.raw_dir}
+
+        if config["dry_run"]:
+            report_paths(
+                f"00 standardize [{name}]",
+                inputs,
+                {"standardized": paths.preprocessed_dir},
+            )
+            continue
+
+        print(f"\n=== Standardizing {name} ===")
+        _RECIPES[name](paths, config)
+        stage_provenance(
+            paths.preprocessed_dir,
+            config,
+            run_type="standardize",
+            extras={"source": name, "inputs": inputs},
+        )
+
+
 if __name__ == "__main__":
-    run_gshp = False
-    run_rosetta = False
-    run_mt_mesonet = False
-    run_reesh = False
-    run_ncss = False
-    run_lacadian = True
-
-    if run_gshp:
-        gshp_dir_ = os.path.join("/nas", "soils", "soil_potential_obs", "gshp")
-        soil_csv_path_ = os.path.join(
-            gshp_dir_, "WRC_dataset_surya_et_al_2021_final.csv"
-        )
-        out_dir_ = os.path.join(
-            "/nas",
-            "soils",
-            "soil_potential_obs",
-            "preprocessed",
-            "gshp",
-        )
-        write_standardized_gshp(soil_csv_path_, out_dir_, minimum_points=4)
-
-    if run_rosetta:
-        root_ = os.path.join("/nas", "soils", "rosetta", "training_data")
-        props_csv_ = os.path.join(root_, "rosetta_properties.csv")
-        curves_wide_csv_ = os.path.join(root_, "rosetta_curves_wide.csv")
-        out_dir_ = os.path.join(
-            "/nas",
-            "soils",
-            "soil_potential_obs",
-            "preprocessed",
-            "rosetta",
-        )
-        write_standardized_rosetta(curves_wide_csv_, out_dir_, profile_key="Index")
-
-    if run_mt_mesonet:
-        root_ = os.path.join("/nas", "soils", "soil_potential_obs", "mt_mesonet")
-        swp_csv_ = os.path.join(root_, "swp.csv")
-        metadata_csv_ = os.path.join(root_, "station_metadata.csv")
-        out_dir_ = os.path.join(
-            "/nas",
-            "soils",
-            "soil_potential_obs",
-            "preprocessed",
-            "mt_mesonet",
-        )
-        write_standardized_mt_mesonet(
-            swp_csv_, metadata_csv_, out_dir_, profile_key="station"
-        )
-
-    if run_reesh:
-        in_dir_ = os.path.join("/nas", "soils", "soil_potential_obs", "reesh")
-        out_dir_ = os.path.join(
-            "/nas",
-            "soils",
-            "soil_potential_obs",
-            "preprocessed",
-            "reesh",
-        )
-        write_standardized_reesh(in_dir_, out_dir_, profile_key="Plot")
-
-    if run_ncss:
-        base_dir_ = os.path.join(
-            "/nas",
-            "soils",
-            "soil_potential_obs",
-            "ncss_labdatasqlite",
-        )
-        parquet_path_ = os.path.join(base_dir_, "ncss_selection.parquet")
-        out_dir_ = os.path.join(
-            "/nas",
-            "soils",
-            "soil_potential_obs",
-            "preprocessed",
-            "ncss",
-        )
-        write_standardized_ncss(parquet_path_, out_dir_, minimum_points=4)
-
-    if run_lacadian:
-        root_ = os.path.join("/nas", "soils", "soil_potential_obs", "lacadian")
-        swp_csv_ = os.path.join(root_, "swp.csv")
-        metadata_csv_ = os.path.join(root_, "station_metadata.csv")
-        out_dir_ = os.path.join(
-            "/nas",
-            "soils",
-            "soil_potential_obs",
-            "preprocessed",
-            "lacadian",
-        )
-        write_standardized_lacadian(
-            swp_csv_, metadata_csv_, out_dir_, profile_key="station"
-        )
+    main()
 
 # ========================= EOF ====================================================================
