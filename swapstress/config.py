@@ -62,6 +62,7 @@ def write_provenance(
     config: dict[str, Any],
     run_type: str,
     extras: dict[str, Any] | None = None,
+    filename: str = "provenance.json",
 ) -> str:
     """Write a ``provenance.json`` artifact to *output_dir*.
 
@@ -76,6 +77,11 @@ def write_provenance(
         ``'gapfill'``.
     extras : dict, optional
         Additional top-level fields (``inputs``, ``outputs``, ``upstream``).
+    filename : str
+        Name to write under *output_dir*.  Stages that own their output
+        directory keep the default; stages that share one (several write into
+        ``swapstress/training/``) pass a stage-specific name so the last one to
+        run does not erase the others' record.
 
     Returns
     -------
@@ -93,7 +99,7 @@ def write_provenance(
     if extras:
         doc.update(extras)
 
-    out_path = os.path.join(output_dir, "provenance.json")
+    out_path = os.path.join(output_dir, filename)
     os.makedirs(output_dir, exist_ok=True)
     with open(out_path, "w") as f:
         json.dump(doc, f, indent=2, default=str)
