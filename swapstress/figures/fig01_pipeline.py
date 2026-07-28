@@ -7,7 +7,7 @@ and land cover dropped at threshold r2_drop <= 0).
 Outputs SVG and PNG to --output-dir.
 
 Usage:
-    uv run python viz/presentation/fig3_pipeline.py --output-dir figs/presentation
+    uv run swapstress-figures --figure pipeline
 """
 
 from __future__ import annotations
@@ -274,22 +274,22 @@ def main(argv=None) -> None:
 
     svg_text = build_svg()
 
-    svg_path = out / "fig3_pipeline.svg"
+    svg_path = out / "fig01_pipeline.svg"
     svg_path.write_text(svg_text, encoding="utf-8")
-    print(f"Wrote {svg_path}")
+    print(f"Wrote {svg_path.absolute()}")
 
     # Render PNG via cairosvg (tspan subscripts degrade to inline text)
     try:
         import cairosvg
 
-        png_path = out / "fig3_pipeline.png"
+        png_path = out / "fig01_pipeline.png"
         cairosvg.svg2png(
             bytestring=svg_text.encode("utf-8"),
             write_to=str(png_path),
             output_width=W * 2,
             output_height=H * 2,
         )
-        print(f"Wrote {png_path}")
+        print(f"Wrote {png_path.absolute()}")
     except ImportError:
         print(
             "cairosvg not installed; PNG not generated. Install with: uv add cairosvg"

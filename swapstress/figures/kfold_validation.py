@@ -6,8 +6,8 @@ Three-panel 16:9 slide:
   C (right bottom) Compact per-fold metrics table
 
 Usage:
-    uv run python viz/presentation/fig5_kfold_validation.py
-    uv run python viz/presentation/fig5_kfold_validation.py --output-dir figs/presentation
+    uv run swapstress-figures --figure kfold
+    uv run swapstress-figures --figure kfold --output-dir figs/descriptor
 """
 
 import argparse
@@ -27,6 +27,7 @@ from matplotlib.patches import FancyBboxPatch
 from shapely.geometry import Polygon
 
 from swapstress.model.data import _tile_to_fold
+from swapstress.figures.basemap import states_shapefile
 
 # ---------------------------------------------------------------------------
 # Paths and constants
@@ -38,7 +39,7 @@ KFOLD_DIR = Path(
 TRAINING_TABLE = Path(
     "/nas/soils/swapstress/training/obs_level_training_9km_global.parquet"
 )
-STATES_SHP = Path("/tmp/us_states/cb_2022_us_state_20m.shp")
+STATES_SHP = Path(states_shapefile())
 
 N_FOLDS = 5
 EXCLUDE_STUSPS = {"AK", "HI", "AS", "GU", "MP", "PR", "VI"}
@@ -424,7 +425,7 @@ def main(argv=None):
     )
 
     for ext in ("png", "pdf"):
-        out = output_dir / f"fig5_kfold_validation.{ext}"
+        out = output_dir / f"kfold_validation.{ext}"
         fig.savefig(out, dpi=200, bbox_inches="tight", facecolor="white")
         print(f"  Saved {out}")
     plt.close(fig)

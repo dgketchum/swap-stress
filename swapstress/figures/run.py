@@ -1,10 +1,14 @@
 """Stage 08: swapstress-figures -- render the descriptor's figures.
 
 Every figure module here exposes ``main(argv)`` and accepts ``--output-dir``, so
-this driver is a name-to-module table plus a loop. It keeps the pre-refactor
-module names; Phase 6 of ``notes/refactor_plan.md`` is what maps them onto the
-descriptor's Fig 1-6 numbering, and the keys below are the names the descriptor
-uses so that renaming the modules will not change this interface.
+this driver is a name-to-module table plus a loop. The modules are numbered for
+the descriptor's Fig 1-6; the keys are what the descriptor calls them, so a
+later module rename does not change this interface.
+
+The old module numbers (``fig3_``, ``fig5_``, ``fig7_``, ``fig11b_``) were a
+presentation deck's ordering, not the paper's, and are gone. Two modules that
+the plan listed as Fig 4 sources are supporting analyses rather than main
+figures -- they still render on request but are not part of ``all``.
 
 A figure that fails is reported and the run continues. Most of these read a
 released product or a trained model, and a missing one should not stop the rest
@@ -18,15 +22,23 @@ import importlib
 import traceback
 from typing import List, Optional
 
-# Descriptor figure -> module providing main(argv).
-FIGURES = {
-    "pipeline": "swapstress.figures.fig3_pipeline",
-    "vg-vs-direct": "swapstress.figures.fig_vg_vs_direct",
-    "kfold": "swapstress.figures.fig5_kfold_validation",
-    "koppen": "swapstress.figures.fig7_koppen_transferability",
-    "error-map": "swapstress.figures.fig6b_error_map",
-    "drought": "swapstress.figures.fig11b_drought_timeseries",
+# Descriptor Fig 1-6 -> module providing main(argv).
+MAIN_FIGURES = {
+    "pipeline": "swapstress.figures.fig01_pipeline",
+    "coverage": "swapstress.figures.fig02_coverage",
+    "pixel-series": "swapstress.figures.fig03_pixel_series",
+    "validation-scatter": "swapstress.figures.fig04_validation_scatter",
+    "spatial-skill": "swapstress.figures.fig05_spatial_skill",
+    "uncertainty": "swapstress.figures.fig06_uncertainty",
 }
+
+# Rendered on request, not part of --figure all.
+SUPPORTING_FIGURES = {
+    "kfold": "swapstress.figures.kfold_validation",
+    "vg-vs-direct": "swapstress.figures.vg_vs_direct",
+}
+
+FIGURES = {**MAIN_FIGURES, **SUPPORTING_FIGURES}
 
 DEFAULT_OUTPUT_DIR = "figs/descriptor"
 
@@ -45,7 +57,8 @@ def build_parser() -> argparse.ArgumentParser:
         nargs="+",
         default=None,
         choices=["all", *FIGURES],
-        help=f"Figures to render (default: all -> {' '.join(FIGURES)}).",
+        help=f"Figures to render (default: all -> {' '.join(MAIN_FIGURES)}). "
+        f"Supporting analyses, on request only: {' '.join(SUPPORTING_FIGURES)}.",
     )
     parser.add_argument(
         "--output-dir",
@@ -67,7 +80,7 @@ def main(argv: Optional[List[str]] = None) -> None:
     config = resolve(build_parser(), argv)
     requested = config.get("figure") or ["all"]
     if "all" in requested:
-        requested = list(FIGURES)
+        requested = list(MAIN_FIGURES)
     output_dir = config.get("output_dir") or DEFAULT_OUTPUT_DIR
 
     if config["dry_run"]:
