@@ -7,8 +7,17 @@ import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
 
-from retention_curve import PARAM_SYMBOLS
+from swapstress.gshp import load_published_params
 from swapstress.swrc import theta_from_psi
+
+# Restored here after retention_curve.PARAM_SYMBOLS was dropped in b66775a;
+# this is the only remaining consumer.
+PARAM_SYMBOLS = {
+    "theta_r": r"$\theta_r$",
+    "theta_s": r"$\theta_s$",
+    "alpha": r"$\alpha$",
+    "n": "n",
+}
 
 
 def _load_results_to_df(results_dir):
@@ -82,13 +91,16 @@ def plot_parameter_histograms(results_dir, output_dir):
     print("Histogram plots complete.")
 
 
-def plot_parameter_influence(results_dir, output_dir):
+def plot_parameter_influence(params, output_dir):
     """
-    Demonstrates the influence of each fitted van Genuchten parameter on the SWRC shape.
+    Demonstrates the influence of each van Genuchten parameter on the SWRC shape.
     Plots SWRCs for 10th, 50th, and 90th percentiles of one parameter,
     while holding others at their mean values.
+
+    ``params`` is either a DataFrame of parameters (one row per layer) or a path
+    to a directory of fit-result JSONs.
     """
-    df = _load_results_to_df(results_dir)
+    df = params if isinstance(params, pd.DataFrame) else _load_results_to_df(params)
     if df is None:
         return
 
@@ -175,15 +187,16 @@ def plot_parameter_influence(results_dir, output_dir):
 if __name__ == "__main__":
     root_ = os.path.join("/nas", "soils")
 
-    fits = os.path.join(root_, "soil_potential_obs", "curve_fits", "gshp", "nelder")
+    gshp_csv_ = os.path.join(
+        root_,
+        "soil_potential_obs",
+        "gshp",
+        "WRC_dataset_surya_et_al_2021_final.csv",
+    )
     plot_output_dir_ = os.path.join(root_, "swapstress", "figures", "comparison_plots")
 
-    # plot_parameter_summaries(results_dir=results_dir_,
-    #                          output_dir=plot_output_dir_)
-    #
-    # plot_parameter_histograms(results_dir=results_dir_,
-    #                           output_dir=plot_output_dir_)
-
-    plot_parameter_influence(results_dir=fits, output_dir=plot_output_dir_)
+    plot_parameter_influence(
+        params=load_published_params(gshp_csv_), output_dir=plot_output_dir_
+    )
 
 # ========================= EOF ====================================================================

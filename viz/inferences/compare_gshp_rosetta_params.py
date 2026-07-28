@@ -14,64 +14,28 @@ import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
 
+from swapstress.gshp import FREE_THETA_CLASS, load_published_params
+
 PARAMS = ["theta_r", "theta_s", "alpha", "n"]
 LOG10_PARAMS = {"alpha", "n"}
 
 
-def load_gshp_groupped(csv_path):
-    """Load GSHP CSV and aggregate one row per layer_id with parameter columns present.
+def load_gshp_groupped(csv_path, swcc_classes=(FREE_THETA_CLASS,)):
+    """Load the published GSHP parameters, one row per layer.
 
-    Returns a DataFrame with columns: profile_id, layer_id, [theta_r, theta_s, alpha, n], latitude, longitude, data_flag
-    Only rows with good quality estimates are kept when possible.
+    Delegates to :func:`swapstress.gshp.load_published_params`, so alpha comes
+    back in 1/cm rather than the 1/m the published file uses.
+
+    Defaults to the YWYD subset. GSHP bounded theta_s by a texture + bulk
+    density regression for the NWYD class (30% of layers), so including those
+    layers would compare a texture-based PTF against parameters that already
+    carry a texture-based prior.
+
+    Collapsed to one row per profile to match the Rosetta side, which is
+    likewise aggregated to profile points before comparison.
     """
-    try:
-        df = pd.read_csv(csv_path, encoding="latin1", low_memory=False)
-    except Exception:
-        df = pd.read_csv(csv_path)
-
-    # Filter to good quality if column exists
-    if "data_flag" in df.columns:
-        mask_good = df["data_flag"].astype(str).str.lower().str.contains("good")
-        if mask_good.any():
-            df = df[mask_good]
-
-    needed = ["profile_id", "layer_id", "alpha", "thetar", "thetas", "n"]
-    present = [c for c in needed if c in df.columns]
-    if "profile_id" not in present and "layer_id" not in present:
-        raise ValueError("GSHP CSV missing 'profile_id' and 'layer_id' columns.")
-
-    # Aggregate one row per layer_id (first value per column)
-    # Group by profile_id primarily; fallback to layer_id
-    group_key = "profile_id" if "profile_id" in present else "layer_id"
-    agg_spec = {c: "first" for c in present if c != group_key}
-    g = (
-        df[present]
-        .groupby(group_key)
-        .agg(agg_spec)
-        .reset_index()
-        .rename(columns={group_key: "profile_id"})
-    )
-
-    # Coordinates if available
-    lat_cols = ["latitude", "latitude_decimal_degrees"]
-    lon_cols = ["longitude", "longitude_decimal_degrees"]
-    lat_src = next((c for c in lat_cols if c in df.columns), None)
-    lon_src = next((c for c in lon_cols if c in df.columns), None)
-    if lat_src and lon_src:
-        coords = (
-            df[["layer_id", lat_src, lon_src]]
-            .groupby("layer_id")
-            .agg("first")
-            .reset_index()
-        )
-        coords = coords.rename(columns={lat_src: "latitude", lon_src: "longitude"})
-        g = g.merge(coords, on="layer_id", how="left")
-
-    # Rename params to our standard
-    rename_map = {"thetar": "theta_r", "thetas": "theta_s"}
-    g = g.rename(columns=rename_map)
-
-    # Ensure profile_id exists as string identifier
+    layers = load_published_params(csv_path, swcc_classes=swcc_classes)
+    g = layers.groupby("profile_id", dropna=False).first().reset_index()
     g["profile_id"] = g["profile_id"].astype(str)
     return g
 
@@ -177,7 +141,7 @@ def compare_gshp_to_rosetta(
         if p in g.columns:
             s_g = g[p].copy()
             if p == "alpha":
-                s_g /= 100
+                # already 1/cm from the loader; Rosetta stores log10(1/cm)
                 s_g = np.log10(s_g)
                 s_g[s_g < -5] = np.nan
             s_g = s_g.dropna()

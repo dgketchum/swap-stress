@@ -7,6 +7,7 @@ import matplotlib.pyplot as plt
 
 from retention_curve import ROSETTA_LEVEL_DEPTHS, POLARIS_DEPTH_RANGES
 from viz.inferences.compare_gshp_rosetta_params import find_rosetta_param_columns
+from swapstress.gshp import load_published_params
 from swapstress.swrc import theta_from_psi
 
 """Compare GSHP SWRC fits to Rosetta curves.
@@ -61,20 +62,31 @@ def plot_curves(
 
     psi = np.logspace(-2, 6, 400)
 
-    df = pd.read_csv(gshp_csv, encoding="latin1", low_memory=False)
-    df = df[df["data_flag"] == "good quality estimate"]
-    df = df.rename(
+    # Observations come from the raw file; the parameters come from the
+    # canonical loader, which handles the 1/m -> 1/cm conversion and the
+    # quality filter in one place.
+    obs = pd.read_csv(gshp_csv, encoding="latin1", low_memory=False)
+    obs = obs.rename(
         columns={
             "latitude_decimal_degrees": "lat",
             "longitude_decimal_degrees": "lon",
-            "alpha": "alpha_pub",
-            "n": "n_pub",
-            "thetar": "theta_r_pub",
-            "thetas": "theta_s_pub",
         }
     )
-    df["alpha_pub"] /= 100
-    df["alpha_pub"][df["alpha_pub"] < -5] = np.nan
+    obs = obs.drop(columns=["alpha", "n", "thetar", "thetas"], errors="ignore")
+
+    params = load_published_params(gshp_csv).rename(
+        columns={
+            "alpha": "alpha_pub",
+            "n": "n_pub",
+            "theta_r": "theta_r_pub",
+            "theta_s": "theta_s_pub",
+        }
+    )
+    df = obs.merge(
+        params[["layer_id", "alpha_pub", "n_pub", "theta_r_pub", "theta_s_pub"]],
+        on="layer_id",
+        how="inner",
+    )
 
     keep = [
         "profile_id",
