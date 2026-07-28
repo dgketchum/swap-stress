@@ -182,7 +182,7 @@ def main():
     parser.add_argument(
         "--output-dir",
         default=None,
-        help="Output directory (default: <model-dir>/swapstress.validation/).",
+        help="Output directory (default: <model-dir>/error_analysis/).",
     )
     args = parser.parse_args()
 
