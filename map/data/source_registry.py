@@ -135,7 +135,10 @@ SOURCES = {
         ee_table_filename="gshp_ee_data_250m.parquet",
         labels_subpath="soil_potential_obs/gshp/WRC_dataset_surya_et_al_2021_final_clean.csv",
         preprocessed_subdir="gshp",
-        fit_results_subdir="gshp",
+        # No fit_results_subdir: GSHP is the one source we do not refit. Its
+        # parameters come from the published dataset via swapstress.gshp, so
+        # there is no curve_fits/gshp/ directory to fall back to.
+        fit_results_subdir=None,
         depth_col="depth_cm",
         depth_from_horizon=True,  # Uses (hzn_top + hzn_bot) / 2
         embeddings_subdir="gshp",

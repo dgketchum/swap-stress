@@ -191,7 +191,12 @@ def standardize_gshp(df, depth_col=None):
         d = _standardize_depth(d, depth_col)
     d = d.rename(columns={"suction": "suction_cm", "depth": "depth_cm"})
     keep = ["suction_cm", "theta", "depth_cm"]
-    # GSHP needs these extra data to be fit according to their approach
+    # Carried through for downstream analysis, not for fitting: we no longer
+    # refit GSHP curves. Texture and bulk density are excluded from the feature
+    # set (they are lab measurements, unavailable at inference) but are used to
+    # bin diagnostics; SWCC_classes identifies the YWYD subset whose theta_r and
+    # theta_s were fit freely, which is the only subset safe to compare against
+    # a texture-based PTF. See swapstress.gshp.
     keep += [
         c
         for c in (
