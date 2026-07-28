@@ -587,15 +587,13 @@ def run_prediction(
 
 def build_parser() -> argparse.ArgumentParser:
     """Create CLI parser."""
+    from swapstress.cli import add_common_args
+
     parser = argparse.ArgumentParser(
-        description="Run the direct RF model over aligned EASE-Grid2 rasters",
+        prog="swapstress-predict",
+        description="Stage 05: run the direct model over aligned EASE-Grid2 rasters",
     )
-    parser.add_argument(
-        "--config",
-        type=str,
-        default=None,
-        help="Path to TOML run config.",
-    )
+    add_common_args(parser)
     parser.add_argument(
         "--model-dir",
         default=None,
@@ -677,13 +675,23 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main() -> None:
+def main(argv=None) -> None:
     """CLI entry point."""
-    args = build_parser().parse_args()
+    from swapstress.cli import report_paths, resolve
 
-    from swapstress.config import load_config
+    config = resolve(build_parser(), argv)
 
-    config = load_config(args.config, vars(args))
+    if config["dry_run"]:
+        report_paths(
+            "05 predict",
+            {
+                "model dir": config.get("model_dir", DEFAULT_MODEL_DIR),
+                "static rasters": config.get("static_dir", DEFAULT_STATIC_DIR),
+                "smap rasters": config.get("smap_dir", DEFAULT_SMAP_DIR),
+            },
+            {"predictions": config.get("output_dir") or "(inferred from model dir)"},
+        )
+        return
 
     run_prediction(
         model_dir=config.get("model_dir", DEFAULT_MODEL_DIR),

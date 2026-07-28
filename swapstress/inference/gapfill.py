@@ -275,15 +275,13 @@ def run_gapfill(
 
 
 def build_parser() -> argparse.ArgumentParser:
+    from swapstress.cli import add_common_args
+
     parser = argparse.ArgumentParser(
-        description="Gap-fill aligned raster series by interpolation along the time axis",
+        prog="swapstress-gapfill",
+        description="Stage 06: gap-fill an aligned raster series along the time axis",
     )
-    parser.add_argument(
-        "--config",
-        type=str,
-        default=None,
-        help="Path to TOML run config.",
-    )
+    add_common_args(parser)
     parser.add_argument(
         "--source-dir",
         default=None,
@@ -323,15 +321,18 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main() -> None:
-    args = build_parser().parse_args()
+def main(argv=None) -> None:
+    from swapstress.cli import report_paths, resolve
 
-    from swapstress.config import load_config
+    config = resolve(build_parser(), argv, required=["output_dir"])
 
-    config = load_config(args.config, vars(args))
-
-    if not config.get("output_dir"):
-        build_parser().error("--output-dir is required (via CLI or TOML config)")
+    if config["dry_run"]:
+        report_paths(
+            "06 gapfill",
+            {"predictions": config.get("source_dir", DEFAULT_SOURCE_DIR)},
+            {"gap-filled": config["output_dir"]},
+        )
+        return
 
     run_gapfill(
         source_dir=config.get("source_dir", DEFAULT_SOURCE_DIR),
