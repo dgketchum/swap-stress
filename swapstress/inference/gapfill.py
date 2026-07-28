@@ -58,6 +58,29 @@ DEFAULT_BAND_DESCRIPTION = "log10_suction_cm"
 # ---------------------------------------------------------------------------
 
 
+def interpolate_pixel(
+    day_index: np.ndarray,
+    values: np.ndarray,
+    write_index: np.ndarray,
+) -> np.ndarray:
+    """Level 2 for a single pixel: the whole gap-filling rule, in one place.
+
+    ``values`` is that pixel's Level 1 series over ``day_index``, NaN on any day
+    with no valid retrieval. ``np.interp`` fills between observations and holds
+    the end values flat outside them, so the first and last stretches of the
+    series are extrapolated, not observed. A pixel with no valid day anywhere
+    (ocean, permanent mask) stays NODATA rather than being invented.
+
+    Factored out of the raster loop so that anything reporting on Level 2 --
+    notably the pixel-series figure -- draws the same curve the stage writes,
+    instead of a second implementation that could drift from it.
+    """
+    valid = ~np.isnan(values)
+    if not valid.any():
+        return np.full(len(write_index), NODATA_VALUE, dtype=np.float32)
+    return np.interp(write_index, day_index[valid], values[valid])
+
+
 def discover_source_rasters(
     source_dir: str | Path,
     prefix: str,
@@ -218,13 +241,9 @@ def run_gapfill(
         chunk = stack[:, col_start:col_end]
 
         for local_px in range(col_end - col_start):
-            col = chunk[:, local_px]
-            valid_mask = ~np.isnan(col)
-            if not valid_mask.any():
-                continue  # permanent NODATA (ocean etc.) — stays NODATA
-            xp = day_idx[valid_mask]
-            fp = col[valid_mask]
-            out_stack[:, col_start + local_px] = np.interp(write_t_indices, xp, fp)
+            out_stack[:, col_start + local_px] = interpolate_pixel(
+                day_idx, chunk[:, local_px], write_t_indices
+            )
 
         if (col_start // CHUNK + 1) % 5 == 0 or col_end == n_pixels:
             print(f"  pixels {col_end:,}/{n_pixels:,}", flush=True)
