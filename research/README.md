@@ -24,20 +24,18 @@ the core package never imports `research/`.
 | `figures/` | Presentation and poster figures that do not back SD Figs 1–6, plus the CONUS animations and empirical SWRC summaries |
 | `extract/` | One-off extractions — CZE, FROM-GLC10, NCSS |
 
-## Caveat on imports
+## Running it
 
-Phase 2 of the refactor moved these files without touching their import
-statements, so modules here still import from the pre-refactor top-level names
-(`map.*`, `viz.*`). They are repaired in the single mechanical rewrite in
-Phase 3, alongside the core package. Until then, expect imports in this subtree
-to fail; the code and its history are what is being preserved, not its
-immediate runnability.
+Imports here were repaired in Phase 3's mechanical rewrite, so this subtree
+runs: `pytest research/` collects and passes its 54 tests. It is still excluded
+from the default `pytest` run and from the ruff-enforced set, because it is not
+part of what the descriptor claims to reproduce — not because it is broken.
 
 ## What stayed behind
 
-Six scripts remain in `viz/presentation/` because they back the descriptor's
-figures: `fig3_pipeline.py` (Fig 1), `fig11b_drought_timeseries.py` (Fig 3),
-`fig_vg_vs_direct.py` and `fig5_kfold_validation.py` (Fig 4),
+Six figure scripts went to `swapstress/figures/` instead, because they back the
+descriptor's figures: `fig3_pipeline.py` (Fig 1), `fig11b_drought_timeseries.py`
+(Fig 3), `fig_vg_vs_direct.py` and `fig5_kfold_validation.py` (Fig 4),
 `fig7_koppen_transferability.py` (Fig 5), and `fig6b_error_map.py` (Fig 6).
-`viz/emprical_summaries/distributions.py` also stayed; it folds into
-`swapstress/figures/summaries.py` in Phase 3.
+`distributions.py` went there too; it folds into
+`swapstress/figures/summaries.py` in Phase 6.
