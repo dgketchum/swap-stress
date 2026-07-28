@@ -10,6 +10,7 @@ Usage:
     uv run python viz/presentation/fig11b_drought_timeseries.py
 """
 
+import argparse
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -71,7 +72,13 @@ def _load_observations(date_start, date_end):
     return df
 
 
-def main():
+def main(argv=None):
+    parser = argparse.ArgumentParser(
+        description="Figure 11b: observed vs modeled drought time series"
+    )
+    parser.add_argument("--output-dir", default="figs/presentation")
+    args = parser.parse_args(argv)
+
     print("Loading observations...", flush=True)
     obs = _load_observations(DATE_START, DATE_END)
 
@@ -188,7 +195,7 @@ def main():
     ax_pr.grid(axis="y", alpha=0.15)
 
     # --- Save ---
-    out_dir = Path("figs/presentation")
+    out_dir = Path(args.output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     for ext in ("png", "pdf"):
         fig.savefig(

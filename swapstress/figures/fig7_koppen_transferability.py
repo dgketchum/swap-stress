@@ -10,6 +10,7 @@ Usage:
 
 from __future__ import annotations
 
+import argparse
 from pathlib import Path
 
 import geopandas as gpd
@@ -142,7 +143,7 @@ def load_conus_koppen():
     return data
 
 
-def build_figure():
+def build_figure(output_dir=OUT_DIR):
     cv = pd.read_csv(CV_CSV)
     label_to_code = {v: k for k, v in BECK_LABELS.items()}
 
@@ -356,13 +357,23 @@ def build_figure():
     cb.ax.tick_params(labelsize=7)
 
     # ── Save ──────────────────────────────────────────────────────────
-    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    out_dir = Path(output_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
     for ext in ("png", "pdf"):
-        out_path = OUT_DIR / f"fig7_koppen_transferability.{ext}"
+        out_path = out_dir / f"fig7_koppen_transferability.{ext}"
         fig.savefig(out_path, bbox_inches="tight", facecolor="white")
-    print(f"Saved: {OUT_DIR}/fig7_koppen_transferability.{{png,pdf}}")
+        print(f"Saved: {out_path}")
     plt.close(fig)
 
 
+def main(argv=None):
+    parser = argparse.ArgumentParser(
+        description="Figure 7: Koppen-zone transferability"
+    )
+    parser.add_argument("--output-dir", default=str(OUT_DIR))
+    args = parser.parse_args(argv)
+    build_figure(args.output_dir)
+
+
 if __name__ == "__main__":
-    build_figure()
+    main()

@@ -275,7 +275,7 @@ def make_figure(y_true, y_pred_direct, y_pred_vg, output_path: Path):
 # ---------------------------------------------------------------------------
 
 
-def main():
+def main(argv=None):
     parser = argparse.ArgumentParser(description="VG vs Direct — ReESH holdout scatter")
     parser.add_argument(
         "--obs-table",
@@ -286,7 +286,7 @@ def main():
         default="/nas/soils/swapstress/training/obs_level_training_9km_global.parquet",
     )
     parser.add_argument("--output-dir", default="figs/presentation")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     out_dir = Path(args.output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)

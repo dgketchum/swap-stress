@@ -99,7 +99,13 @@ def load_smap_composite(date_str, window=3):
     return mean_theta, crs, transform
 
 
-def main(date_str, output_dir):
+def main(argv=None):
+    parser = argparse.ArgumentParser(description="Figure 6b: Error map")
+    parser.add_argument("--date", default="2023-07-15")
+    parser.add_argument("--output-dir", default="figs/presentation")
+    args = parser.parse_args(argv)
+    date_str, output_dir = args.date, args.output_dir
+
     f_rmse, f_jac = build_error_lookups()
 
     # Load SMAP theta composite (±3 days to fill orbital gaps)
@@ -227,8 +233,4 @@ def main(date_str, output_dir):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Figure 6b: Error map")
-    parser.add_argument("--date", default="2023-07-15")
-    parser.add_argument("--output-dir", default="figs/presentation")
-    args = parser.parse_args()
-    main(args.date, args.output_dir)
+    main()

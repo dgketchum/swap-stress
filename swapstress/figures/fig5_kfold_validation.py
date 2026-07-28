@@ -375,8 +375,19 @@ def draw_table(ax, summary):
 # ---------------------------------------------------------------------------
 
 
-def main(output_dir: str):
-    output_dir = Path(output_dir)
+def main(argv=None):
+    parser = argparse.ArgumentParser(
+        description="Figure 5: K-fold validation scatter + MGRS tile map",
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=str,
+        default="figs/presentation",
+        help="Output directory (default: figs/presentation/)",
+    )
+    args = parser.parse_args(argv)
+
+    output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
     print("Loading data...")
@@ -420,14 +431,4 @@ def main(output_dir: str):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(
-        description="Figure 5: K-fold validation scatter + MGRS tile map",
-    )
-    parser.add_argument(
-        "--output-dir",
-        type=str,
-        default="figs/presentation",
-        help="Output directory (default: figs/presentation/)",
-    )
-    args = parser.parse_args()
-    main(args.output_dir)
+    main()

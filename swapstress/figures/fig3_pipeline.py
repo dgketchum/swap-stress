@@ -260,14 +260,14 @@ def build_svg() -> str:
 # ---------------------------------------------------------------------------
 
 
-def main() -> None:
+def main(argv=None) -> None:
     parser = argparse.ArgumentParser(description="Generate Fig 3: pipeline diagram")
     parser.add_argument(
         "--output-dir",
         default="figs/presentation",
         help="Output directory for SVG and PNG",
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     out = Path(args.output_dir)
     out.mkdir(parents=True, exist_ok=True)
