@@ -8,8 +8,8 @@ the conditional bias and sensitivity analyses, and sigma_SMAP = 0.067
 (ISMN-observed ubRMSE at 5 cm, n=811 stations).
 
 Usage:
-    uv run python -m swapstress.figures.fig6b_error_map
-    uv run python -m swapstress.figures.fig6b_error_map --date 2023-07-15
+    uv run swapstress-figures --figure uncertainty
+    uv run swapstress-figures --figure uncertainty -- --date 2023-07-15
 """
 
 from __future__ import annotations
@@ -22,14 +22,21 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import rasterio
+from rasterio.windows import from_bounds
 from scipy.interpolate import interp1d
+from swapstress.figures.basemap import states_shapefile
 
+RELEASE_DIR = Path("/nas/soils/swapstress/releases/global_pruned_refresh_20260520")
+# Stage 04 writes the error analyses beside the model, not into the release
+# tree; the old release path here never existed.
 ERROR_DIR = Path(
-    "/nas/soils/swapstress/releases/global_pruned_refresh_20260520/evaluation"
+    "/nas/soils/swapstress/models/direct_rf_9km_global_pruned/error_analysis"
 )
 SMAP_DIR = Path("/nas/soils/smap/SPL3SMP_E/daily_tif")
-PRED_DIR = Path("/nas/soils/swapstress/releases/global_pruned_refresh_20260520/gapfill")
-STATES_SHP = Path("/tmp/us_states/cb_2022_us_state_20m.shp")
+# Level 1 rather than gap-filled: the mask only needs the pixels that carry a
+# same-day retrieval, and this figure is about the model's own uncertainty.
+PRED_DIR = RELEASE_DIR / "inference_l3"
+STATES_SHP = Path(states_shapefile())
 
 SIGMA_SMAP_PUB = 0.04  # published SMAP L3 ubRMSE
 SIGMA_SMAP_OBS = 0.089  # ISMN-observed RMSE (811 stations, 5 cm, no bias correction)
@@ -101,8 +108,8 @@ def load_smap_composite(date_str, window=3):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Figure 6b: Error map")
-    parser.add_argument("--date", default="2023-07-15")
-    parser.add_argument("--output-dir", default="figs/presentation")
+    parser.add_argument("--date", default="2024-07-15")
+    parser.add_argument("--output-dir", default="figs/descriptor")
     args = parser.parse_args(argv)
     date_str, output_dir = args.date, args.output_dir
 
@@ -111,12 +118,28 @@ def main(argv=None):
     # Load SMAP theta composite (±3 days to fill orbital gaps)
     smap, smap_crs, smap_transform = load_smap_composite(date_str, window=3)
 
-    # Load suction prediction for masking (valid CONUS pixels)
+    # Load suction prediction for masking (valid CONUS pixels).
+    # The SMAP dailies are a CONUS window of the same EASE-Grid2 raster the
+    # predictions are written on -- same CRS, same 9 km cells -- while the
+    # prediction covers the globe. Read through the matching window rather than
+    # resampling, so the two arrays line up cell for cell.
     pred_path = PRED_DIR / f"suction_{date_str.replace('-', '')}.tif"
+    smap_bounds = rasterio.transform.array_bounds(*smap.shape, smap_transform)
     with rasterio.open(pred_path) as src:
-        pred = src.read(1).astype(np.float32)
-        pred_transform = src.transform
+        window = (
+            from_bounds(*smap_bounds, transform=src.transform)
+            .round_offsets()
+            .round_lengths()
+        )
+        pred = src.read(1, window=window).astype(np.float32)
+        pred_transform = src.window_transform(window)
         pred_crs = src.crs
+
+    if pred.shape != smap.shape:
+        raise ValueError(
+            f"Windowed prediction is {pred.shape} but the SMAP composite is "
+            f"{smap.shape}; the two rasters are not on the same grid."
+        )
 
     valid_smap = np.isfinite(smap)
     valid_pred = np.isfinite(pred) & (pred > 0)
@@ -225,11 +248,11 @@ def main(argv=None):
 
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
-    fname = f"fig6b_error_map_{date_str.replace('-', '')}"
+    fname = f"fig06_uncertainty_{date_str.replace('-', '')}"
     for ext in ("png", "pdf"):
         fig.savefig(out / f"{fname}.{ext}", dpi=200, bbox_inches="tight")
     plt.close(fig)
-    print(f"Saved to {out / fname}.png")
+    print(f"Saved to {(out / f'{fname}.png').absolute()}")
 
 
 if __name__ == "__main__":

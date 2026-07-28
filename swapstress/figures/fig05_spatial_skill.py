@@ -5,7 +5,7 @@ Top-R:  CONUS Koppen map with standard Beck colors.
 Bot-R:  CONUS choropleth colored by LOSO R² per climate zone.
 
 Usage:
-    uv run python viz/presentation/fig7_koppen_transferability.py
+    uv run swapstress-figures --figure spatial-skill
 """
 
 from __future__ import annotations
@@ -21,18 +21,19 @@ import pandas as pd
 import rasterio
 from matplotlib.colors import ListedColormap, BoundaryNorm, to_rgba
 from rasterio.windows import from_bounds
+from swapstress.figures.basemap import lakes_shapefile, states_shapefile
 
 matplotlib.use("Agg")
 
 # ── Paths ────────────────────────────────────────────────────────────
 BECK_TIF = Path("/nas/soils/swapstress/ancillary/Beck_KG_V1_present_0p0083.tif")
-CV_CSV = Path(
-    "/nas/soils/swapstress/releases/global_pruned_refresh_20260520/evaluation"
-    "/regional_cv_results.csv"
-)
-STATES_SHP = Path("/tmp/us_states/cb_2022_us_state_20m.shp")
-LAKES_SHP = Path("/tmp/ne_10m_lakes/ne_10m_lakes.shp")
-OUT_DIR = Path("figs/presentation")
+# The regional CV results are written by stage 04 beside the model, not into
+# the release tree -- the old release path here never existed.
+MODEL_DIR = Path("/nas/soils/swapstress/models/direct_rf_9km_global_pruned")
+CV_CSV = MODEL_DIR / "error_analysis" / "v01" / "regional_cv_results.csv"
+STATES_SHP = Path(states_shapefile())
+LAKES_SHP = Path(lakes_shapefile())
+OUT_DIR = Path("figs/descriptor")
 
 # ── CONUS bounds (EPSG:4326) ─────────────────────────────────────────
 LON_MIN, LON_MAX = -125.0, -66.5
@@ -360,9 +361,9 @@ def build_figure(output_dir=OUT_DIR):
     out_dir = Path(output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     for ext in ("png", "pdf"):
-        out_path = out_dir / f"fig7_koppen_transferability.{ext}"
+        out_path = out_dir / f"fig05_spatial_skill.{ext}"
         fig.savefig(out_path, bbox_inches="tight", facecolor="white")
-        print(f"Saved: {out_path}")
+        print(f"Saved: {out_path.absolute()}")
     plt.close(fig)
 
 
