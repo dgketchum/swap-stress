@@ -40,6 +40,9 @@ dependencies = [
     "pyarrow",
     "tomli; python_version < '3.11'",
     "quantile-forest>=1.4.1",
+    "pymc>=5.25.1",
+    "mgrs>=1.5.4",
+    "cairosvg>=2.9.0",
 ]
 
 [build-system]
