@@ -26,6 +26,11 @@ DATA_ROOT="${DATA_ROOT:-/nas/soils}"
 MODEL_DIR="${MODEL_DIR:-${DATA_ROOT}/swapstress/models/direct_rf_9km_global_pruned}"
 FIG_DIR="${FIG_DIR:-${REPO}/figs/descriptor}"
 
+RELEASE_DIR="${RELEASE_DIR:-${DATA_ROOT}/swapstress/releases/${RELEASE}}"
+INFERENCE_DIR="${INFERENCE_DIR:-${RELEASE_DIR}/inference}"   # Level 1
+GAPFILL_DIR="${GAPFILL_DIR:-${RELEASE_DIR}/gapfill}"         # Level 2
+PRODUCT_DIR="${PRODUCT_DIR:-${RELEASE_DIR}/product}"
+
 TRAIN_CONFIG="${TRAIN_CONFIG:-${CONFIGS}/train_9km_global_pruned.toml}"
 PREDICT_CONFIG="${PREDICT_CONFIG:-${CONFIGS}/predict_9km_global_pruned.toml}"
 GAPFILL_CONFIG="${GAPFILL_CONFIG:-${CONFIGS}/gapfill_9km_global_pruned.toml}"
@@ -90,11 +95,13 @@ stage 05 swapstress-predict --config "${PREDICT_CONFIG}"
 
 stage 06 swapstress-gapfill --config "${GAPFILL_CONFIG}"
 
-# Stage 07 lands with the product writer (Phase 5 of notes/refactor_plan.md).
-if in_range 07; then
-  echo ""
-  echo "  stage 07 (swapstress-package): not yet implemented; skipping."
-fi
+# Level 2 is what gets released; deriving its per-pixel gapfill_flag needs the
+# Level 1 rasters alongside, which is why both directories are passed.
+stage 07 swapstress-package \
+  --source-dir "${GAPFILL_DIR}" \
+  --level1-dir "${INFERENCE_DIR}" \
+  --output-dir "${PRODUCT_DIR}" \
+  --level 2
 
 stage 08 swapstress-figures --output-dir "${FIG_DIR}"
 

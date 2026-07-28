@@ -85,8 +85,7 @@ STAGES: List[Stage] = [
         "07",
         "swapstress-package",
         "swapstress.inference.product:main",
-        "Write the released product: dual-band MPa and log10(cm), CF attributes.",
-        implemented=False,
+        "Write the released product: MPa and log10(cm) bands, CF attributes.",
     ),
     Stage(
         "08",
