@@ -242,16 +242,15 @@ def train_and_evaluate(
     return results
 
 
-if __name__ == "__main__":
+def build_parser():
+    from swapstress.cli import add_common_args
+
     parser = argparse.ArgumentParser(
-        description="Train direct RF model: EE features + theta -> log10(suction_cm)",
+        prog="swapstress-train",
+        description="Stage 03: train the direct model, "
+        "EE features + theta -> log10(suction_cm).",
     )
-    parser.add_argument(
-        "--config",
-        type=str,
-        default=None,
-        help="Path to TOML run config.",
-    )
+    add_common_args(parser)
     parser.add_argument(
         "--obs-table",
         type=str,
@@ -343,16 +342,22 @@ if __name__ == "__main__":
         default=False,
         help="Use RandomForestQuantileRegressor (enables quantile prediction at inference).",
     )
-    args = parser.parse_args()
+    return parser
 
-    from swapstress.config import feature_groups_to_exclude, load_config
 
-    config = load_config(args.config, vars(args))
+def main(argv=None):
+    from swapstress.cli import report_paths, resolve
+    from swapstress.config import feature_groups_to_exclude
 
-    if not config.get("obs_table"):
-        parser.error("--obs-table is required (via CLI or TOML config)")
-    if not config.get("output_dir"):
-        parser.error("--output-dir is required (via CLI or TOML config)")
+    config = resolve(build_parser(), argv, required=["obs_table", "output_dir"])
+
+    if config["dry_run"]:
+        report_paths(
+            "03 train",
+            {"training table": config["obs_table"]},
+            {"model dir": config["output_dir"]},
+        )
+        return
 
     # Convert positive feature_groups to exclude_groups
     exclude_groups = config.get("exclude_groups")
@@ -362,7 +367,7 @@ if __name__ == "__main__":
     holdout_col = config.get("holdout_col")
     n_folds = config.get("n_folds", 5)
     n_jobs = config.get("n_jobs", -1)
-    do_kfold = args.kfold or config.get("kfold", False)
+    do_kfold = config.get("kfold", False)
 
     if do_kfold:
         from swapstress.model.crossval import run_kfold_cv
@@ -403,3 +408,7 @@ if __name__ == "__main__":
             n_jobs=n_jobs,
             quantile=config.get("quantile", False),
         )
+
+
+if __name__ == "__main__":
+    main()

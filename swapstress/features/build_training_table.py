@@ -35,6 +35,7 @@ from swapstress.sources.registry import (
     get_source,
     DataSource,
     DataPaths,
+    DEFAULT_SOURCES,
     TRAINING_TABLE_DROP_COLS,
     VALID_SCALES,
 )
@@ -620,28 +621,32 @@ def build_unified_table(
     return combined
 
 
-if __name__ == "__main__":
+def build_parser():
+    from swapstress.cli import add_common_args
+
     parser = argparse.ArgumentParser(
-        description="Build unified observation-level training table.",
+        prog="swapstress-build-table",
+        description="Stage 02: build the unified observation-level training table.",
     )
+    add_common_args(parser)
     parser.add_argument(
         "--sources",
         type=str,
         nargs="+",
-        default=["gshp", "ncss", "mt_mesonet", "reesh", "lacadian"],
-        help="Source names to include.",
+        default=None,
+        help=f"Source names to include (default: {' '.join(DEFAULT_SOURCES)}).",
     )
     parser.add_argument(
         "--scale",
         type=str,
-        default="9km_global",
+        default=None,
         choices=VALID_SCALES,
         help="Resolution scale (default: 9km_global). 250m is historical only.",
     )
     parser.add_argument(
         "--data-root",
         type=str,
-        default="/nas/soils",
+        default=None,
         help="Root data directory (default: /nas/soils).",
     )
     parser.add_argument(
@@ -658,29 +663,66 @@ if __name__ == "__main__":
     parser.add_argument(
         "--fit-method",
         type=str,
-        default="bayes",
+        default=None,
         help="Fitting method for JSON files (default: bayes).",
     )
-    args = parser.parse_args()
+    return parser
 
-    output_path_ = args.output
-    if output_path_ is None:
-        suffix = f"_emb_{args.scale}" if args.embeddings else f"_{args.scale}"
-        output_path_ = os.path.join(
-            args.data_root,
-            "swapstress",
-            "training",
-            f"obs_level_training{suffix}.parquet",
-        )
+
+def default_output_path(data_root, scale, embeddings):
+    """Where the training table lands when --output is not given."""
+    suffix = f"_emb_{scale}" if embeddings else f"_{scale}"
+    return os.path.join(
+        data_root, "swapstress", "training", f"obs_level_training{suffix}.parquet"
+    )
+
+
+def main(argv=None):
+    from swapstress.cli import report_paths, resolve, stage_provenance
+    from swapstress.sources.registry import DataPaths, get_source
+
+    config = resolve(build_parser(), argv)
+    config.setdefault("sources", DEFAULT_SOURCES)
+    config.setdefault("scale", "9km_global")
+    config.setdefault("data_root", "/nas/soils")
+    config.setdefault("fit_method", "bayes")
+
+    output_path = config.get("output") or default_output_path(
+        config["data_root"], config["scale"], config["embeddings"]
+    )
+
+    if config["dry_run"]:
+        # The observations come from preprocessed/ (prefer_preprocessed=True);
+        # fit_results_dir is only consulted when that directory is absent, so it
+        # is not reported as a required input.
+        inputs = {}
+        for name in config["sources"]:
+            paths = DataPaths(config["data_root"], get_source(name), config["scale"])
+            inputs[f"{name} features"] = paths.ee_table
+            inputs[f"{name} observations"] = paths.preprocessed_dir
+            if paths.labels_file:
+                inputs[f"{name} published vG"] = paths.labels_file
+        report_paths("02 build-table", inputs, {"training table": output_path})
+        return
 
     build_unified_table(
-        sources=args.sources,
-        data_root=args.data_root,
-        output_path=output_path_,
-        fit_method=args.fit_method,
-        include_embeddings=args.embeddings,
+        sources=config["sources"],
+        data_root=config["data_root"],
+        output_path=output_path,
+        fit_method=config["fit_method"],
+        include_embeddings=config["embeddings"],
         prefer_preprocessed=True,
-        scale=args.scale,
+        scale=config["scale"],
     )
+    stage_provenance(
+        os.path.dirname(output_path),
+        config,
+        run_type="build_table",
+        extras={"outputs": [output_path]},
+    )
+
+
+if __name__ == "__main__":
+    main()
 
 # ========================= EOF ====================================================================

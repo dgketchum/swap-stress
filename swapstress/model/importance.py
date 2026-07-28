@@ -422,16 +422,14 @@ def run_analysis(
     return results
 
 
-if __name__ == "__main__":
+def build_parser():
+    from swapstress.cli import add_common_args
+
     parser = argparse.ArgumentParser(
+        prog="swapstress-importance",
         description="Feature importance analysis for direct suction model.",
     )
-    parser.add_argument(
-        "--config",
-        type=str,
-        default=None,
-        help="Path to TOML run config.",
-    )
+    add_common_args(parser)
     parser.add_argument(
         "--obs-table",
         type=str,
@@ -474,16 +472,21 @@ if __name__ == "__main__":
         default=None,
         help="Spatial grouping grid cell size in metres (default: 250).",
     )
-    args = parser.parse_args()
+    return parser
 
-    from swapstress.config import load_config
 
-    config = load_config(args.config, vars(args))
+def main(argv=None):
+    from swapstress.cli import report_paths, resolve
 
-    if not config.get("obs_table"):
-        parser.error("--obs-table is required (via CLI or TOML config)")
-    if not config.get("output_dir"):
-        parser.error("--output-dir is required (via CLI or TOML config)")
+    config = resolve(build_parser(), argv, required=["obs_table", "output_dir"])
+
+    if config["dry_run"]:
+        report_paths(
+            "importance",
+            {"training table": config["obs_table"]},
+            {"output dir": config["output_dir"]},
+        )
+        return
 
     run_analysis(
         obs_table_path=config["obs_table"],
@@ -495,3 +498,7 @@ if __name__ == "__main__":
         resolution_m=config.get("resolution_m", 250),
         config_dict=config,
     )
+
+
+if __name__ == "__main__":
+    main()
