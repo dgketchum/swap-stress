@@ -13,7 +13,7 @@ Reports per-site R², ΔR² relative to the θ_L3 baseline, and partial
 correlation of the predictor with the flux residual.
 
 Usage:
-    python -m map.evaluation.flux_regression \
+    python -m research.flux.flux_regression \
         --input /nas/soils/swapstress/evaluation/flux_validation/flux_site_daily.parquet \
         --output-dir /nas/soils/swapstress/evaluation/flux_validation/regression
 """

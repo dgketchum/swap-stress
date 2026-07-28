@@ -14,8 +14,8 @@ from typing import Any, Dict
 import numpy as np
 import pandas as pd
 
-from map.learning.direct.data import assign_spatial_group
-from map.learning.direct.metrics import (
+from swapstress.model.data import assign_spatial_group
+from swapstress.model.metrics import (
     compute_metrics,
     compute_metrics_by_site,
     compute_metrics_by_source,

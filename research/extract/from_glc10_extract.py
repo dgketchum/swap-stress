@@ -11,7 +11,7 @@ import ee
 import geopandas as gpd
 import pandas as pd
 
-from map.data.call_ee import is_authorized
+from swapstress.features.call_ee import is_authorized
 
 CLASS_LABELS = {
     10: "Cropland",

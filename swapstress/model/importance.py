@@ -10,7 +10,7 @@ Two complementary analyses:
    Key comparisons include landsat_bands vs landsat_indices vs full landsat.
 
 Usage:
-    python -m map.learning.decision_tree.feature_importance \\
+    python -m swapstress.model.importance \\
         --obs-table /nas/soils/swapstress/training/obs_level_training_9km_global.parquet \\
         --output-dir /nas/soils/swapstress/releases/global_pruned_refresh_20260520/feature_importance
 """
@@ -26,19 +26,19 @@ from sklearn.ensemble import RandomForestRegressor
 from sklearn.inspection import permutation_importance
 from sklearn.metrics import r2_score
 
-from map.data.features import (
+from swapstress.features.features import (
     aggregate_importance_by_group,
     classify_feature,
     filter_feature_groups,
     get_feature_columns,
 )
-from map.learning.direct.data import (
+from swapstress.model.data import (
     apply_site_split,
     create_site_split,
     filter_complete_samples,
 )
-from map.learning.direct.metrics import compute_metrics
-from map.learning.direct.preprocessing import build_preprocessor
+from swapstress.model.metrics import compute_metrics
+from swapstress.model.preprocessing import build_preprocessor
 
 
 def run_permutation_importance(
@@ -399,7 +399,7 @@ def run_analysis(
 
     # Write provenance artifact
     if config_dict is not None:
-        from map.config import input_checksum, write_provenance
+        from swapstress.config import input_checksum, write_provenance
 
         prov_path = write_provenance(
             output_dir=output_dir,
@@ -476,7 +476,7 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    from map.config import load_config
+    from swapstress.config import load_config
 
     config = load_config(args.config, vars(args))
 

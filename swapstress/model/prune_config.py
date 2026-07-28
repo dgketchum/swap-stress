@@ -6,7 +6,7 @@ whose r2_drop is at or below the threshold, and writes a new TOML config with
 the surviving feature_groups list.
 
 Usage:
-    uv run python -m map.learning.decision_tree.prune_config \
+    uv run python -m swapstress.model.prune_config \
         --ablation-csv /nas/.../group_ablation.csv \
         --base-config configs/train_9km_global.toml \
         --threshold 0.0 \

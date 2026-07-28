@@ -14,7 +14,7 @@ Produces:
   - l3_vs_l4_bias_by_texture.png  Texture-stratified bias (leakage diagnostic)
 
 Usage:
-    python -m map.evaluation.l3_vs_l4_swp \
+    python -m research.sensors.l3_vs_l4_swp \
         --l3-dir /path/to/inference_l3 \
         --l4-dir /path/to/inference_l4 \
         --output-dir /path/to/evaluation/l3_vs_l4
@@ -37,7 +37,7 @@ import pandas as pd
 import rasterio
 from pyproj import Transformer
 
-from site_modeling.prep import select_params_from_bayes_json, theta_to_psi_cm
+from research.vg_inversion.site_modeling.prep import select_params_from_bayes_json, theta_to_psi_cm
 
 SUCTION_RE = re.compile(r"^suction_(\d{8})\.tif$")
 NODATA = -9999.0

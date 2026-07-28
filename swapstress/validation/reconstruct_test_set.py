@@ -19,7 +19,7 @@ import joblib
 import numpy as np
 import pandas as pd
 
-from map.learning.direct.data import prepare_direct_data
+from swapstress.model.data import prepare_direct_data
 
 MODEL_DIR = "/nas/soils/swapstress/models/direct_rf_9km_global_pruned"
 

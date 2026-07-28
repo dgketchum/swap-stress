@@ -157,7 +157,7 @@ def feature_groups_to_exclude(
     list of str
         Groups to *exclude*, suitable for ``filter_feature_groups()``.
     """
-    from map.data.features import FEATURE_GROUPS
+    from swapstress.features.features import FEATURE_GROUPS
 
     # Skip meta-aliases like "landsat" that overlap with sub-groups
     all_groups = {k for k in FEATURE_GROUPS if k not in ("landsat",)}

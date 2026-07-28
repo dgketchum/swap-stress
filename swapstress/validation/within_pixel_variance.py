@@ -29,7 +29,7 @@ import pandas as pd
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-from error_analysis.reconstruct_test_set import MODEL_DIR
+from swapstress.validation.reconstruct_test_set import MODEL_DIR
 
 
 def compute_within_pixel_stats(
@@ -182,7 +182,7 @@ def main():
     parser.add_argument(
         "--output-dir",
         default=None,
-        help="Output directory (default: <model-dir>/error_analysis/).",
+        help="Output directory (default: <model-dir>/swapstress.validation/).",
     )
     args = parser.parse_args()
 
@@ -190,7 +190,7 @@ def main():
     output_dir = args.output_dir or os.path.join(args.model_dir, "error_analysis")
     os.makedirs(output_dir, exist_ok=True)
 
-    from error_analysis.reconstruct_test_set import _get_resolution_m
+    from swapstress.validation.reconstruct_test_set import _get_resolution_m
 
     with open(model_path / "direct_model_results.json") as f:
         model_results = json.load(f)
@@ -209,7 +209,7 @@ def main():
     df = pd.read_parquet(config["obs_table"])
     df = df.dropna(subset=["theta", "log10_suction_cm", "lat", "lon"])
 
-    from map.learning.direct.data import assign_spatial_group
+    from swapstress.model.data import assign_spatial_group
 
     df["spatial_group"] = assign_spatial_group(df, resolution_m=resolution_m)
     df = df.dropna(subset=["spatial_group"])
@@ -220,7 +220,7 @@ def main():
     print(f"  {len(multi_site)} pixels with >=2 sites")
 
     if "rosetta_level" not in df.columns and "depth_cm" in df.columns:
-        from retention_curve.depth_utils import depth_to_rosetta_level
+        from swapstress.sources.depth import depth_to_rosetta_level
 
         df["rosetta_level"] = df["depth_cm"].apply(
             lambda d: depth_to_rosetta_level(d) if pd.notna(d) else None

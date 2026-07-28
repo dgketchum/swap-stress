@@ -8,8 +8,8 @@ the conditional bias and sensitivity analyses, and sigma_SMAP = 0.067
 (ISMN-observed ubRMSE at 5 cm, n=811 stations).
 
 Usage:
-    uv run python -m viz.presentation.fig6b_error_map
-    uv run python -m viz.presentation.fig6b_error_map --date 2023-07-15
+    uv run python -m swapstress.figures.fig6b_error_map
+    uv run python -m swapstress.figures.fig6b_error_map --date 2023-07-15
 """
 
 from __future__ import annotations

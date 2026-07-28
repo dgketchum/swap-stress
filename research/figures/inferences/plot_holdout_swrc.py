@@ -6,7 +6,7 @@ and generates one PNG per site showing observed data points and a smooth
 predicted retention curve for each depth.
 
 Usage:
-    python -m viz.inferences.plot_holdout_swrc \
+    python -m research.figures.inferences.plot_holdout_swrc \
         --obs-table /nas/soils/swapstress/training/obs_level_training_9km_global.parquet \
         --model-dir /nas/soils/swapstress/models/direct_rf_9km_global_pruned \
         --out-dir /nas/soils/swapstress/releases/global_pruned_refresh_20260520/figures/ \
@@ -27,15 +27,15 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics import mean_squared_error, r2_score
 
-from map.data.features import get_feature_columns
-from map.learning.direct.data import (
+from swapstress.features.features import get_feature_columns
+from swapstress.model.data import (
     apply_site_split,
     audit_dataset,
     create_site_split,
     filter_blocking_features,
     filter_complete_samples,
 )
-from map.learning.direct.preprocessing import build_preprocessor
+from swapstress.model.preprocessing import build_preprocessor
 
 
 def extract_site_name(sample_id: str) -> str:

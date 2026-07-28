@@ -29,7 +29,7 @@ Outputs:
     - swp.csv (paired SWP/VWC observations for retention curve fitting)
 
 Usage:
-    python -m vwc_series.lacadian
+    python -m swapstress.sources.lacadian
 """
 
 import os

@@ -11,9 +11,9 @@ import pytorch_lightning as pl
 from torch.utils.data import DataLoader
 from pytorch_lightning.callbacks import ModelCheckpoint
 
-from map.learning import DEVICE
-from map.learning.mae.dataset import CombinedVwcDataset
-from map.learning.mae.mae import VwcMAE
+from research.neural import DEVICE
+from research.neural.mae.dataset import CombinedVwcDataset
+from research.neural.mae.mae import VwcMAE
 
 
 def _score_window(v):

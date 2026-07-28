@@ -26,7 +26,7 @@ from matplotlib.colors import LogNorm
 from matplotlib.patches import FancyBboxPatch
 from shapely.geometry import Polygon
 
-from map.learning.direct.data import _tile_to_fold
+from swapstress.model.data import _tile_to_fold
 
 # ---------------------------------------------------------------------------
 # Paths and constants

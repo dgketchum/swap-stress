@@ -5,7 +5,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from lmfit import Model
 
-from retention_curve.swrc import SWRC
+from swapstress.fitting import SWRC
 from swapstress.swrc import theta_from_psi
 
 

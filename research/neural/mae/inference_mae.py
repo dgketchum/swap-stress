@@ -9,9 +9,9 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
-from map.learning import DEVICE
-from map.learning.mae.dataset import CombinedVwcDataset
-from map.learning.mae.mae import VwcMAE
+from research.neural import DEVICE
+from research.neural.mae.dataset import CombinedVwcDataset
+from research.neural.mae.mae import VwcMAE
 
 
 def find_best_model_checkpoint(checkpoints_root):

@@ -2,8 +2,8 @@ import os
 import torch
 from PIL import ImageShow
 from visualtorch import layered_view
-from map.learning.tabular_nn.tabular_nn import VanillaMLP, MLPWithEmbeddings
-from map.learning.mae.mae import VwcMAE
+from research.neural.tabular_nn.models import VanillaMLP, MLPWithEmbeddings
+from research.neural.mae.mae import VwcMAE
 
 
 class _NoOpViewer(ImageShow.Viewer):

@@ -6,7 +6,7 @@ and provides functions for filtering, classifying, and aggregating feature
 importance by group.
 
 Usage:
-    from map.data.features import FEATURE_GROUPS, filter_feature_groups, classify_feature
+    from swapstress.features.features import FEATURE_GROUPS, filter_feature_groups, classify_feature
 
     # Get feature columns excluding certain groups
     filtered = filter_feature_groups(feature_cols, exclude_groups=['embeddings', 'polaris'])
@@ -21,7 +21,7 @@ Usage:
 import re
 from typing import Dict, List
 
-from map.data import ee_feature_list
+from swapstress.features import ee_feature_list
 
 # Embedding column patterns
 _EMBEDDING_PATTERNS = [

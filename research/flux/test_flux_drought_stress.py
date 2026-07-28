@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from map.evaluation import flux_drought_stress as fds
+from research.flux import flux_drought_stress as fds
 
 
 def _dates(n):
@@ -32,7 +32,7 @@ def test_const_beta_cannot_capture_stress_shape():
     beta = 1.0 / (1.0 + np.exp(-30.0 * (theta - 0.25)))  # stress ramp
     flux = pot * beta + rng.normal(0, 0.02, n)
     dates = _dates(n)
-    from map.evaluation import flux_beta_models as fbm
+    from research.flux import flux_beta_models as fbm
 
     cv_const = fds.const_beta_cv_skill(pot, flux, dates)
     cv_theta = fbm.beta_cv_skill(

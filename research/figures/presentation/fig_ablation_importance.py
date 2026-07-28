@@ -43,8 +43,8 @@ GROUP_LABELS = {
 
 def run_theta_ablation(ablation_dir: Path, obs_table: Path) -> dict:
     """Run 5-fold CV without theta and return the result dict."""
-    from map.learning.direct.crossval import run_kfold_cv
-    from map.learning.direct.data import prepare_direct_data
+    from swapstress.model.crossval import run_kfold_cv
+    from swapstress.model.data import prepare_direct_data
 
     exp_dir = ablation_dir / "drop_theta"
 
@@ -53,8 +53,8 @@ def run_theta_ablation(ablation_dir: Path, obs_table: Path) -> dict:
         """Wrapper that strips theta from all_features before training."""
         import os
         import pandas as pd
-        from map.learning.direct.preprocessing import prepare_rf_arrays
-        from map.learning.direct.reporting import evaluate_and_report
+        from swapstress.model.preprocessing import prepare_rf_arrays
+        from swapstress.model.reporting import evaluate_and_report
         from sklearn.ensemble import RandomForestRegressor
 
         data = prepare_direct_data(

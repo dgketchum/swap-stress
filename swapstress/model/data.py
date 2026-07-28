@@ -16,7 +16,7 @@ import numpy as np
 import pandas as pd
 from sklearn.model_selection import train_test_split
 
-from map.data.features import (
+from swapstress.features.features import (
     filter_feature_groups,
     get_feature_columns,
 )

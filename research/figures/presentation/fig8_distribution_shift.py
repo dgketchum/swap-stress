@@ -3,7 +3,7 @@
 Five-panel figure with overlaid density histograms and Wasserstein distance.
 
 Usage:
-    python -m viz.presentation.fig8_distribution_shift \
+    python -m research.figures.presentation.fig8_distribution_shift \
         --obs-table /nas/soils/swapstress/training/obs_level_training_9km_global.parquet \
         --output-dir figs/presentation \
         --smap-subsample 10

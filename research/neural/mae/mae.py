@@ -3,8 +3,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from map.learning import LEARNING_RATE, WEIGHT_DECAY
-from map.learning.mae.dataset import PositionalEncoding
+from research.neural import LEARNING_RATE, WEIGHT_DECAY
+from research.neural.mae.dataset import PositionalEncoding
 
 
 class VwcMAE(pl.LightningModule):

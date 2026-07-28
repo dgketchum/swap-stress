@@ -33,8 +33,8 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from map.evaluation import flux_features as ff
-from map.evaluation import flux_stats as fs
+from research.flux import flux_features as ff
+from research.flux import flux_stats as fs
 
 # Growing-season thresholds (shared with the rest of the flux validation).
 T_AVG_MIN = 5.0

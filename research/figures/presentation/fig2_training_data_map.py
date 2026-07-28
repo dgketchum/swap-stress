@@ -7,8 +7,8 @@ Style matches Figure 1b (fig1_panel_bc.py): white background, hidden
 top/right spines, compact legend, 200 dpi.
 
 Usage:
-    uv run python -m viz.presentation.fig2_training_data_map
-    uv run python -m viz.presentation.fig2_training_data_map --output-dir figs/presentation
+    uv run python -m research.figures.presentation.fig2_training_data_map
+    uv run python -m research.figures.presentation.fig2_training_data_map --output-dir figs/presentation
 """
 
 from __future__ import annotations

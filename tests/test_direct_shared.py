@@ -12,7 +12,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from map.learning.direct.data import (
+from swapstress.model.data import (
     assign_mgrs_fold,
     assign_spatial_group,
     apply_mgrs_split,
@@ -29,12 +29,12 @@ from map.learning.direct.data import (
     write_kfold_manifest,
     write_split_manifest,
 )
-from map.learning.direct.metrics import (
+from swapstress.model.metrics import (
     compute_metrics,
     compute_metrics_by_source,
     compute_metrics_by_site,
 )
-from map.learning.direct.preprocessing import (
+from swapstress.model.preprocessing import (
     NNPreprocessor,
     get_categorical_feature_columns,
     get_numeric_feature_columns,
@@ -396,7 +396,7 @@ class TestNNPreprocessor:
 class TestManifestInterop:
     def test_two_way_manifest_is_upgraded_for_nn(self, tmp_path):
         """Legacy two-way manifests should be upgraded in place for NN use."""
-        from map.learning.direct.data import prepare_direct_data, read_split_manifest
+        from swapstress.model.data import prepare_direct_data, read_split_manifest
 
         # Write a two-way manifest (no val_groups)
         manifest = {
@@ -446,7 +446,7 @@ class TestManifestInterop:
 
     def test_rf_writes_three_way_manifest(self, tiny_parquet, tmp_path):
         """RF trainer must write a manifest with val_groups so NN can consume it."""
-        from map.learning.direct.data import (
+        from swapstress.model.data import (
             prepare_direct_data,
             read_split_manifest,
             write_split_manifest,
@@ -492,7 +492,7 @@ class TestManifestInterop:
 
     def test_rf_merges_val_into_train(self, tiny_parquet, tmp_path):
         """RF should train on train+val groups, not just train groups."""
-        from map.learning.direct.data import prepare_direct_data
+        from swapstress.model.data import prepare_direct_data
 
         data = prepare_direct_data(
             obs_table_path=tiny_parquet,
@@ -517,7 +517,7 @@ class TestManifestInterop:
 
     def test_manifest_written_to_shared_path(self, tmp_path):
         """write_split_manifest creates parent dirs and writes correctly."""
-        from map.learning.direct.data import write_split_manifest
+        from swapstress.model.data import write_split_manifest
 
         shared_path = str(tmp_path / "shared" / "split.json")
         write_split_manifest(

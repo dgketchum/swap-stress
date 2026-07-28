@@ -13,7 +13,7 @@ Sources:
     - Rosetta: Gridded prior from pedotransfer (pre-computed VG params)
 
 Usage:
-    from map.data.source_registry import SOURCES, get_source
+    from swapstress.sources.registry import SOURCES, get_source
 
     # Get a specific source config
     gshp = get_source('gshp')
@@ -136,7 +136,7 @@ SOURCES = {
         labels_subpath="soil_potential_obs/gshp/WRC_dataset_surya_et_al_2021_final_clean.csv",
         preprocessed_subdir="gshp",
         # No fit_results_subdir: GSHP is the one source we do not refit. Its
-        # parameters come from the published dataset via swapstress.gshp, so
+        # parameters come from the published dataset via swapstress.sources.gshp, so
         # there is no curve_fits/gshp/ directory to fall back to.
         fit_results_subdir=None,
         depth_col="depth_cm",

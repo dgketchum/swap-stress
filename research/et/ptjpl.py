@@ -9,7 +9,7 @@ import geopandas as gpd
 from tqdm import tqdm
 
 from openet import ptjpl
-from et.et_utils import get_lanid
+from research.et.et_utils import get_lanid
 
 sys.path.insert(0, os.path.abspath(".."))
 sys.setrecursionlimit(5000)

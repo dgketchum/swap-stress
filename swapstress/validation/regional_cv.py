@@ -27,8 +27,8 @@ from sklearn.impute import SimpleImputer
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-from error_analysis.reconstruct_test_set import sample_beck_koppen
-from map.learning.direct.metrics import compute_metrics
+from swapstress.validation.reconstruct_test_set import sample_beck_koppen
+from swapstress.model.metrics import compute_metrics
 
 MODEL_DIR = "/nas/soils/swapstress/models/direct_rf_9km_global_pruned"
 
@@ -187,7 +187,7 @@ def main():
     parser.add_argument(
         "--output-dir",
         default=None,
-        help="Output directory (default: <model-dir>/error_analysis/).",
+        help="Output directory (default: <model-dir>/swapstress.validation/).",
     )
     parser.add_argument(
         "--n-estimators",

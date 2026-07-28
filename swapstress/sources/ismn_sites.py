@@ -7,7 +7,7 @@ import pandas as pd
 from ismn.interface import ISMN_Interface
 
 # Reuse the existing depth helper, do not reimplement
-from vwc_series.ismn_vwc import _depth_from_meta
+from swapstress.sources.ismn import _depth_from_meta
 
 _DS_GLOBAL = None
 

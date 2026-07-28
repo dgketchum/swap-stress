@@ -9,7 +9,7 @@ Output: one row per sample_id with 20 columns:
   vod_{asc,desc}_{mean,stddev}_{winter,spring,summer,autumn,annual}
 
 Usage:
-    python -m map.data.amsr_extract \
+    python -m swapstress.features.amsr_extract \
         --amsr-dir /path/to/amsr/nc4s \
         --sites-parquet /path/to/training.parquet \
         --output /path/to/amsr_vod_climatology.parquet

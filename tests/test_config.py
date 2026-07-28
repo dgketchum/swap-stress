@@ -1,10 +1,10 @@
-"""Tests for map.config — TOML loading and provenance generation."""
+"""Tests for swapstress.config — TOML loading and provenance generation."""
 
 import json
 import os
 
 
-from map.config import (
+from swapstress.config import (
     feature_groups_to_exclude,
     get_git_commit,
     get_version,
@@ -167,7 +167,7 @@ class TestFeatureGroupsToExclude:
 
     def test_all_groups_included(self):
         """Including all groups produces an empty exclude list."""
-        from map.data.features import FEATURE_GROUPS
+        from swapstress.features.features import FEATURE_GROUPS
 
         all_groups = [k for k in FEATURE_GROUPS if k != "landsat"]
         exclude = feature_groups_to_exclude(all_groups)

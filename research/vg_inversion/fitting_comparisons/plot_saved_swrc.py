@@ -1,7 +1,7 @@
 import os
 from typing import List
 
-from retention_curve.swrc import SWRC
+from swapstress.fitting import SWRC
 
 
 def _json_files(d: str) -> List[str]:

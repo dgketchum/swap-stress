@@ -1,8 +1,11 @@
-"""Published van Genuchten parameters from the GSHP database.
+"""The GSHP source: published van Genuchten parameters, and site preparation.
 
 For GSHP layers we use the parameters Gupta et al. (2021) published rather than
-refitting the retention curves ourselves. This module is the one place that
-reads them, so the unit conversion and the quality filter happen exactly once.
+refitting the retention curves ourselves. :func:`load_published_params` is the
+one place that reads them, so the unit conversion and the quality filter happen
+exactly once. :func:`process_soil_data` is the upstream step that turns the raw
+distribution into the per-profile metadata and MGRS-joined point file used for
+Earth Engine extraction.
 
 Why not refit
 -------------
@@ -63,14 +66,18 @@ so the default quality filter already removes it. It is the only one.
 
 Note on the ``*_clean.csv`` variant
 -----------------------------------
-``WRC_dataset_surya_et_al_2021_final_clean.csv`` is a per-profile file built for
-Earth Engine point extraction; it collapses each profile with ``first``, so its
-parameter columns belong to whichever layer happened to sort first. It is not a
-source of per-layer parameters. Point this loader at the full dataset.
+``WRC_dataset_surya_et_al_2021_final_clean.csv`` is the per-profile file
+:func:`process_soil_data` writes for Earth Engine point extraction; it collapses
+each profile with ``first``, so its parameter columns belong to whichever layer
+happened to sort first. It is not a source of per-layer parameters. Point
+:func:`load_published_params` at the full dataset.
 """
 
 from __future__ import annotations
 
+from pathlib import Path
+
+import geopandas as gpd
 import numpy as np
 import pandas as pd
 
@@ -116,6 +123,7 @@ __all__ = [
     "sanitize_profile_id",
     "load_published_params",
     "to_swrc_arrays",
+    "process_soil_data",
 ]
 
 
@@ -260,6 +268,121 @@ def to_swrc_arrays(params: pd.DataFrame):
         params["alpha"].to_numpy(dtype=np.float64),
         params["n"].to_numpy(dtype=np.float64),
     )
+
+
+def process_soil_data(csv_path, shp_path, output_dir):
+    """Prepare GSHP for extraction: per-profile metadata plus an MGRS join.
+
+    Writes ``<stem>_clean.csv`` (one row per profile, see the module note) and
+    ``wrc_aggregated_mgrs.{csv,shp}`` (the same points tagged with their MGRS
+    tile, which is what the Earth Engine extraction samples and what the
+    spatial split blocks on).
+
+    Args:
+        csv_path: the full ``WRC_dataset_surya_et_al_2021_final.csv``.
+        shp_path: MGRS grid shapefile.
+        output_dir: directory to write the three outputs to.
+    """
+    csv_path = Path(csv_path).expanduser()
+    shp_path = Path(shp_path).expanduser()
+    output_dir = Path(output_dir).expanduser()
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    print(f"Output will be saved to: {output_dir}")
+
+    print(f"Loading soil data from: {csv_path}")
+    df = pd.read_csv(csv_path, encoding="latin1")
+
+    # profile_id is used as a filename elsewhere, so strip path delimiters on
+    # both sides of every join.
+    if "profile_id" in df.columns:
+        df["profile_id"] = df["profile_id"].astype(str).apply(sanitize_profile_id)
+
+    print("Preparing cleaned metadata CSV (uid, classes, coords, flags)...")
+    required_cols = [
+        "profile_id",
+        "layer_id",
+        "SWCC_classes",
+        "latitude_decimal_degrees",
+        "longitude_decimal_degrees",
+        "data_flag",
+        "thetar",
+        "thetas",
+        "alpha",
+        "n",
+        "hzn_top",
+        "hzn_bot",
+    ]
+
+    missing = [c for c in required_cols if c not in df.columns]
+    if missing:
+        print(f"Warning: missing expected columns in source CSV: {missing}")
+
+    # One row per profile: extraction samples a point, and several layers share
+    # the same coordinates.
+    cols_present = [c for c in required_cols if c in df.columns]
+    base = df[cols_present].copy()
+
+    agg_cols = [c for c in cols_present if c != "profile_id"]
+    agg_spec = {c: "first" for c in agg_cols}
+
+    grouped_clean = base.groupby("profile_id", dropna=False).agg(agg_spec).reset_index()
+    obs_counts = (
+        base.groupby("profile_id", dropna=False).size().reset_index(name="obs_ct")
+    )
+    clean_df = grouped_clean.merge(obs_counts, on="profile_id", how="left")
+
+    if "layer_id" in clean_df.columns:
+        clean_df = clean_df.drop(columns=["layer_id"])
+
+    clean_df = clean_df.rename(columns=_RENAME)
+    clean_df["depth_cm"] = (clean_df["hzn_top"] + clean_df["hzn_bot"]) * 0.5
+
+    dup_mask = clean_df["profile_id"].duplicated(keep=False)
+    if dup_mask.any():
+        dup_vals = sorted(set(clean_df.loc[dup_mask, "profile_id"]))
+        example_vals = ", ".join(map(str, dup_vals[:10]))
+        raise ValueError(
+            f"Duplicate profile_id values found ({len(dup_vals)} unique "
+            f"duplicates). Examples: {example_vals}"
+        )
+
+    clean_path = output_dir / (csv_path.stem + "_clean.csv")
+    clean_df.to_csv(clean_path, index=False)
+    print(f"Wrote cleaned metadata CSV: {clean_path}")
+
+    print(f"Loading MGRS grid from: {shp_path}")
+    mgrs_gdf = gpd.read_file(shp_path)
+
+    if not {"latitude", "longitude"}.issubset(clean_df.columns):
+        raise ValueError("Cleaned metadata missing 'latitude' and/or 'longitude'")
+
+    geometry = gpd.points_from_xy(clean_df["longitude"], clean_df["latitude"])
+    soil_gdf = gpd.GeoDataFrame(clean_df.copy(), geometry=geometry, crs="EPSG:4326")
+    print(f"Created GeoDataFrame with {len(soil_gdf)} features.")
+
+    if soil_gdf.crs != mgrs_gdf.crs:
+        print(f"Reprojecting MGRS grid to {soil_gdf.crs}...")
+        mgrs_gdf = mgrs_gdf.to_crs(soil_gdf.crs)
+
+    print("Performing spatial join with MGRS grid...")
+    joined_gdf = gpd.sjoin(
+        soil_gdf,
+        mgrs_gdf[["MGRS_TILE", "geometry"]],
+        how="inner",
+        predicate="intersects",
+    ).drop(columns=["index_right"])
+
+    output_csv_path = output_dir / "wrc_aggregated_mgrs.csv"
+    output_shp_path = output_dir / "wrc_aggregated_mgrs.shp"
+
+    print(f"Exporting CSV to: {output_csv_path}")
+    joined_gdf.drop(columns="geometry").to_csv(output_csv_path, index=False)
+
+    print(f"Exporting Shapefile to: {output_shp_path}")
+    joined_gdf.to_file(output_shp_path)
+
+    print("\nProcessing finished successfully!")
 
 
 # ========================= EOF ====================================================================

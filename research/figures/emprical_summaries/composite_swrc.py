@@ -13,7 +13,7 @@ Usage:
     python viz/emprical_summaries/composite_swrc.py
 
     Or programmatically:
-    from viz.emprical_summaries.composite_swrc import plot_composite_swrc
+    from research.figures.emprical_summaries.composite_swrc import plot_composite_swrc
     plot_composite_swrc(site_id, reesh_json, rosetta_df, ml_pred_df, direct_pred_df, out_path)
 """
 
@@ -24,7 +24,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 
-from retention_curve.depth_utils import depth_to_rosetta_level
+from swapstress.sources.depth import depth_to_rosetta_level
 from swapstress.swrc import psi_from_theta
 
 

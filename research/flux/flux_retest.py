@@ -35,11 +35,11 @@ import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 
-from map.evaluation import flux_cv_analysis as fca  # noqa: E402
-from map.evaluation import flux_features as ff  # noqa: E402
-from map.evaluation import flux_stats as fs  # noqa: E402
-from map.evaluation import flux_stress_models as fsm  # noqa: E402
-from map.evaluation import flux_transferability as ft  # noqa: E402
+from research.flux import flux_cv_analysis as fca  # noqa: E402
+from research.flux import flux_features as ff  # noqa: E402
+from research.flux import flux_stats as fs  # noqa: E402
+from research.flux import flux_stress_models as fsm  # noqa: E402
+from research.flux import flux_transferability as ft  # noqa: E402
 
 DAILY_PARQUET = (
     "/nas/soils/swapstress/evaluation/flux_validation/flux_site_daily.parquet"

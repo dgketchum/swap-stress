@@ -5,9 +5,9 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
-from retention_curve import ROSETTA_LEVEL_DEPTHS, POLARIS_DEPTH_RANGES
-from viz.inferences.compare_gshp_rosetta_params import find_rosetta_param_columns
-from swapstress.gshp import load_published_params
+from swapstress.sources.depth import ROSETTA_LEVEL_DEPTHS, POLARIS_DEPTH_RANGES
+from research.figures.inferences.compare_gshp_rosetta_params import find_rosetta_param_columns
+from swapstress.sources.gshp import load_published_params
 from swapstress.swrc import theta_from_psi
 
 """Compare GSHP SWRC fits to Rosetta curves.

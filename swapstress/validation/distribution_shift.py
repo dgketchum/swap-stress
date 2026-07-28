@@ -289,7 +289,7 @@ def plot_histograms(
 
 
 def main():
-    from error_analysis.reconstruct_test_set import MODEL_DIR
+    from swapstress.validation.reconstruct_test_set import MODEL_DIR
 
     parser = argparse.ArgumentParser(
         description="Section 5.4: distribution-shift confrontation"
@@ -307,7 +307,7 @@ def main():
     parser.add_argument(
         "--output-dir",
         default=None,
-        help="Output directory (default: <model-dir>/error_analysis/).",
+        help="Output directory (default: <model-dir>/swapstress.validation/).",
     )
     parser.add_argument(
         "--max-files",
@@ -321,8 +321,8 @@ def main():
     output_dir = args.output_dir or os.path.join(args.model_dir, "error_analysis")
     os.makedirs(output_dir, exist_ok=True)
 
-    from error_analysis.reconstruct_test_set import _get_resolution_m
-    from map.learning.direct.data import assign_spatial_group, prepare_direct_data
+    from swapstress.validation.reconstruct_test_set import _get_resolution_m
+    from swapstress.model.data import assign_spatial_group, prepare_direct_data
 
     with open(model_path / "direct_model_results.json") as f:
         config = json.load(f)["config"]

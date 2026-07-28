@@ -205,9 +205,10 @@ if __name__ == "__main__":
     """
     run_eval_for_sites = False
 
-    prep_dir_ = os.path.join("site_modeling", "outputs", "prep")
-    metrics_dir_ = os.path.join("site_modeling", "outputs", "metrics")
-    corr_dir_ = os.path.join("site_modeling", "outputs", "correlations")
+    site_modeling_ = os.path.join("research", "vg_inversion", "site_modeling")
+    prep_dir_ = os.path.join(site_modeling_, "outputs", "prep")
+    metrics_dir_ = os.path.join(site_modeling_, "outputs", "metrics")
+    corr_dir_ = os.path.join(site_modeling_, "outputs", "correlations")
     os.makedirs(metrics_dir_, exist_ok=True)
     os.makedirs(corr_dir_, exist_ok=True)
 

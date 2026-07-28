@@ -8,13 +8,13 @@ accuracy metrics for comparison with SMAP L3.
 
 Usage:
     # Full pipeline: search → extract → score → compare
-    python -m map.evaluation.nisar_sme2_ismn full \
+    python -m research.sensors.nisar_sme2_ismn full \
         --l3-csv /nas/soils/vwc_timeseries/ismn/smap_ismn_5cm_comparison.csv \
         --ismn-dir /nas/soils/vwc_timeseries/ismn/processed_time_series/preprocessed_by_station \
         --output /nas/soils/vwc_timeseries/ismn/nisar_sme2_ismn_5cm_comparison.csv
 
     # Compare only (after extraction)
-    python -m map.evaluation.nisar_sme2_ismn compare \
+    python -m research.sensors.nisar_sme2_ismn compare \
         --l3-csv /nas/soils/vwc_timeseries/ismn/smap_ismn_5cm_comparison.csv \
         --nisar-csv /nas/soils/vwc_timeseries/ismn/nisar_sme2_ismn_5cm_comparison.csv
 """

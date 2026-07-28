@@ -19,7 +19,7 @@ from datetime import date, timedelta
 
 import numpy as np
 
-from map.evaluation import flux_beta_models as fbm
+from research.flux import flux_beta_models as fbm
 from swapstress.swrc import log10_psi_from_theta
 
 

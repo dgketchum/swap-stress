@@ -24,11 +24,11 @@ output directory is a spatially and temporally complete daily series.
 Usage
 -----
     # Suction inference
-    uv run python -m map.inference.gapfill_rasters \\
+    uv run python -m swapstress.inference.gapfill \\
         --config /home/dgketchum/code/swap-stress/configs/gapfill_9km_global_pruned.toml
 
     # SMAP L3 soil moisture
-    uv run python -m map.inference.gapfill_rasters \\
+    uv run python -m swapstress.inference.gapfill \\
         --source-dir /nas/soils/smap/SPL3SMP_E/daily_tif \\
         --output-dir /nas/soils/smap/SPL3SMP_E/daily_tif_gapfilled \\
         --prefix smap_sm --band-description soil_moisture_m3m3 \\
@@ -242,7 +242,7 @@ def run_gapfill(
 
     # Write provenance artifact
     if config_dict is not None:
-        from map.config import write_provenance
+        from swapstress.config import write_provenance
 
         upstream_prov = Path(source_dir).expanduser().resolve() / "provenance.json"
         prov_path = write_provenance(
@@ -326,7 +326,7 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> None:
     args = build_parser().parse_args()
 
-    from map.config import load_config
+    from swapstress.config import load_config
 
     config = load_config(args.config, vars(args))
 

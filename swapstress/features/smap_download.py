@@ -15,19 +15,19 @@ Fill value: -9999.0
 
 Usage:
     # L3, CONUS (original workflow)
-    python -m map.data.smap_download \
+    python -m swapstress.features.smap_download \
         --product L3 --grid-scope conus \
         --output-dir /nas/soils/smap/SPL3SMP_E \
         --start 2015-04-01 --end 2026-02-15
 
     # L4, global, full period of record
-    python -m map.data.smap_download \
+    python -m swapstress.features.smap_download \
         --product L4 --grid-scope global \
         --output-dir /nas/soils/smap/SPL4SMGP \
         --start 2015-03-31 --end 2026-06-01
 
     # Download only (skip GeoTIFF conversion)
-    python -m map.data.smap_download \
+    python -m swapstress.features.smap_download \
         --product L4 --grid-scope global \
         --output-dir /nas/soils/smap/SPL4SMGP \
         --start 2015-03-31 --end 2026-06-01 \

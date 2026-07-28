@@ -18,12 +18,12 @@ NetCDF variables used:
     Scene_Flags     — QC: 0=nominal, 1=scene dependent, >=4 = bad
 
 Usage:
-    python -m map.data.smos_ic_download \
+    python -m research.sensors.smos_ic_download \
         --output-dir /nas/soils/smos/SMOS_IC \
         --start 2010-03-01 --end 2021-12-31
 
     # Download only (skip GeoTIFF conversion)
-    python -m map.data.smos_ic_download \
+    python -m research.sensors.smos_ic_download \
         --output-dir /nas/soils/smos/SMOS_IC \
         --start 2015-01-01 --end 2021-12-31 \
         --download-only

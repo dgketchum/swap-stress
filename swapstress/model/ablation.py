@@ -5,7 +5,7 @@ feature groups present in the global training table.  10 experiments
 total, each a full k-fold CV run.
 
 Usage:
-    python -m map.learning.decision_tree.ablation \
+    python -m swapstress.model.ablation \
         --obs-table /nas/soils/swapstress/training/obs_level_training_9km_global.parquet \
         --output-dir /nas/soils/swapstress/releases/global_pruned_refresh_20260520/feature_importance
 """
@@ -17,8 +17,8 @@ import json
 import os
 import time
 
-from map.learning.decision_tree.train_direct import train_and_evaluate
-from map.learning.direct.crossval import run_kfold_cv
+from swapstress.model.train import train_and_evaluate
+from swapstress.model.crossval import run_kfold_cv
 
 
 # All feature groups present in the 9km global training table

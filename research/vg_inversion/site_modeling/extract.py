@@ -2,7 +2,7 @@ import os
 from datetime import date
 from typing import Optional
 
-from et.ptjpl import export_ptjpl_zonal_stats
+from research.et.ptjpl import export_ptjpl_zonal_stats
 
 try:
     # Earth Engine is optional; defer errors to runtime
@@ -11,7 +11,7 @@ except Exception:
     ee = None  # type: ignore
 
 # Reuse the existing, vetted extraction helpers
-from map.data.cze_extract import (
+from research.extract.cze_extract import (
     ee_init as _ee_init,
     export_landsat_bands_over_buffers,
 )
@@ -20,7 +20,7 @@ from map.data.cze_extract import (
 def ee_init(project: str = "ee-dgketchum") -> None:
     """Initialize the Earth Engine client using project credentials.
 
-    Wraps map.data.cze_extract.ee_init to keep this module standalone.
+    Wraps research.extract.cze_extract.ee_init to keep this module standalone.
     """
     _ee_init(project=project)
 
@@ -74,7 +74,7 @@ def export_openet_ptjpl_for_sites(
     mask_type: str = "inv_irr",
     **kwargs,
 ) -> None:
-    """Export PT-JPL ET fraction zonal stats to Cloud Storage using local et.ptjpl.
+    """Export PT-JPL ET fraction zonal stats to Cloud Storage using local research.et.ptjpl.
 
     Parameters
     - shapefile: Sites polygon shapefile (or points; points not supported by zonal stats).

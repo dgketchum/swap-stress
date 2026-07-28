@@ -2,7 +2,7 @@
 regime-specific?
 
 The confirmatory flux tests (retest H1–H5) and the multiplicative stress-function
-retest (:mod:`map.evaluation.flux_stress_retest`) both concluded that soil water
+retest (:mod:`research.flux.flux_stress_retest`) both concluded that soil water
 is *second-order to meteorology* for predicting ET/GPP out of sample. But those
 tests average over the whole growing season, and on most growing-season days the
 canopy is **not** water-limited: β ≈ β_max, the flux equals its potential, and
@@ -59,10 +59,10 @@ import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 
-from map.evaluation import flux_beta_models as fbm  # noqa: E402
-from map.evaluation import flux_features as ff  # noqa: E402
-from map.evaluation import flux_stats as fs  # noqa: E402
-from map.evaluation import flux_stress_retest as frs  # noqa: E402
+from research.flux import flux_beta_models as fbm  # noqa: E402
+from research.flux import flux_features as ff  # noqa: E402
+from research.flux import flux_stats as fs  # noqa: E402
+from research.flux import flux_stress_retest as frs  # noqa: E402
 
 DAILY_PARQUET = (
     "/nas/soils/swapstress/evaluation/flux_validation/flux_site_daily.parquet"

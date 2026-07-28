@@ -10,10 +10,10 @@ Uses the same observation table, feature groups, and spatial holdout as the
 RF trainer so results are directly comparable.
 
 Usage:
-    python -m map.learning.tabular_nn.train_direct_nn \\
+    python -m research.neural.tabular_nn.train_direct_nn \\
         --config configs/train_9km_conus_mlp.toml
 
-    python -m map.learning.tabular_nn.train_direct_nn \\
+    python -m research.neural.tabular_nn.train_direct_nn \\
         --obs-table ... --output-dir ... --model-name mlp
 """
 
@@ -29,15 +29,15 @@ import torch
 from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
 from torch.utils.data import DataLoader
 
-from map.learning.direct.data import (
+from swapstress.model.data import (
     prepare_direct_data,
     write_split_manifest,
 )
-from map.learning.direct.preprocessing import NNPreprocessor
-from map.learning.direct.reporting import evaluate_and_report
-from map.learning.tabular_nn.dataset import FlatDataset, SplitDataset
-from map.learning.tabular_nn.lightning_module import DirectRegressionModule
-from map.learning.tabular_nn.models import (
+from swapstress.model.preprocessing import NNPreprocessor
+from swapstress.model.reporting import evaluate_and_report
+from research.neural.tabular_nn.dataset import FlatDataset, SplitDataset
+from research.neural.tabular_nn.lightning_module import DirectRegressionModule
+from research.neural.tabular_nn.models import (
     FTTransformer,
     MLPWithEmbeddings,
     VanillaMLP,
@@ -462,7 +462,7 @@ def train_and_evaluate(
 
     # Provenance
     if config_dict is not None:
-        from map.config import input_checksum, write_provenance
+        from swapstress.config import input_checksum, write_provenance
 
         prov_path = write_provenance(
             output_dir=output_dir,
@@ -587,7 +587,7 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    from map.config import feature_groups_to_exclude, load_config
+    from swapstress.config import feature_groups_to_exclude, load_config
 
     config = load_config(args.config, vars(args))
 
@@ -607,7 +607,7 @@ if __name__ == "__main__":
     do_kfold = args.kfold or config.get("kfold", False)
 
     if do_kfold:
-        from map.learning.direct.crossval import run_kfold_cv
+        from swapstress.model.crossval import run_kfold_cv
 
         run_kfold_cv(
             obs_table_path=config["obs_table"],

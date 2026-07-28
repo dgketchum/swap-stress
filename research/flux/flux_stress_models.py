@@ -34,8 +34,8 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from map.evaluation import flux_cv_analysis as fca
-from map.evaluation import flux_stats as fs
+from research.flux import flux_cv_analysis as fca
+from research.flux import flux_stats as fs
 
 # Match the confirmatory CV configuration exactly.
 N_BLOCKS = fca.N_BLOCKS

@@ -1,7 +1,7 @@
 """Tests for the canonical van Genuchten retention curve.
 
 The reference values in :func:`test_matches_published_ptf_baseline` were captured
-from ``map.evaluation.ptf_baseline.vg_suction`` before it was replaced. They lock
+from ``swapstress.validation.ptf_baseline.vg_suction`` before it was replaced. They lock
 the numerics that produce the manuscript's Rosetta/POLARIS comparison. If a
 change here makes that test fail, the published PTF metrics have moved and the
 change is wrong unless the manuscript is being reworked deliberately.

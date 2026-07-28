@@ -10,7 +10,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from swapstress.gshp import (
+from swapstress.sources.gshp import (
     ALPHA_PER_M_TO_PER_CM,
     FREE_THETA_CLASS,
     GOOD_QUALITY_FLAG,

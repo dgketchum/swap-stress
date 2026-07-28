@@ -7,7 +7,7 @@ import pandas as pd
 import numpy as np
 import xarray as xr
 from tqdm import tqdm
-from map.data.thredds import GridMet
+from swapstress.features.thredds import GridMet
 
 
 def _list_gridmet_files(base_dir, var):

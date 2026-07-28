@@ -26,9 +26,9 @@ The new proxy must clear a **higher** bar than ψ did — beat not just REW but 
 - **P5** β(VOD_anom) vs β(REW) for GPP, leakage-safe (SIF/ESI excluded as predictors;
   VOD anomaly detrends slow biomass so it is not GPP_pot leakage).
 
-Machinery reuses :mod:`map.evaluation.flux_stats` (blocked CV, site bootstrap,
-BH-FDR, sign test), :mod:`map.evaluation.flux_beta_models` (β_max cap, GPP envelope,
-polarity) and :mod:`map.evaluation.flux_features` (ET0, REW). The multiplicative
+Machinery reuses :mod:`research.flux.flux_stats` (blocked CV, site bootstrap,
+BH-FDR, sign test), :mod:`research.flux.flux_beta_models` (β_max cap, GPP envelope,
+polarity) and :mod:`research.flux.flux_features` (ET0, REW). The multiplicative
 β for supply×demand and fusion is a **product of monotone sigmoids** (Jarvis/Feddes
 form) implemented here — one factor per input, matched-complexity by parameter count.
 
@@ -54,10 +54,10 @@ import numpy as np
 import pandas as pd
 from scipy import optimize
 
-from map.evaluation import flux_beta_models as fbm
-from map.evaluation import flux_cv_analysis as fca
-from map.evaluation import flux_features as ff
-from map.evaluation import flux_stats as fs
+from research.flux import flux_beta_models as fbm
+from research.flux import flux_cv_analysis as fca
+from research.flux import flux_features as ff
+from research.flux import flux_stats as fs
 
 # ---------------------------------------------------------------------------
 # Paths

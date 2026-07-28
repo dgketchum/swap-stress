@@ -3,7 +3,7 @@ DEPRECATED: This module is superseded by build_training_table.py
 
 Use build_training_table.py with source='mt_mesonet' or 'reesh' instead:
 
-    from map.data.build_training_table import build_unified_table
+    from swapstress.features.build_training_table import build_unified_table
     build_unified_table(['mt_mesonet', 'reesh'], data_root, output_path, include_embeddings=True)
 
 The extract_station_fit_params() function is now available in build_training_table.py
@@ -20,7 +20,7 @@ from glob import glob
 import numpy as np
 import pandas as pd
 
-from retention_curve.depth_utils import depth_to_rosetta_level
+from swapstress.sources.depth import depth_to_rosetta_level
 
 
 def _deprecation_warning():

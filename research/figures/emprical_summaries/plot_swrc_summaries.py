@@ -7,7 +7,7 @@ import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
 
-from swapstress.gshp import load_published_params
+from swapstress.sources.gshp import load_published_params
 from swapstress.swrc import theta_from_psi
 
 # Restored here after retention_curve.PARAM_SYMBOLS was dropped in b66775a;

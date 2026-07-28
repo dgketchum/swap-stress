@@ -8,19 +8,19 @@ existing L3 comparison.
 
 Usage:
     # Extract SM at ISMN stations from all downloaded granules
-    python -m map.evaluation.smap_s_ismn extract \
+    python -m research.sensors.smap_s_ismn extract \
         --hdf5-dir /nas/soils/smap/SPL2SMAP_S/hdf5 \
         --l3-csv /nas/soils/vwc_timeseries/ismn/smap_ismn_5cm_comparison.csv \
         --output /nas/soils/smap/SPL2SMAP_S/ismn_extractions.parquet
 
     # Merge with ISMN and score
-    python -m map.evaluation.smap_s_ismn score \
+    python -m research.sensors.smap_s_ismn score \
         --extractions /nas/soils/smap/SPL2SMAP_S/ismn_extractions.parquet \
         --ismn-dir /nas/soils/vwc_timeseries/ismn/processed_time_series/preprocessed_by_station \
         --output /nas/soils/vwc_timeseries/ismn/smap_s_ismn_5cm_comparison.csv
 
     # Head-to-head comparison with L3
-    python -m map.evaluation.smap_s_ismn compare \
+    python -m research.sensors.smap_s_ismn compare \
         --l3-csv /nas/soils/vwc_timeseries/ismn/smap_ismn_5cm_comparison.csv \
         --ss-csv /nas/soils/vwc_timeseries/ismn/smap_s_ismn_5cm_comparison.csv
 """
@@ -34,7 +34,7 @@ import h5py
 import numpy as np
 import pandas as pd
 
-from map.data.smap_sentinel_download import lonlat_to_m03_colrow
+from research.sensors.smap_sentinel_download import lonlat_to_m03_colrow
 
 # HDF5 paths within SPL2SMAP_S files
 _GRP = "Soil_Moisture_Retrieval_Data_3km"

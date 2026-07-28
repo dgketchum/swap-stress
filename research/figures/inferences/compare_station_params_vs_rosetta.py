@@ -3,7 +3,7 @@ import re
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-from retention_curve import (
+from swapstress.sources.depth import (
     parse_polaris_depth_from_asset,
     map_polaris_depth_range_to_rosetta_level,
 )

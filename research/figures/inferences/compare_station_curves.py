@@ -8,7 +8,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from sklearn.metrics import r2_score, mean_squared_error
 
-from retention_curve import EMPIRICAL_TO_ROSETTA_LEVEL_MAP
+from swapstress.sources.depth import EMPIRICAL_TO_ROSETTA_LEVEL_MAP
 from swapstress.swrc import theta_from_psi
 
 

@@ -14,7 +14,7 @@ Output schema:
     - [EE features]: All extracted geospatial features
 
 Usage:
-    from map.data.build_training_table import build_unified_table
+    from swapstress.features.build_training_table import build_unified_table
     df = build_unified_table(
         ['gshp', 'ncss'],
         output_path='obs_training.parquet',
@@ -31,14 +31,14 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
-from map.data.source_registry import (
+from swapstress.sources.registry import (
     get_source,
     DataSource,
     DataPaths,
     TRAINING_TABLE_DROP_COLS,
     VALID_SCALES,
 )
-from retention_curve.depth_utils import depth_to_rosetta_level
+from swapstress.sources.depth import depth_to_rosetta_level
 
 # Physical limits for data validation
 # These are applied during training table construction as a final safety check

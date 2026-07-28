@@ -30,7 +30,7 @@ Design commitments (plan §4, §10):
   single monotone-increasing β family serves every predictor.
 - **Out of sample.** Skill is blocked-CV R² vs the *training* mean on the exact
   fold structure (embargo, min-days, all-folds-required) used by the confirmatory
-  H1–H5 machinery in :mod:`map.evaluation.flux_stats` / ``flux_cv_analysis``.
+  H1–H5 machinery in :mod:`research.flux.flux_stats` / ``flux_cv_analysis``.
 
 No I/O, no GPU, no Earth Engine — pure CPU statistics over cached arrays.
 """
@@ -41,8 +41,8 @@ import numpy as np
 import pandas as pd
 from scipy import optimize
 
-from map.evaluation import flux_cv_analysis as fca
-from map.evaluation import flux_stats as fs
+from research.flux import flux_cv_analysis as fca
+from research.flux import flux_stats as fs
 
 # Match the confirmatory CV configuration exactly.
 N_BLOCKS = fca.N_BLOCKS

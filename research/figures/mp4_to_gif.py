@@ -1,7 +1,7 @@
 """Convert .mp4 files in a directory to .gif, placing both formats in a subdirectory.
 
 Usage:
-    python -m viz.mp4_to_gif /path/to/mp4s --outdir ts_anims --scale 0.7 --duration 200
+    python -m research.figures.mp4_to_gif /path/to/mp4s --outdir ts_anims --scale 0.7 --duration 200
 """
 
 import argparse

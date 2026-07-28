@@ -12,7 +12,7 @@ Grid: EASE-Grid2 M03 — 11568 cols x 4872 rows, 3002.685 m cell size
 Fill value: -9999.0
 
 Usage:
-    python -m map.data.smap_sentinel_download \
+    python -m research.sensors.smap_sentinel_download \
         --output-dir /nas/soils/smap/SPL2SMAP_S \
         --start 2022-01-01 --end 2023-12-31
 """

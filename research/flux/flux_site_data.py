@@ -10,7 +10,7 @@ Produces:
   - flux_site_meta.parquet    Per-site static metadata and data availability flags
 
 Usage:
-    python -m map.evaluation.flux_site_data \
+    python -m research.flux.flux_site_data \
         --output-dir /nas/soils/swapstress/evaluation/flux_validation
 """
 
@@ -28,15 +28,15 @@ import pandas as pd
 import rasterio
 from pyproj import Transformer
 
-from map.evaluation.ptf_baseline import _sample_rosetta_at_sites
+from swapstress.validation.ptf_baseline import _sample_rosetta_at_sites
 from swapstress.swrc import psi_from_theta
-from map.inference.predict_rasters import (
+from swapstress.inference.predict import (
     ModelArtifacts,
     StaticRasterStack,
     FIXED_FEATURES,
 )
-from retention_curve.depth_utils import depth_to_rosetta_level
-from site_modeling.prep import find_ameriflux_file
+from swapstress.sources.depth import depth_to_rosetta_level
+from research.vg_inversion.site_modeling.prep import find_ameriflux_file
 
 # ---------------------------------------------------------------------------
 # Paths

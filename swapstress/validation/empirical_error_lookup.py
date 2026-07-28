@@ -24,7 +24,7 @@ import pandas as pd
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-from error_analysis.reconstruct_test_set import (
+from swapstress.validation.reconstruct_test_set import (
     MODEL_DIR,
     reconstruct,
     sample_beck_koppen,
@@ -180,7 +180,7 @@ def main():
     parser.add_argument(
         "--output-dir",
         default=None,
-        help="Output directory (default: <model-dir>/error_analysis/).",
+        help="Output directory (default: <model-dir>/swapstress.validation/).",
     )
     parser.add_argument(
         "--theta-bins",

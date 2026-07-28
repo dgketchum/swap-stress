@@ -9,7 +9,7 @@ import pandas as pd
 import ee
 import geopandas as gpd
 
-from retention_curve import map_polaris_depth_range_to_rosetta_level
+from swapstress.sources.depth import map_polaris_depth_range_to_rosetta_level
 
 
 # --------------------------- Concatenate station layers ---------------------------

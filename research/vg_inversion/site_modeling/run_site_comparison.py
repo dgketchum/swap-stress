@@ -8,14 +8,14 @@ import geopandas as gpd
 import matplotlib.pyplot as plt
 from sklearn.linear_model import LinearRegression
 
-from site_modeling.prep import (
+from research.vg_inversion.site_modeling.prep import (
     build_site_dataset_from_ameriflux,
     detect_drydown_mask,
     load_gridmet_series,
     load_ameriflux_halfhourly,
     find_ameriflux_file,
 )
-from site_modeling.model import (
+from research.vg_inversion.site_modeling.model import (
     evaluate_theta_vs_psi,
     evaluate_multivariate,
     evaluate_lagged,
@@ -34,7 +34,7 @@ def list_reesh_site_ids(shapefile: str, id_col: str = "site_id") -> List[str]:
     return sids
 
 
-# selection now handled in site_modeling.prep
+# selection now handled in research.vg_inversion.site_modeling.prep
 
 
 def _fit_line(x: np.ndarray, y: np.ndarray) -> Tuple[float, float, float]:

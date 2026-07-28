@@ -1,7 +1,7 @@
 import ee
 
-from map.data.ee_utils import landsat_composites
-from map.data.cdl import get_cdl
+from swapstress.features.ee_utils import landsat_composites
+from swapstress.features.cdl import get_cdl
 
 
 def _prefixed(img, prefix):

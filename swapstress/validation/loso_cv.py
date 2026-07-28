@@ -30,9 +30,9 @@ from sklearn.ensemble import RandomForestRegressor
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-from map.learning.direct.metrics import compute_metrics
+from swapstress.model.metrics import compute_metrics
 
-from error_analysis.conditional_bias import compute_conditional_bias
+from swapstress.validation.conditional_bias import compute_conditional_bias
 
 MODEL_DIR = "/nas/soils/swapstress/models/direct_rf_9km_global_pruned"
 
@@ -189,7 +189,7 @@ def main():
     parser.add_argument(
         "--output-dir",
         default=None,
-        help="Output directory (default: <model-dir>/error_analysis/).",
+        help="Output directory (default: <model-dir>/swapstress.validation/).",
     )
     parser.add_argument(
         "--n-estimators",

@@ -3,7 +3,7 @@ De-rigged per-site analyses — WS1 (H3), WS3 (H5), WS4b (H4b), WS5, WS7.
 
 Everything here replaces the *in-sample* nested-R² tests of
 ``quartile_binned_mlr.py`` with out-of-sample, autocorrelation-aware machinery
-from :mod:`map.evaluation.flux_stats`:
+from :mod:`research.flux.flux_stats`:
 
 - **H3 (honest complementarity)** — does ψ add *predictive* skill beyond θ? Per
   site: blocked-CV ΔR² (primary), a nested partial-F, and a block-permutation
@@ -29,8 +29,8 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from map.evaluation import flux_features as ff
-from map.evaluation import flux_stats as fs
+from research.flux import flux_features as ff
+from research.flux import flux_stats as fs
 
 T_AVG_MIN = 5.0
 SW_IN_MIN = 100.0

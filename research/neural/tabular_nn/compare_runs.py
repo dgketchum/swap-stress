@@ -2,7 +2,7 @@
 Compare RF and NN runs by reading their direct_model_results.json files.
 
 Usage:
-    python -m map.learning.tabular_nn.compare_runs \\
+    python -m research.neural.tabular_nn.compare_runs \\
         --run-dirs /nas/.../direct_rf_9km_conus /nas/.../direct_mlp_9km_conus \\
         --output comparison.csv
 """

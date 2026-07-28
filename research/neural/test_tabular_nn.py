@@ -11,14 +11,14 @@ import numpy as np
 import pytest
 import torch
 
-from map.learning.tabular_nn.models import (
+from research.neural.tabular_nn.models import (
     VanillaMLP,
     MLPWithEmbeddings,
     FTTransformer,
 )
-from map.learning.tabular_nn.dataset import FlatDataset, SplitDataset
-from map.learning.tabular_nn.lightning_module import DirectRegressionModule
-from map.learning.tabular_nn.compare_runs import build_comparison_table
+from research.neural.tabular_nn.dataset import FlatDataset, SplitDataset
+from research.neural.tabular_nn.lightning_module import DirectRegressionModule
+from research.neural.tabular_nn.compare_runs import build_comparison_table
 
 
 class TestModels:

@@ -256,7 +256,7 @@ def build_site_covariates(
     USDA-texture and Köppen class codes. IGBP PFT is not in the station metadata,
     so Köppen climate + USDA texture stand in as the categorical stratifiers.
     """
-    from map.inference.predict_rasters import StaticRasterStack
+    from swapstress.inference.predict import StaticRasterStack
 
     required = set(TEXTURE_FEATURES + PRECIP_FEATURES + [PET_FEATURE] + CLASS_FEATURES)
     stack = StaticRasterStack.load(static_dir, required)

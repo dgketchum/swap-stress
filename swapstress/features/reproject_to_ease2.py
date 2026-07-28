@@ -9,17 +9,17 @@ soil moisture GeoTIFFs.
 
 Usage:
     # Reproject all *_9km.tif files to the CONUS subset in place
-    python -m map.data.reproject_to_ease2 \
+    python -m swapstress.features.reproject_to_ease2 \
         --input-dir /nas/soils/swapstress/inference/conus_features
 
     # Reproject raw global exports to a dedicated output directory
-    python -m map.data.reproject_to_ease2 \
+    python -m swapstress.features.reproject_to_ease2 \
         --input-dir /nas/soils/swapstress/inference/global_features/rasters_raw \
         --output-dir /nas/soils/swapstress/inference/global_features/rasters_ease2 \
         --grid-scope global
 
     # Verify alignment against a SMAP daily GeoTIFF on the same target grid
-    python -m map.data.reproject_to_ease2 \
+    python -m swapstress.features.reproject_to_ease2 \
         --input-dir /nas/soils/swapstress/inference/global_features/rasters_raw \
         --output-dir /nas/soils/swapstress/inference/global_features/rasters_ease2 \
         --grid-scope global \
@@ -34,7 +34,7 @@ import numpy as np
 import rasterio
 from rasterio.warp import Resampling, reproject
 
-from map.data.smap_download import (
+from swapstress.features.smap_download import (
     EASE2_CRS,
     MAP_SCALE,
     resolve_ease2_grid,

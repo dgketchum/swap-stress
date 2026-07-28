@@ -12,11 +12,11 @@ prep      Extract Rosetta L2 and POLARIS 0-5 cm vG parameters at training sites.
 evaluate  Compare PTF-derived suction against observed and model-predicted values.
 
 Usage:
-    python -m map.evaluation.ptf_baseline prep \
+    python -m swapstress.validation.ptf_baseline prep \
         --training-table /nas/soils/swapstress/training/obs_level_training_9km_global.parquet \
         --output /nas/soils/swapstress/evaluation/ptf_baseline/site_vg_params.parquet
 
-    python -m map.evaluation.ptf_baseline evaluate \
+    python -m swapstress.validation.ptf_baseline evaluate \
         --training-table /nas/soils/swapstress/training/obs_level_training_9km_global.parquet \
         --vg-params /nas/soils/swapstress/evaluation/ptf_baseline/site_vg_params.parquet \
         --output /nas/soils/swapstress/evaluation/ptf_baseline

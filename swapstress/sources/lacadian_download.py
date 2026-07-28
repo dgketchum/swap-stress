@@ -7,7 +7,7 @@ tab-separated .txt at:
     LaCADIAN/Daily/{year}/{site_id}_{site_name}_DAILY_{year}.txt
 
 Usage:
-    python -m vwc_series.download_lacadian
+    python -m swapstress.sources.lacadian_download
 """
 
 import os

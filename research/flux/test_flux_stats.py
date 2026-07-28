@@ -19,7 +19,7 @@ from datetime import date, timedelta
 import numpy as np
 from scipy import stats as sp_stats
 
-from map.evaluation import flux_stats as fs
+from research.flux import flux_stats as fs
 
 
 # ---------------------------------------------------------------------------

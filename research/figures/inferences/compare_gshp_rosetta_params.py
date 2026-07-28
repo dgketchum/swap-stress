@@ -14,7 +14,7 @@ import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
 
-from swapstress.gshp import FREE_THETA_CLASS, load_published_params
+from swapstress.sources.gshp import FREE_THETA_CLASS, load_published_params
 
 PARAMS = ["theta_r", "theta_s", "alpha", "n"]
 LOG10_PARAMS = {"alpha", "n"}
@@ -23,7 +23,7 @@ LOG10_PARAMS = {"alpha", "n"}
 def load_gshp_groupped(csv_path, swcc_classes=(FREE_THETA_CLASS,)):
     """Load the published GSHP parameters, one row per layer.
 
-    Delegates to :func:`swapstress.gshp.load_published_params`, so alpha comes
+    Delegates to :func:`swapstress.sources.gshp.load_published_params`, so alpha comes
     back in 1/cm rather than the 1/m the published file uses.
 
     Defaults to the YWYD subset. GSHP bounded theta_s by a texture + bulk

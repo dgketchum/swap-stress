@@ -21,7 +21,7 @@ from datetime import date, timedelta
 
 import numpy as np
 
-from map.evaluation import flux_plant_potential as fpp
+from research.flux import flux_plant_potential as fpp
 
 
 def _dates(n, start=date(2016, 1, 1)):

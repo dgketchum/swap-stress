@@ -14,7 +14,8 @@ import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
 
-from retention_curve import PARAM_SYMBOLS, EMPIRICAL_TO_ROSETTA_LEVEL_MAP
+from swapstress.figures import PARAM_SYMBOLS
+from swapstress.sources.depth import EMPIRICAL_TO_ROSETTA_LEVEL_MAP
 
 
 def _load_empirical_results(results_dir):

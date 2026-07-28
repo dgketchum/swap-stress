@@ -6,7 +6,7 @@ from typing import Dict, Optional, Tuple, List, Set, Iterable
 
 import numpy as np
 import pandas as pd
-from map.data.gridmet_extract import get_gridmet_point_timeseries_thredds
+from swapstress.features.gridmet_extract import get_gridmet_point_timeseries_thredds
 
 
 CM_PER_MPA = 10197.16  # cm of water per MPa (approx.)

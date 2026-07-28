@@ -1,8 +1,8 @@
 import pandas as pd
 import os
 import numpy as np
-from utils.gshp import sanitize_profile_id
-from utils.ncss import ncss_to_standardized, load_ncss_parquet
+from swapstress.sources.gshp import sanitize_profile_id
+from swapstress.sources.ncss import ncss_to_standardized, load_ncss_parquet
 
 from tqdm import tqdm
 
@@ -196,7 +196,7 @@ def standardize_gshp(df, depth_col=None):
     # set (they are lab measurements, unavailable at inference) but are used to
     # bin diagnostics; SWCC_classes identifies the YWYD subset whose theta_r and
     # theta_s were fit freely, which is the only subset safe to compare against
-    # a texture-based PTF. See swapstress.gshp.
+    # a texture-based PTF. See swapstress.sources.gshp.
     keep += [
         c
         for c in (

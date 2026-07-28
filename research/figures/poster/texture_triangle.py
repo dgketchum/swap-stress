@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 from matplotlib import use
 from matplotlib.lines import Line2D
 
-from retention_curve import PARAM_SYMBOLS
+from swapstress.figures import PARAM_SYMBOLS
 
 use("Agg")
 
@@ -76,7 +76,7 @@ def _normalize_to_triangle(sand, silt, clay):
 def _load_reesh_swrc_params():
     """Load ReESH SWRC fit parameters (theta_r, theta_s, alpha, n) aggregated by station and depth."""
     try:
-        from map.data.station_training_table import extract_station_fit_params
+        from research.vg_inversion.station_training_table import extract_station_fit_params
     except Exception:
         return None
 

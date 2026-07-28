@@ -7,14 +7,14 @@ accuracy metrics, and produces a three-way comparison with L3 and SPL2SMAP_S.
 
 Usage:
     # Full pipeline: extract → score → compare
-    python -m map.evaluation.smap_l4_ismn full \
+    python -m research.sensors.smap_l4_ismn full \
         --tif-dir /nas/soils/smap/SPL4SMGP/daily_tif \
         --l3-csv /nas/soils/vwc_timeseries/ismn/smap_ismn_5cm_comparison.csv \
         --ismn-dir /nas/soils/vwc_timeseries/ismn/processed_time_series/preprocessed_by_station \
         --output /nas/soils/vwc_timeseries/ismn/smap_l4_ismn_5cm_comparison.csv
 
     # Three-way comparison only
-    python -m map.evaluation.smap_l4_ismn compare \
+    python -m research.sensors.smap_l4_ismn compare \
         --l3-csv /nas/soils/vwc_timeseries/ismn/smap_ismn_5cm_comparison.csv \
         --ss-csv /nas/soils/vwc_timeseries/ismn/smap_s_ismn_5cm_comparison.csv \
         --l4-csv /nas/soils/vwc_timeseries/ismn/smap_l4_ismn_5cm_comparison.csv

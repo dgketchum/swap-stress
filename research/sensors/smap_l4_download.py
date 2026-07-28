@@ -11,7 +11,7 @@ Grid: EASE-Grid2 M09 — 3856 cols x 1624 rows, 9008.055 m cell size (same as L3
 Fill value: -9999.0
 
 Usage:
-    python -m map.data.smap_l4_download \
+    python -m research.sensors.smap_l4_download \
         --output-dir /nas/soils/smap/SPL4SMGP \
         --start 2022-01-01 --end 2023-12-31
 """
@@ -25,7 +25,7 @@ from typing import Optional
 import h5py
 import numpy as np
 
-from map.data.smap_download import (
+from swapstress.features.smap_download import (
     EASE2_CRS,
     _conus_slice,
     _conus_transform,

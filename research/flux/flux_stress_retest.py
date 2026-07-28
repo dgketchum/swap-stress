@@ -3,9 +3,9 @@
 Implements ``notes/flux_stress_function_experiment_plan.md``. Every prior flux
 test put soil water in an *additive* model; this re-tests in the physically
 correct *multiplicative* framing ``flux = potential · β(soil)`` where β is a
-matched-complexity stress function (:mod:`map.evaluation.flux_beta_models`). It
+matched-complexity stress function (:mod:`research.flux.flux_beta_models`). It
 reuses the retest's out-of-sample machinery (blocked CV, LOSO, site bootstrap,
-BH-FDR from :mod:`map.evaluation.flux_stats`) and the cached
+BH-FDR from :mod:`research.flux.flux_stats`) and the cached
 ``flux_site_daily.parquet`` — no re-extraction, CPU-only, minutes.
 
 Pre-registered confirmatory contrasts (plan §1), evaluated out of sample and
@@ -40,10 +40,10 @@ import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 
-from map.evaluation import flux_beta_models as fbm  # noqa: E402
-from map.evaluation import flux_cv_analysis as fca  # noqa: E402
-from map.evaluation import flux_features as ff  # noqa: E402
-from map.evaluation import flux_stats as fs  # noqa: E402
+from research.flux import flux_beta_models as fbm  # noqa: E402
+from research.flux import flux_cv_analysis as fca  # noqa: E402
+from research.flux import flux_features as ff  # noqa: E402
+from research.flux import flux_stats as fs  # noqa: E402
 
 DAILY_PARQUET = (
     "/nas/soils/swapstress/evaluation/flux_validation/flux_site_daily.parquet"
@@ -248,7 +248,7 @@ def build_insitu_frame() -> pd.DataFrame | None:
     ET/GPP and met. Returns a frame with ``site_id, date, theta, psi_obs,
     rew_theta, et0, et_corr, gpp`` or None if no site assembles.
     """
-    from map.evaluation import quartile_binned_mlr as qbm
+    from research.flux import quartile_binned_mlr as qbm
 
     vg = qbm._load_vg_params()
     frames = []

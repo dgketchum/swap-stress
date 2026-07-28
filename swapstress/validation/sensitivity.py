@@ -27,7 +27,7 @@ import pandas as pd
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-from error_analysis.reconstruct_test_set import MODEL_DIR, reconstruct
+from swapstress.validation.reconstruct_test_set import MODEL_DIR, reconstruct
 
 
 def compute_jacobian(
@@ -146,7 +146,7 @@ def main():
     parser.add_argument(
         "--output-dir",
         default=None,
-        help="Output directory (default: <model-dir>/error_analysis/).",
+        help="Output directory (default: <model-dir>/swapstress.validation/).",
     )
     parser.add_argument(
         "--delta",

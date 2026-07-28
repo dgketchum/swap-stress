@@ -4,7 +4,7 @@ import pandas as pd
 import torch
 import matplotlib.pyplot as plt
 
-from map.learning.mae.train_mae import load_mae
+from research.neural.mae.train_mae import load_mae
 
 
 def _zscore(a):

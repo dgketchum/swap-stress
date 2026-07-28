@@ -11,7 +11,7 @@ matching feature matrix from:
   ``rosetta_level``)
 
 Usage:
-    uv run python -m map.inference.predict_rasters \
+    uv run python -m swapstress.inference.predict \
         --config /home/dgketchum/code/swap-stress/configs/predict_9km_global_pruned.toml
 """
 
@@ -30,7 +30,7 @@ import numpy as np
 import rasterio
 from rasterio.transform import Affine
 
-from retention_curve.depth_utils import depth_to_rosetta_level
+from swapstress.sources.depth import depth_to_rosetta_level
 
 SMAP_FILENAME_RE = re.compile(r"^smap_(?:sm|l4(?:_sm)?)_(\d{8})\.tif$")
 DEFAULT_MODEL_DIR = "/nas/soils/swapstress/models/direct_rf_9km_global_pruned"
@@ -527,7 +527,7 @@ def run_prediction(
 
     # Write provenance artifact
     if config_dict is not None:
-        from map.config import write_provenance
+        from swapstress.config import write_provenance
 
         upstream_prov = model_artifacts.model_dir / "provenance.json"
         prov_path = write_provenance(
@@ -644,7 +644,7 @@ def main() -> None:
     """CLI entry point."""
     args = build_parser().parse_args()
 
-    from map.config import load_config
+    from swapstress.config import load_config
 
     config = load_config(args.config, vars(args))
 

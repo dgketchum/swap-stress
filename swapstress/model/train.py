@@ -8,12 +8,12 @@ Evaluation uses site-level holdout to prevent data leakage from spatially
 correlated observations.
 
 Usage:
-    python -m map.learning.decision_tree.train_direct \\
+    python -m swapstress.model.train \\
         --obs-table /nas/soils/swapstress/training/obs_level_training_9km_global.parquet \\
         --output-dir /nas/soils/swapstress/models/direct_rf_9km_global_pruned
 
     # Exclude feature groups
-    python -m map.learning.decision_tree.train_direct \\
+    python -m swapstress.model.train \\
         --obs-table ... --output-dir ... \\
         --exclude-groups embeddings polaris smap
 """
@@ -31,11 +31,11 @@ try:
 except ImportError:
     RandomForestQuantileRegressor = None
 
-from map.learning.direct.data import (
+from swapstress.model.data import (
     prepare_direct_data,
 )
-from map.learning.direct.preprocessing import prepare_rf_arrays
-from map.learning.direct.reporting import evaluate_and_report
+from swapstress.model.preprocessing import prepare_rf_arrays
+from swapstress.model.reporting import evaluate_and_report
 
 
 def train_and_evaluate(
@@ -93,7 +93,7 @@ def train_and_evaluate(
     """
     import pandas as pd
 
-    from map.learning.direct.data import write_split_manifest
+    from swapstress.model.data import write_split_manifest
 
     # Shared data loading and spatial split — always request val split
     # so the manifest is consumable by both RF and NN.
@@ -215,7 +215,7 @@ def train_and_evaluate(
 
     # Write provenance artifact
     if config_dict is not None:
-        from map.config import input_checksum, write_provenance
+        from swapstress.config import input_checksum, write_provenance
 
         prov_path = write_provenance(
             output_dir=output_dir,
@@ -345,7 +345,7 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    from map.config import feature_groups_to_exclude, load_config
+    from swapstress.config import feature_groups_to_exclude, load_config
 
     config = load_config(args.config, vars(args))
 
@@ -365,7 +365,7 @@ if __name__ == "__main__":
     do_kfold = args.kfold or config.get("kfold", False)
 
     if do_kfold:
-        from map.learning.direct.crossval import run_kfold_cv
+        from swapstress.model.crossval import run_kfold_cv
 
         run_kfold_cv(
             obs_table_path=config["obs_table"],

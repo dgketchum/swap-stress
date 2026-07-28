@@ -6,7 +6,7 @@ segment shows how many profiles from a given source fall into each observation-
 count bin.
 
 Usage:
-    uv run python -m viz.presentation.fig2b_obs_count_bar
+    uv run python -m research.figures.presentation.fig2b_obs_count_bar
 """
 
 from __future__ import annotations

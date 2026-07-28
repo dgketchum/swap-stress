@@ -5,7 +5,7 @@ Computes 1D PDPs, 2D interaction PDPs, and ICE curves for selected features,
 using the held-out test set reconstructed via the saved split manifest.
 
 Usage:
-    uv run python -m map.learning.decision_tree.partial_dependence \
+    uv run python -m swapstress.model.partial_dependence \
         --config configs/pdp_9km_global_pruned.toml
 """
 
@@ -24,9 +24,9 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from sklearn.inspection import partial_dependence
 
-from error_analysis.reconstruct_test_set import reconstruct
-from map.config import load_config, write_provenance
-from map.data.ee_feature_list import label_feature
+from swapstress.validation.reconstruct_test_set import reconstruct
+from swapstress.config import load_config, write_provenance
+from swapstress.features.ee_feature_list import label_feature
 
 _EXTRA_LABELS = {
     "theta": r"$\theta$ (m$^3$ m$^{-3}$)",

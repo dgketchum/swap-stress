@@ -6,7 +6,7 @@ import json
 import geopandas as gpd
 import pandas as pd
 
-from map.data.source_registry import get_source, DataPaths, VALID_SCALES
+from swapstress.sources.registry import get_source, DataPaths, VALID_SCALES
 
 CATEGORIES = [
     "hhs_stc",

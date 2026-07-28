@@ -8,15 +8,15 @@ Supports CONUS (EPSG:5070) and global (EPSG:4326) region scopes.
 
 Usage:
     # Export CONUS raster groups (legacy)
-    python -m map.data.ee_export_conus_rasters --mode rasters --region conus --groups all
+    python -m swapstress.features.ee_export_conus_rasters --mode rasters --region conus --groups all
 
     # Export global raster groups for the active release
-    python -m map.data.ee_export_conus_rasters --mode rasters --region global \
+    python -m swapstress.features.ee_export_conus_rasters --mode rasters --region global \
         --groups soilgrids_shallow,worldclim,fao_hwsd,landsat_bands \
         --prefix global_features/rasters_raw/staging
 
     # Extract point values at 9km resolution
-    python -m map.data.ee_export_conus_rasters --mode points \
+    python -m swapstress.features.ee_export_conus_rasters --mode points \
         --shapefile /path/to/sites.shp --index-col site_id
 """
 
@@ -25,10 +25,10 @@ import argparse
 import ee
 import geopandas as gpd
 
-from map.data.call_ee import get_world_climate, is_authorized
-from map.data.cdl import remap_cdl
-from map.data.ee_utils import landsat_composites
-from map.data.smap_download import MAP_SCALE
+from swapstress.features.call_ee import get_world_climate, is_authorized
+from swapstress.features.cdl import remap_cdl
+from swapstress.features.ee_utils import landsat_composites
+from swapstress.features.smap_download import MAP_SCALE
 
 GCS_BUCKET = "wudr"
 GCS_PREFIX = "conus_features"
