@@ -1,14 +1,10 @@
 import os
 
 import ee
-import pyproj
-
-os.environ.setdefault("PROJ_LIB", pyproj.datadir.get_data_dir())
-
 import geopandas as gpd
 from shapely.geometry import box
 
-from map.data.call_ee import stack_bands_climatology, is_authorized
+from swapstress.features.call_ee import stack_bands_climatology, is_authorized
 
 
 def _export_tile_data(
