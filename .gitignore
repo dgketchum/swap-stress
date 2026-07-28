@@ -235,7 +235,7 @@ zh_commands.sh
 
 # Large generated figure and animation archives -- kept on disk, never tracked
 figs/legacy/
-figs/poster/poster/
+research/figures/poster/poster/
 
 # Stray nested output dirs created by scripts writing to relative paths
 notebooks/notebooks/
