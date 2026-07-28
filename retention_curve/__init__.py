@@ -1,5 +1,13 @@
 import re
 
+# Dropped in b66775a while stripping VG code paths, but viz/ still imports it.
+PARAM_SYMBOLS = {
+    "theta_r": r"$\theta_r$",
+    "theta_s": r"$\theta_s$",
+    "alpha": r"$\alpha$",
+    "n": "n",
+}
+
 ROSETTA_LEVEL_DEPTHS = {
     1: (0, 2.5),
     2: (2.5, 10),
