@@ -71,6 +71,7 @@ matter of exporting a few variables rather than editing the script:
 | `TRAIN_CONFIG` | `configs/train_9km_global_pruned.toml` |
 | `PREDICT_CONFIG` | `configs/predict_9km_global_pruned.toml` |
 | `GAPFILL_CONFIG` | `configs/gapfill_9km_global_pruned.toml` |
+| `CONTAINER` | `netcdf` — stage 07's output form; `geotiff` for per-day files |
 | `RUNNER` | `uv run` — set to empty if the console scripts are on `PATH` |
 
 ## Where the paths come from
@@ -105,7 +106,7 @@ three representations Table 2 documents, plus the two conditional bands:
 |---|---|---|---|
 | `log10_suction_cm` | positive, ~0–6 | log10(cm H₂O) | the model's own output, unchanged |
 | `matric_potential_MPa` | **negative** | MPa | `−10**log10_suction_cm / 10197.16` |
-| `suction_cm` | positive | cm H₂O | `10**log10_suction_cm` |
+| `suction_cm` | positive | cm H₂O | `10**log10_suction_cm`; omitted by `--drop-linear-suction` |
 | `uncertainty` | — | log10 units | QRF interval width; present only if the model was run with quantiles |
 | `gapfill_flag` | — | 1 | Level 2 only; 1 where the value was interpolated |
 
@@ -137,10 +138,42 @@ Every other CF attribute — `units`, `long_name`, `_FillValue`, `grid_mapping`,
 `Conventions`, the grid identification, and a link back to the run's
 `provenance_package.json` — is written unconditionally.
 
-**Container.** `build_bands()` computes the stack without touching disk, and
-`write_geotiff()` is one container for it. Whether the release ships per-day
-GeoTIFFs or a time-stacked NetCDF is still open; a NetCDF writer plugs into the
-same band list without changing what any band means.
+**Containers.** `build_bands()` computes the stack without touching disk, and two
+writers consume the same band list. Neither changes what a band means.
+
+| | `--container netcdf` | `--container geotiff` |
+|---|---|---|
+| Layout | time-stacked, one file per year | one file per day |
+| Role | the deposit, archive of record | derived convenience form for GIS |
+| Time | a real CF coordinate | encoded in the filename |
+| Dtypes | per variable — `gapfill_flag` is `uint8` | one for all bands, so the flag is float32 |
+| Compression | deflate | zstd |
+
+NetCDF is the citable deposit. CF is native there rather than riding in TIFF
+tags, a point time series is one chunked read instead of thousands of file
+opens, and the file count suits a repository. It uses deflate rather than the
+zstd we use internally: worse ratio, but a deposit should optimize for opening
+everywhere in ten years over bytes saved.
+
+Chunking is fixed at write time and is the one costly thing to get wrong —
+`(time=1, y=all, x=all)` makes maps fast and point series pathological, and the
+reverse also fails. The shipped shape is `(time=30, y=128, x=128)`, about 2 MB
+uncompressed per chunk, which serves both. Each chunk dimension clamps to the
+array, so a short year is not padded.
+
+A year of the M09 grid across the released bands is tens of gigabytes, so the
+writer creates the file with its full time dimension up front and writes each
+day into its slice as it is read; nothing beyond one day is held in memory. If a
+day fails part way through, the partial file is deleted rather than left looking
+finished.
+
+**Redundant bands.** The three representations are exact transforms of one
+another, so storing all three costs 3× for no added information.
+`--drop-linear-suction` omits `suction_cm`, which is the one to drop first: it
+spans 0–10⁶ linearly, so it is high-entropy and compresses worst, while
+`log10_suction_cm` is smooth. The log band stays regardless — it is the model's
+actual output and the units `uncertainty` is expressed in. `reproduce.sh` drops
+it for NetCDF and keeps it for GeoTIFF.
 
 ## Running one analysis or one figure
 

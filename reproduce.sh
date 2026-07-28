@@ -31,6 +31,16 @@ INFERENCE_DIR="${INFERENCE_DIR:-${RELEASE_DIR}/inference}"   # Level 1
 GAPFILL_DIR="${GAPFILL_DIR:-${RELEASE_DIR}/gapfill}"         # Level 2
 PRODUCT_DIR="${PRODUCT_DIR:-${RELEASE_DIR}/product}"
 
+# The deposit container. NetCDF drops the linear suction band by default, since
+# it is an exact transform of the log band and compresses worst; a GeoTIFF run
+# keeps it, because that form is for GIS users reading single bands.
+CONTAINER="${CONTAINER:-netcdf}"
+if [[ "${CONTAINER}" == "netcdf" ]]; then
+  DROP_LINEAR_SUCTION="${DROP_LINEAR_SUCTION---drop-linear-suction}"
+else
+  DROP_LINEAR_SUCTION="${DROP_LINEAR_SUCTION-}"
+fi
+
 TRAIN_CONFIG="${TRAIN_CONFIG:-${CONFIGS}/train_9km_global_pruned.toml}"
 PREDICT_CONFIG="${PREDICT_CONFIG:-${CONFIGS}/predict_9km_global_pruned.toml}"
 GAPFILL_CONFIG="${GAPFILL_CONFIG:-${CONFIGS}/gapfill_9km_global_pruned.toml}"
@@ -96,12 +106,16 @@ stage 05 swapstress-predict --config "${PREDICT_CONFIG}"
 stage 06 swapstress-gapfill --config "${GAPFILL_CONFIG}"
 
 # Level 2 is what gets released; deriving its per-pixel gapfill_flag needs the
-# Level 1 rasters alongside, which is why both directories are passed.
+# Level 1 rasters alongside, which is why both directories are passed. The
+# deposit is time-stacked NetCDF, one file per year, without the redundant
+# linear suction band; set CONTAINER=geotiff for the per-day GIS form.
 stage 07 swapstress-package \
   --source-dir "${GAPFILL_DIR}" \
   --level1-dir "${INFERENCE_DIR}" \
   --output-dir "${PRODUCT_DIR}" \
-  --level 2
+  --level 2 \
+  --container "${CONTAINER}" \
+  ${DROP_LINEAR_SUCTION}
 
 stage 08 swapstress-figures --output-dir "${FIG_DIR}"
 
