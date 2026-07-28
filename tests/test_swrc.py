@@ -269,6 +269,35 @@ class TestVanGenuchtenParams:
             p.n = 2.0
 
 
+class TestStrictFlag:
+    """``strict=False`` exists only for curve-fitting residual models."""
+
+    def test_default_is_strict(self):
+        got = theta_from_psi(np.logspace(0, 4, 10), 0.30, 0.25, 0.05, 1.5)
+        assert np.all(np.isnan(got))
+
+    def test_permissive_returns_finite_for_inverted_theta(self):
+        got = theta_from_psi(np.logspace(0, 4, 10), 0.30, 0.25, 0.05, 1.5, strict=False)
+        assert np.all(np.isfinite(got))
+
+    def test_permissive_still_rejects_n_le_1(self):
+        """n <= 1 is not a search-space artifact; the equation has no m there."""
+        got = theta_from_psi(np.logspace(0, 4, 10), TR, TS, AL, 1.0, strict=False)
+        assert np.all(np.isnan(got))
+
+    def test_identical_to_strict_when_params_are_valid(self):
+        psi = np.logspace(-1, 6, 200)
+        a = theta_from_psi(psi, TR, TS, AL, N)
+        b = theta_from_psi(psi, TR, TS, AL, N, strict=False)
+        assert np.array_equal(a, b)
+
+    def test_strict_flag_does_not_touch_the_inverse(self):
+        """psi_from_theta has no permissive mode; nothing fits on the inverse."""
+        import inspect
+
+        assert "strict" not in inspect.signature(psi_from_theta).parameters
+
+
 class TestDefaults:
     def test_se_eps_default_is_the_published_one(self):
         assert SE_EPS == 1e-6

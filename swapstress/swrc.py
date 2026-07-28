@@ -14,7 +14,10 @@ Conventions
   is what every call site in this repository assumed.
 - Invalid parameter combinations yield ``NaN`` rather than a patched value. Do
   not add fallbacks here: a NaN means the upstream parameters are unusable and
-  that should surface, not be silently filled.
+  that should surface, not be silently filled. The one exception is
+  ``theta_from_psi(..., strict=False)``, which exists so least-squares fitters
+  can evaluate the curve across a search path that passes through invalid
+  parameter space; see that function's docstring.
 
 Numerical guards
 ----------------
@@ -137,7 +140,14 @@ class VanGenuchtenParams:
 
 
 def theta_from_psi(
-    psi_cm, theta_r, theta_s, alpha, n, *, psi_floor_cm: float = PSI_FLOOR_CM
+    psi_cm,
+    theta_r,
+    theta_s,
+    alpha,
+    n,
+    *,
+    psi_floor_cm: float = PSI_FLOOR_CM,
+    strict: bool = True,
 ):
     """Forward van Genuchten: theta(psi).
 
@@ -155,6 +165,18 @@ def theta_from_psi(
         Shape parameter, must be > 1.
     psi_floor_cm : float
         Lower clamp on ``psi`` so that ``psi = 0`` does not raise.
+    strict : bool
+        When True (the default, and correct for analysis) every condition in
+        :func:`valid_params` must hold or the result is ``NaN``.
+
+        When False, only ``n > 1`` is enforced. This exists for **curve-fitting
+        residual models only**. A least-squares optimizer walks through
+        parameter space that includes ``theta_s <= theta_r``, and returning NaN
+        there aborts the fit rather than steering it away; the archived fits
+        were produced against this looser evaluation, so reproducing them
+        requires it. Never use ``strict=False`` to evaluate a curve for
+        analysis -- it will happily return numbers for parameter sets that are
+        not retention curves at all.
 
     Returns
     -------
@@ -167,7 +189,10 @@ def theta_from_psi(
     alpha = np.asarray(alpha, dtype=np.float64)
     n = np.asarray(n, dtype=np.float64)
 
-    valid = valid_params(theta_r, theta_s, alpha, n) & np.isfinite(psi_cm)
+    if strict:
+        valid = valid_params(theta_r, theta_s, alpha, n) & np.isfinite(psi_cm)
+    else:
+        valid = np.isfinite(psi_cm) & np.isfinite(n) & (n > 1.0)
     shape = np.broadcast(psi_cm, theta_r, theta_s, alpha, n).shape
     out = np.full(shape, np.nan, dtype=np.float64)
 
