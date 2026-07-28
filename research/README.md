@@ -34,8 +34,26 @@ part of what the descriptor claims to reproduce — not because it is broken.
 ## What stayed behind
 
 Six figure scripts went to `swapstress/figures/` instead, because they back the
-descriptor's figures: `fig3_pipeline.py` (Fig 1), `fig11b_drought_timeseries.py`
-(Fig 3), `fig_vg_vs_direct.py` and `fig5_kfold_validation.py` (Fig 4),
-`fig7_koppen_transferability.py` (Fig 5), and `fig6b_error_map.py` (Fig 6).
-`distributions.py` went there too; it folds into
-`swapstress/figures/summaries.py` in Phase 6.
+descriptor's figures. Phase 6 renamed them to the descriptor's own numbering,
+so the module name and the figure number no longer disagree:
+
+| Was | Now | Role |
+|---|---|---|
+| `fig3_pipeline.py` | `fig01_pipeline.py` | Fig 1 |
+| — | `fig02_coverage.py` | Fig 2 (new in Phase 6) |
+| `fig11b_drought_timeseries.py` | `fig03_pixel_series.py` | Fig 3 (rewritten) |
+| — | `fig04_validation_scatter.py` | Fig 4 (new in Phase 6) |
+| `fig7_koppen_transferability.py` | `fig05_spatial_skill.py` | Fig 5 |
+| `fig6b_error_map.py` | `fig06_uncertainty.py` | Fig 6 |
+| `fig_vg_vs_direct.py` | `vg_vs_direct.py` | supporting |
+| `fig5_kfold_validation.py` | `kfold_validation.py` | supporting |
+
+The last two are analyses the plan listed under Fig 4, but the figure the
+outline actually specifies is a scatter against the PTF baselines. They still
+render on request and are excluded from `--figure all`.
+
+`distributions.py` went there too. It was to fold into
+`swapstress/figures/summaries.py`, but that is Phase 7 work, not Phase 6: both
+modules back the notebooks and Table 1 rather than Figs 1-6, and neither is
+imported anywhere in `swapstress/` yet. Merging them before the notebooks call
+them would mean settling on an API with nothing exercising it.
