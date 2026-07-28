@@ -59,13 +59,25 @@ dev = [
 ]
 
 [tool.hatch.build.targets.wheel]
+# Phase 3 collapses this to ["swapstress", "research"]. Until then, list what
+# the repo actually contains -- the pre-refactor list named a package that had
+# moved and omitted two that exist, so the wheel did not build the tree.
 packages = [
-    "et",
+    "error_analysis",
+    "figs",
     "map",
-    "poster",
+    "research",
     "retention_curve",
-    "site_modeling",
+    "swapstress",
     "utils",
     "viz",
     "vwc_series",
 ]
+
+[tool.pytest.ini_options]
+# research/ is preserved exploratory work, not part of the reproduction path.
+# Its tests move with it and are not run by default.
+testpaths = ["tests"]
+
+[tool.ruff]
+extend-exclude = ["research"]
