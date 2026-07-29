@@ -8,8 +8,8 @@ source selection.
 Sources:
     - GSHP: Global Soil Hydraulic Properties (lab WRC, VG params from CSV)
     - NCSS: National Cooperative Soil Survey (lab WRC, VG params fitted)
-    - MT Mesonet: Montana Mesonet stations (field SWP/VWC, VG params fitted)
-    - ReESH: Remote sensing ecosystem sites (field WRC, VG params fitted)
+    - MT Mesonet: Montana Mesonet stations (lab-analyzed samples, VG params fitted)
+    - ReESH: Remote sensing ecosystem sites (lab WRC, VG params fitted)
     - Rosetta: Gridded prior from pedotransfer (pre-computed VG params)
 
 Usage:
@@ -188,7 +188,7 @@ SOURCES = {
     ),
     "mt_mesonet": DataSource(
         name="mt_mesonet",
-        description="Montana Mesonet - field soil water potential stations",
+        description="Montana Mesonet - lab-analyzed soil samples (HYPROP)",
         index_col="station",
         group_col="station",
         has_vg_params=False,

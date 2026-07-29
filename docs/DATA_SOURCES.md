@@ -55,7 +55,7 @@ retention points. It applies only to the two lab curve sources, GSHP and NCSS.
 |---|---|---|---|
 | GSHP | laboratory retention curves | `profile_id` | `WRC_dataset_surya_et_al_2021_final.csv` |
 | NCSS | laboratory characterization | `profile_id` | `ncss_selection.parquet` |
-| MT Mesonet | in-situ paired sensors | `station` | `swp.csv` + `station_metadata.csv` |
+| MT Mesonet | laboratory retention curves | `station` | `swp.csv` + `station_metadata.csv` |
 | ReESH | laboratory retention curves | `site_id` | `*_SoilWaterRetentionCurves.csv` |
 | LaCADIAN | in-situ paired sensors | `station` | `swp.csv` + `station_metadata.csv` |
 
@@ -173,11 +173,12 @@ as measured if the minimum suction is ≤ 150 cm, the dry end if the maximum is
 ## MT Mesonet — Montana Mesonet
 
 Automated environmental monitoring stations across Montana. Measurement type:
-**in-situ** — co-located soil water potential and volumetric water content
-sensors at several depths, read as a daily time series, not laboratory samples.
-`swapstress/sources/mt_mesonet.py` pulls the station series from the Mesonet API
-and pivots the long-format response into per-station tables; `swp.csv` is the
-paired extract, with columns `station, Depth [cm], KPA, VWC`.
+**laboratory** — retention data measured on soil samples collected at the
+stations, using the same instrumentation as ReESH (HYPROP sample analysis), not
+readings from the installed field probes. `swapstress/sources/mt_mesonet.py`
+pulls the series from the Mesonet API and pivots the long-format response into
+per-station tables; `swp.csv` is the paired extract, with columns
+`station, Depth [cm], KPA, VWC`.
 
 **Standardization** (`standardize_mt_mesonet`). `suction_cm = |KPA| × 10.19716`,
 and `VWC` is already a volumetric fraction. Two source-specific filters run
