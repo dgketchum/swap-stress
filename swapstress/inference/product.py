@@ -2,7 +2,7 @@
 
 The model predicts one thing, ``log10_suction_cm``. This stage turns a directory
 of those daily rasters into the released files: the same quantity in the three
-representations Table 2 documents, plus the uncertainty band when the model was
+representations Table 2 documents, plus the QRF quantile pair when the model was
 run with quantiles and, at Level 2, a per-pixel flag saying which values were
 gap-filled.
 
@@ -14,6 +14,16 @@ its own metadata rather than leaving a reuser to infer it from the values.
 The conversion is exact, not approximate. Because the target is a base-10
 logarithm, going to MPa is an additive shift in log space, so no reported metric
 moves; :mod:`swapstress.units` holds the constant and the argument.
+
+Uncertainty
+-----------
+The released representation is the **quantile pair** ``log10_suction_cm_q025``
+and ``log10_suction_cm_q975``, not a single interval width. Two reasons, and
+both point the same way. The width is derivable from the pair and the pair is
+not derivable from the width, and the product ships only what a reuser cannot
+reconstruct. And a QRF interval in log space is asymmetric about the median, so
+a width alone discards where the mass sits -- which for a stress product is the
+question, since the dry side of the interval is the side that matters.
 
 Levels
 ------
@@ -66,6 +76,14 @@ NODATA_VALUE = -9999.0
 # The flag band is uint8 where the container allows it, and -9999 does not fit.
 FLAG_FILL_VALUE = 255
 CONVENTIONS = "CF-1.10"
+
+# The released prediction interval, as QRF quantile levels: a central 95% band.
+# Named here rather than in the inference stage because the band names encode
+# these numbers, so the release has exactly one place that fixes them.
+QUANTILE_LEVELS = (0.025, 0.975)
+# Its nominal coverage, derived rather than restated -- the number the coverage
+# analysis compares against and the figure labels.
+RELEASE_NOMINAL = round(QUANTILE_LEVELS[1] - QUANTILE_LEVELS[0], 6)
 
 # NetCDF deposit settings. The chunk shape is the one decision that is expensive
 # to get wrong, because it is fixed at write time: (time=1, y=all, x=all) makes
@@ -173,16 +191,49 @@ SUCTION = BandSpec(
     comment="Linear convenience band; exactly 10**log10_suction_cm.",
 )
 
-UNCERTAINTY = BandSpec(
-    name="uncertainty",
+
+def quantile_band_name(level: float) -> str:
+    """The band name for a quantile *level*, e.g. 0.025 -> ``..._q025``.
+
+    The suffix is the level in per mille, three digits, so 0.025 and 0.975 read
+    as ``q025``/``q975`` and nothing rounds two distinct levels together.
+    """
+    if not 0.0 < level < 1.0:
+        raise ValueError(f"A quantile level lies strictly in (0, 1); got {level}")
+    return f"log10_suction_cm_q{level * 1000:03.0f}"
+
+
+Q025_BAND_NAME = quantile_band_name(QUANTILE_LEVELS[0])
+Q975_BAND_NAME = quantile_band_name(QUANTILE_LEVELS[1])
+
+# The uncertainty representation, decided at release: the pair, not the width.
+# See the module docstring -- width is derivable from the pair, the pair is not
+# derivable from the width, and the interval is asymmetric in log space.
+_QUANTILE_COMMENT = (
+    "{ordinal} percentile of the QRF predictive distribution, in the model's "
+    "own units. Together with {other} it is the released 95% prediction "
+    "interval; the interval width q975 - q025 is deliberately not shipped as "
+    "its own band because it is exactly derivable from the pair, while the "
+    "pair is not derivable from a width. The interval is asymmetric about the "
+    "median. A width read off this pair is identical whether the values are "
+    "read as log10(cm) or log10(|MPa|), since the unit change is an additive "
+    "shift. Present only when the model was run with quantiles."
+)
+
+LOG10_SUCTION_Q025 = BandSpec(
+    name=Q025_BAND_NAME,
     units="log10(cm)",
-    long_name="Quantile-regression-forest prediction interval width",
-    sign="none",
-    comment=(
-        "Width of the QRF quantile interval in log10 units, identical whether "
-        "read as log10(cm) or log10(|MPa|). Present only when the model was run "
-        "with quantiles."
-    ),
+    long_name="Lower bound of the QRF 95% prediction interval, log10 suction head",
+    sign="positive",
+    comment=_QUANTILE_COMMENT.format(ordinal="2.5th", other=Q975_BAND_NAME),
+)
+
+LOG10_SUCTION_Q975 = BandSpec(
+    name=Q975_BAND_NAME,
+    units="log10(cm)",
+    long_name="Upper bound of the QRF 95% prediction interval, log10 suction head",
+    sign="positive",
+    comment=_QUANTILE_COMMENT.format(ordinal="97.5th", other=Q025_BAND_NAME),
 )
 
 GAPFILL_FLAG = BandSpec(
@@ -221,9 +272,37 @@ class ProductBands:
         return self.data[self.index(name)]
 
 
+def check_interval(
+    log10: np.ndarray,
+    q025: np.ndarray,
+    q975: np.ndarray,
+    valid: np.ndarray,
+) -> None:
+    """Refuse a quantile pair that does not bracket the median it came with.
+
+    A QRF returns its quantiles as order statistics of one predictive
+    distribution, so ``q025 <= median <= q975`` holds by construction. A
+    violation therefore does not mean an unlucky pixel -- it means the bands
+    were paired up wrongly, or a quantile raster is masked where the median is
+    not. Either way the released interval would be a lie, so it stops here.
+    """
+    low_high = int(np.count_nonzero(q025[valid] > log10[valid]))
+    high_low = int(np.count_nonzero(q975[valid] < log10[valid]))
+    if not (low_high or high_low):
+        return
+    raise ValueError(
+        f"The quantile pair does not bracket the median: {Q025_BAND_NAME} "
+        f"exceeds it at {low_high:,} pixels and {Q975_BAND_NAME} falls below "
+        f"it at {high_low:,} of {int(valid.sum()):,} valid pixels. The bands "
+        "are swapped, misaligned, or one of them carries NODATA where the "
+        "median does not."
+    )
+
+
 def build_bands(
     log10_suction_cm: np.ndarray,
-    uncertainty: Optional[np.ndarray] = None,
+    q025: Optional[np.ndarray] = None,
+    q975: Optional[np.ndarray] = None,
     gapfill_flag: Optional[np.ndarray] = None,
     include_linear_suction: bool = True,
 ) -> ProductBands:
@@ -239,7 +318,12 @@ def build_bands(
     drops ``suction_cm``, which is the one worth dropping first: it spans about
     0 to 1e6 linearly, so it is high-entropy and compresses worst, while
     ``log10_suction_cm`` is smooth. The log band has to stay regardless -- it is
-    the model's actual output, and the units ``uncertainty`` is expressed in.
+    the model's actual output, and the units the quantile pair is expressed in.
+
+    ``q025``/``q975`` are the released uncertainty representation. A run without
+    quantiles has neither and its files simply carry no interval, the same way
+    Level 1 carries no gap-fill flag. Half a pair is not a lesser case of that:
+    it is a broken run, and it raises.
     """
     log10 = np.asarray(log10_suction_cm, dtype=np.float32)
     valid = np.isfinite(log10) & (log10 != NODATA_VALUE)
@@ -262,10 +346,21 @@ def build_bands(
         specs.append(SUCTION)
         bands.append(suction)
 
-    if uncertainty is not None:
-        unc = np.asarray(uncertainty, dtype=np.float32)
-        specs.append(UNCERTAINTY)
-        bands.append(np.where(valid, unc, NODATA_VALUE).astype(np.float32))
+    if (q025 is None) != (q975 is None):
+        missing = Q975_BAND_NAME if q025 is not None else Q025_BAND_NAME
+        raise ValueError(
+            f"The released uncertainty representation is the {Q025_BAND_NAME} / "
+            f"{Q975_BAND_NAME} pair, and {missing} is missing. Package a run "
+            "with both quantile rasters or with neither."
+        )
+
+    if q025 is not None:
+        low = np.asarray(q025, dtype=np.float32)
+        high = np.asarray(q975, dtype=np.float32)
+        check_interval(log10, low, high, valid)
+        specs.extend([LOG10_SUCTION_Q025, LOG10_SUCTION_Q975])
+        bands.append(np.where(valid, low, NODATA_VALUE).astype(np.float32))
+        bands.append(np.where(valid, high, NODATA_VALUE).astype(np.float32))
 
     if gapfill_flag is not None:
         flag = np.asarray(gapfill_flag, dtype=np.float32)
@@ -517,12 +612,16 @@ class NetCDFStack:
         self.ds.close()
 
 
-def read_source_raster(path: Path) -> tuple[np.ndarray, Optional[np.ndarray], dict]:
-    """Read a predict/gapfill raster into (log10, uncertainty, profile).
+def read_source_raster(path: Path) -> tuple:
+    """Read a predict/gapfill raster into (log10, q025, q975, profile).
 
-    Band 1 is always ``log10_suction_cm``. A band literally named
-    ``uncertainty`` is carried through; the linear ``suction_cm`` band that
-    predict can also write is ignored, because this stage recomputes it.
+    Band 1 is always ``log10_suction_cm``. The quantile bands are found by name,
+    so a run without them reads back as ``(log10, None, None, profile)``; the
+    linear ``suction_cm`` band that predict can also write is ignored, because
+    this stage recomputes it.
+
+    A raster carrying one half of the pair is refused here rather than in
+    :func:`build_bands`, so the message can name the file that is wrong.
     """
     with rasterio.open(path) as src:
         profile = src.profile.copy()
@@ -531,12 +630,19 @@ def read_source_raster(path: Path) -> tuple[np.ndarray, Optional[np.ndarray], di
         if src.nodata is not None and not np.isnan(src.nodata):
             log10[log10 == src.nodata] = NODATA_VALUE
 
-        uncertainty = None
-        if "uncertainty" in descriptions:
-            uncertainty = src.read(descriptions.index("uncertainty") + 1).astype(
-                np.float32
+        present = [n for n in (Q025_BAND_NAME, Q975_BAND_NAME) if n in descriptions]
+        if len(present) == 1:
+            raise ValueError(
+                f"{path} carries {present[0]} but not the other half of the "
+                f"released quantile pair ({Q025_BAND_NAME} / {Q975_BAND_NAME}). "
+                "Re-run inference with --release-quantiles."
             )
-    return log10, uncertainty, profile
+
+        quantiles = [
+            src.read(descriptions.index(name) + 1).astype(np.float32)
+            for name in present
+        ] or [None, None]
+    return log10, quantiles[0], quantiles[1], profile
 
 
 def derive_gapfill_flag(level2: np.ndarray, level1_path: Optional[Path]) -> np.ndarray:
@@ -583,15 +689,27 @@ def _day_bands(
     level: int,
     level1: Optional[Path],
     include_linear_suction: bool,
+    require_quantiles: bool = False,
 ) -> tuple:
     """Read one source raster and derive its released bands."""
-    log10, uncertainty, profile = read_source_raster(path)
+    log10, q025, q975, profile = read_source_raster(path)
+    if require_quantiles and q025 is None:
+        # The stacked container would catch this by refusing a day whose bands
+        # changed mid-stack, but the per-day GeoTIFF path would happily write a
+        # file with no interval in it. A release run says what it expects.
+        raise ValueError(
+            f"{path} carries no quantile bands, and --require-quantiles was "
+            f"asked for. The released interval is {Q025_BAND_NAME} / "
+            f"{Q975_BAND_NAME}; re-run inference for this day with "
+            "--release-quantiles, or package without --require-quantiles."
+        )
     flag = None
     if level == 2:
         flag = derive_gapfill_flag(log10, (level1 / path.name) if level1 else None)
     bands = build_bands(
         log10,
-        uncertainty=uncertainty,
+        q025=q025,
+        q975=q975,
         gapfill_flag=flag,
         include_linear_suction=include_linear_suction,
     )
@@ -628,6 +746,7 @@ def _package_geotiff(
     standard_names: Optional[dict],
     overwrite: bool,
     include_linear_suction: bool,
+    require_quantiles: bool,
     writer: Callable[..., Path],
 ) -> List[Path]:
     """One file per day."""
@@ -639,7 +758,9 @@ def _package_geotiff(
             print(f"  exists, skipping: {out_path.name}")
             continue
 
-        bands, profile, flag = _day_bands(path, level, level1, include_linear_suction)
+        bands, profile, flag = _day_bands(
+            path, level, level1, include_linear_suction, require_quantiles
+        )
         writer(
             out_path=out_path,
             profile=profile,
@@ -668,6 +789,7 @@ def _package_netcdf(
     standard_names: Optional[dict],
     overwrite: bool,
     include_linear_suction: bool,
+    require_quantiles: bool,
     source_dir: Path,
     group_by: str,
 ) -> List[Path]:
@@ -685,7 +807,7 @@ def _package_netcdf(
         try:
             for i, path in enumerate(paths):
                 bands, profile, flag = _day_bands(
-                    path, level, level1, include_linear_suction
+                    path, level, level1, include_linear_suction, require_quantiles
                 )
                 if stack is None:
                     stack = NetCDFStack(
@@ -734,12 +856,18 @@ def package_release(
     writer: Callable[..., Path] = write_geotiff,
     container: str = "geotiff",
     include_linear_suction: bool = True,
+    require_quantiles: bool = False,
     group_by: str = "year",
 ) -> List[Path]:
     """Convert a directory of daily model rasters into released files.
 
     ``netcdf`` stacks the days into one CF file per group and is the archive of
     record for a deposit; ``geotiff`` writes one file per day.
+
+    ``require_quantiles`` refuses a source raster that carries no
+    ``log10_suction_cm_q025`` / ``log10_suction_cm_q975`` pair. Off by default,
+    because packaging a median-only experiment is legitimate; on for a release
+    run, where a day quietly missing its interval is the failure to catch.
     """
     source = Path(source_dir)
     out_root = Path(output_dir)
@@ -761,6 +889,7 @@ def package_release(
             standard_names,
             overwrite,
             include_linear_suction,
+            require_quantiles,
             writer,
         )
     if container == "netcdf":
@@ -774,6 +903,7 @@ def package_release(
             standard_names,
             overwrite,
             include_linear_suction,
+            require_quantiles,
             source,
             group_by,
         )
@@ -848,6 +978,13 @@ def build_parser() -> argparse.ArgumentParser:
         "log10_suction_cm and compresses worst; recommended for the deposit.",
     )
     parser.add_argument(
+        "--require-quantiles",
+        action="store_true",
+        help=f"Refuse a source raster without the {Q025_BAND_NAME} / "
+        f"{Q975_BAND_NAME} pair. Use for a release run, where a day silently "
+        "missing its prediction interval is the failure to catch.",
+    )
+    parser.add_argument(
         "--overwrite",
         action="store_true",
         help="Rewrite files that already exist.",
@@ -894,6 +1031,7 @@ def main(argv=None) -> None:
         overwrite=config.get("overwrite", False),
         container=config["container"],
         include_linear_suction=not config.get("drop_linear_suction", False),
+        require_quantiles=config.get("require_quantiles", False),
         group_by=config["group_by"],
     )
     print(f"\n{len(written)} files written to {config['output_dir']}")

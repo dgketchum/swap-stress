@@ -16,6 +16,9 @@ from swapstress.inference.product import (
     FLAG_FILL_VALUE,
     GRID_EPSG,
     NODATA_VALUE,
+    Q025_BAND_NAME,
+    Q975_BAND_NAME,
+    QUANTILE_LEVELS,
     build_bands,
     derive_gapfill_flag,
     date_from_path,
@@ -24,6 +27,7 @@ from swapstress.inference.product import (
     group_rasters,
     package_release,
     parse_standard_names,
+    quantile_band_name,
     read_source_raster,
     time_value,
     write_geotiff,
@@ -39,6 +43,19 @@ SAMPLE = np.array(
     ],
     dtype=np.float32,
 )
+
+
+def _interval(data, below=0.20, above=0.55):
+    """A QRF-like interval around *data*: asymmetric, NODATA where *data* is.
+
+    Asymmetric on purpose. A real QRF interval in log space is not centred on
+    its median, which is the reason the release ships the pair rather than a
+    width that would throw the asymmetry away.
+    """
+    valid = data != NODATA_VALUE
+    low = np.where(valid, data - below, NODATA_VALUE).astype(np.float32)
+    high = np.where(valid, data + above, NODATA_VALUE).astype(np.float32)
+    return low, high
 
 
 def _profile(shape):
@@ -114,12 +131,6 @@ class TestBuildBands:
     def test_rounded_wilting_point_lands_close(self):
         bands = build_bands(np.array([[4.18]], dtype=np.float32))
         assert bands.band("matric_potential_MPa")[0, 0] == pytest.approx(-1.5, rel=2e-2)
-
-    def test_uncertainty_band_added_when_present(self):
-        unc = np.full_like(SAMPLE, 0.3)
-        bands = build_bands(SAMPLE, uncertainty=unc)
-        assert "uncertainty" in [s.name for s in bands.specs]
-        assert np.all(bands.band("uncertainty")[bands.valid] == pytest.approx(0.3))
 
     def test_gapfill_band_added_when_present(self):
         flag = np.zeros_like(SAMPLE)
@@ -248,20 +259,31 @@ class TestReadSource:
             stack,
             descriptions=("log10_suction_cm", "suction_cm"),
         )
-        log10, uncertainty, _ = read_source_raster(path)
-        assert uncertainty is None
+        log10, q025, q975, _ = read_source_raster(path)
+        assert q025 is None and q975 is None
         assert log10[0, 0] == pytest.approx(5.0)
 
-    def test_carries_uncertainty_band_through(self, tmp_path):
-        stack = np.stack([SAMPLE, np.full_like(SAMPLE, 0.25)]).astype(np.float32)
+    def test_carries_the_quantile_pair_through(self, tmp_path):
+        low, high = _interval(SAMPLE)
         path = _write_source(
             tmp_path / "suction_20240101.tif",
-            stack,
-            descriptions=("log10_suction_cm", "uncertainty"),
+            np.stack([SAMPLE, low, high]),
+            descriptions=("log10_suction_cm", Q025_BAND_NAME, Q975_BAND_NAME),
         )
-        _, uncertainty, _ = read_source_raster(path)
-        assert uncertainty is not None
-        assert uncertainty[0, 0] == pytest.approx(0.25)
+        _, q025, q975, _ = read_source_raster(path)
+        assert q025[0, 0] == pytest.approx(4.80)
+        assert q975[0, 0] == pytest.approx(5.55)
+
+    def test_half_a_pair_names_the_offending_file(self, tmp_path):
+        """Silently dropping it would ship a product with no interval at all."""
+        low, _ = _interval(SAMPLE)
+        path = _write_source(
+            tmp_path / "suction_20240101.tif",
+            np.stack([SAMPLE, low]),
+            descriptions=("log10_suction_cm", Q025_BAND_NAME),
+        )
+        with pytest.raises(ValueError, match="other half"):
+            read_source_raster(path)
 
 
 class TestPackageRelease:
@@ -314,6 +336,231 @@ class TestPackageRelease:
     def test_empty_source_dir_raises(self, tmp_path):
         with pytest.raises(FileNotFoundError, match="No suction_"):
             package_release(str(tmp_path), str(tmp_path / "out"), level=1)
+
+
+class TestQuantilePair:
+    """The released uncertainty representation: the pair, not a width.
+
+    Width is derivable from the pair and the pair is not derivable from a
+    width, so the pair is what ships. These tests hold that line -- both bands
+    present or neither, in the model's own units, bracketing the median.
+    """
+
+    def test_band_names_are_the_levels_in_per_mille(self):
+        assert quantile_band_name(0.025) == "log10_suction_cm_q025"
+        assert quantile_band_name(0.975) == "log10_suction_cm_q975"
+        assert (Q025_BAND_NAME, Q975_BAND_NAME) == tuple(
+            quantile_band_name(q) for q in QUANTILE_LEVELS
+        )
+
+    def test_pair_follows_the_three_representations(self):
+        low, high = _interval(SAMPLE)
+        bands = build_bands(SAMPLE, q025=low, q975=high)
+        assert [s.name for s in bands.specs] == [
+            "log10_suction_cm",
+            "matric_potential_MPa",
+            "suction_cm",
+            Q025_BAND_NAME,
+            Q975_BAND_NAME,
+        ]
+
+    def test_pair_is_in_the_model_s_own_units(self):
+        low, high = _interval(SAMPLE)
+        bands = build_bands(SAMPLE, q025=low, q975=high)
+        for name in (Q025_BAND_NAME, Q975_BAND_NAME):
+            spec = bands.specs[bands.index(name)]
+            assert spec.units == "log10(cm)"
+            assert spec.sign == "positive"
+            assert spec.dtype == "float32"
+            assert spec.fill_value == NODATA_VALUE
+
+    def test_width_is_recoverable_from_the_pair(self):
+        low, high = _interval(SAMPLE, below=0.20, above=0.55)
+        bands = build_bands(SAMPLE, q025=low, q975=high)
+        valid = bands.valid
+        width = bands.band(Q975_BAND_NAME)[valid] - bands.band(Q025_BAND_NAME)[valid]
+        assert width == pytest.approx(0.75, rel=1e-5)
+
+    def test_gap_pixels_stay_gaps(self):
+        low, high = _interval(SAMPLE)
+        bands = build_bands(SAMPLE, q025=low, q975=high)
+        gap = ~bands.valid
+        assert gap.sum() == 1
+        for name in (Q025_BAND_NAME, Q975_BAND_NAME):
+            assert np.all(bands.band(name)[gap] == NODATA_VALUE)
+
+    def test_absent_pair_is_a_run_without_quantiles(self):
+        """A non-quantile run is a legitimate product, just without an interval."""
+        names = [s.name for s in build_bands(SAMPLE).specs]
+        assert Q025_BAND_NAME not in names and Q975_BAND_NAME not in names
+
+    @pytest.mark.parametrize("given", ["q025", "q975"])
+    def test_half_a_pair_raises(self, given):
+        low, high = _interval(SAMPLE)
+        kwargs = {"q025": low} if given == "q025" else {"q975": high}
+        with pytest.raises(ValueError, match="pair"):
+            build_bands(SAMPLE, **kwargs)
+
+    def test_a_pair_that_does_not_bracket_the_median_raises(self):
+        """q025 above the median means the bands were paired up wrongly."""
+        low, high = _interval(SAMPLE)
+        with pytest.raises(ValueError, match="does not bracket the median"):
+            build_bands(SAMPLE, q025=high, q975=low)
+
+    def test_equality_is_allowed(self):
+        """A degenerate interval is unusual, not invalid."""
+        bands = build_bands(SAMPLE, q025=SAMPLE.copy(), q975=SAMPLE.copy())
+        valid = bands.valid
+        assert np.all(bands.band(Q025_BAND_NAME)[valid] == SAMPLE[valid])
+
+    def test_nodata_in_one_quantile_where_the_median_is_valid_raises(self):
+        low, high = _interval(SAMPLE)
+        high[0, 1] = NODATA_VALUE
+        with pytest.raises(ValueError, match="does not bracket the median"):
+            build_bands(SAMPLE, q025=low, q975=high)
+
+    def test_survives_the_geotiff_round_trip(self, tmp_path):
+        low, high = _interval(SAMPLE)
+        bands = build_bands(SAMPLE, q025=low, q975=high)
+        out = write_geotiff(
+            out_path=tmp_path / "product.tif",
+            profile=_profile(SAMPLE.shape),
+            bands=bands,
+            level=1,
+            date_str="20240101",
+        )
+        with rasterio.open(out) as src:
+            names = list(src.descriptions)
+            log10 = src.read(names.index("log10_suction_cm") + 1)
+            q025 = src.read(names.index(Q025_BAND_NAME) + 1)
+            q975 = src.read(names.index(Q975_BAND_NAME) + 1)
+            tags = src.tags(names.index(Q025_BAND_NAME) + 1)
+            assert src.dtypes[names.index(Q975_BAND_NAME)] == "float32"
+            assert src.nodata == NODATA_VALUE
+
+        valid = log10 != NODATA_VALUE
+        assert np.all(q025[valid] <= log10[valid])
+        assert np.all(log10[valid] <= q975[valid])
+        assert np.all(q025[~valid] == NODATA_VALUE)
+        assert tags["units"] == "log10(cm)"
+        assert tags["sign_convention"] == "positive"
+        assert tags["_FillValue"] == str(NODATA_VALUE)
+
+    def test_survives_the_netcdf_round_trip(self, tmp_path):
+        netCDF4 = pytest.importorskip("netCDF4")
+        src = tmp_path / "src"
+        src.mkdir()
+        low, high = _interval(SAMPLE)
+        _write_source(
+            src / "suction_20240101.tif",
+            np.stack([SAMPLE, low, high]),
+            descriptions=("log10_suction_cm", Q025_BAND_NAME, Q975_BAND_NAME),
+        )
+        written = package_release(
+            str(src), str(tmp_path / "out"), level=1, container="netcdf"
+        )
+        with netCDF4.Dataset(written[0]) as ds:
+            ds.set_auto_mask(False)
+            var = ds[Q975_BAND_NAME]
+            assert var.dtype == np.float32
+            assert var._FillValue == np.float32(NODATA_VALUE)
+            assert var.units == "log10(cm)"
+            assert var.grid_mapping == "crs"
+            log10 = ds["log10_suction_cm"][0]
+            q025 = ds[Q025_BAND_NAME][0]
+            q975 = var[0]
+
+        valid = log10 != NODATA_VALUE
+        np.testing.assert_allclose(q975[valid] - q025[valid], 0.75, rtol=1e-5)
+        assert np.all(q025[valid] <= log10[valid])
+        assert np.all(log10[valid] <= q975[valid])
+
+    def test_packaging_carries_the_pair_end_to_end(self, tmp_path):
+        src = tmp_path / "inference"
+        src.mkdir()
+        low, high = _interval(SAMPLE)
+        _write_source(
+            src / "suction_20240101.tif",
+            np.stack([SAMPLE, low, high]),
+            descriptions=("log10_suction_cm", Q025_BAND_NAME, Q975_BAND_NAME),
+        )
+        written = package_release(
+            source_dir=str(src), output_dir=str(tmp_path / "release"), level=1
+        )
+        with rasterio.open(written[0]) as dst:
+            assert Q025_BAND_NAME in dst.descriptions
+            assert Q975_BAND_NAME in dst.descriptions
+
+
+class TestRequireQuantiles:
+    """A release run says out loud that it expects the interval."""
+
+    def _median_only(self, tmp_path):
+        src = tmp_path / "inference"
+        src.mkdir()
+        _write_source(src / "suction_20240101.tif", SAMPLE)
+        return src
+
+    def _with_pair(self, tmp_path):
+        src = tmp_path / "inference"
+        src.mkdir()
+        low, high = _interval(SAMPLE)
+        _write_source(
+            src / "suction_20240101.tif",
+            np.stack([SAMPLE, low, high]),
+            descriptions=("log10_suction_cm", Q025_BAND_NAME, Q975_BAND_NAME),
+        )
+        return src
+
+    def test_median_only_still_packages_by_default(self, tmp_path):
+        written = package_release(
+            str(self._median_only(tmp_path)), str(tmp_path / "out"), level=1
+        )
+        with rasterio.open(written[0]) as dst:
+            assert Q025_BAND_NAME not in dst.descriptions
+
+    def test_geotiff_refuses_a_day_without_the_pair(self, tmp_path):
+        with pytest.raises(ValueError, match="no quantile bands"):
+            package_release(
+                str(self._median_only(tmp_path)),
+                str(tmp_path / "out"),
+                level=1,
+                require_quantiles=True,
+            )
+        assert not list((tmp_path / "out").glob("*.tif"))
+
+    def test_netcdf_refuses_a_day_without_the_pair(self, tmp_path):
+        pytest.importorskip("netCDF4")
+        with pytest.raises(ValueError, match="no quantile bands"):
+            package_release(
+                str(self._median_only(tmp_path)),
+                str(tmp_path / "out"),
+                level=1,
+                container="netcdf",
+                require_quantiles=True,
+            )
+        assert not list((tmp_path / "out").glob("*.nc"))
+
+    def test_the_error_names_the_file_and_the_way_out(self, tmp_path):
+        src = self._median_only(tmp_path)
+        with pytest.raises(ValueError) as exc:
+            package_release(
+                str(src), str(tmp_path / "out"), level=1, require_quantiles=True
+            )
+        message = str(exc.value)
+        assert "suction_20240101.tif" in message
+        assert Q025_BAND_NAME in message and Q975_BAND_NAME in message
+        assert "--release-quantiles" in message
+
+    def test_a_day_carrying_the_pair_passes(self, tmp_path):
+        written = package_release(
+            str(self._with_pair(tmp_path)),
+            str(tmp_path / "out"),
+            level=1,
+            require_quantiles=True,
+        )
+        with rasterio.open(written[0]) as dst:
+            assert Q025_BAND_NAME in dst.descriptions
 
 
 class TestHelpers:
@@ -492,12 +739,12 @@ class TestNetCDFRelease:
         pytest.importorskip("netCDF4")
         src = tmp_path / "src"
         src.mkdir()
-        # Day one carries an uncertainty band, day two does not.
-        stacked = np.stack([SAMPLE, np.full_like(SAMPLE, 0.4)])
+        # Day one carries the quantile pair, day two does not.
+        low, high = _interval(SAMPLE)
         _write_source(
             src / "suction_20240101.tif",
-            stacked,
-            descriptions=("log10_suction_cm", "uncertainty"),
+            np.stack([SAMPLE, low, high]),
+            descriptions=("log10_suction_cm", Q025_BAND_NAME, Q975_BAND_NAME),
         )
         _write_source(src / "suction_20240102.tif", SAMPLE)
         with pytest.raises(ValueError, match="but the stack was opened with"):

@@ -10,26 +10,40 @@ matching feature matrix from:
 - fixed metadata features required by the model (``depth_cm``,
   ``rosetta_level``)
 
+Band 1 is always ``log10_suction_cm``. When the saved model is a quantile forest
+and ``--release-quantiles`` is passed, band 1 is its 0.5 quantile and the two
+bounds of the released prediction interval ride along as their own named bands,
+``log10_suction_cm_q025`` and ``log10_suction_cm_q975``. Stage 07 finds them by
+name, which is why the names are set here and not left to the writer.
+
+The pair is what gets written, not the width between them: see
+:mod:`swapstress.inference.product` for why the release ships only the
+representation a reuser cannot reconstruct.
+
 Usage:
     uv run python -m swapstress.inference.predict \
         --config /home/dgketchum/code/swap-stress/configs/predict_9km_global_pruned.toml
+
+    uv run python -m swapstress.inference.predict --config <toml> --release-quantiles
 """
 
 from __future__ import annotations
 
 import argparse
+import inspect
 import json
 import re
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Sequence
 
 import joblib
 import numpy as np
 import rasterio
 from rasterio.transform import Affine
 
+from swapstress.inference.product import QUANTILE_LEVELS, quantile_band_name
 from swapstress.sources.depth import depth_to_rosetta_level
 
 SMAP_FILENAME_RE = re.compile(r"^smap_(?:sm|l4(?:_sm)?)_(\d{8})\.tif$")
@@ -39,6 +53,12 @@ DEFAULT_SMAP_DIR = "/nas/soils/smap/SPL3SMP_E/daily_tif"
 DEFAULT_OUTPUT_ROOT = "/nas/soils/swapstress/inference/predictions"
 FIXED_FEATURES = {"depth_cm", "rosetta_level"}
 NODATA_VALUE = -9999.0
+
+# What the release run asks for: the median, which is band 1 of every daily
+# raster, and the two bounds of the released 95% prediction interval. The levels
+# themselves live in ``product`` because the released band names encode them.
+MEDIAN_QUANTILE = 0.5
+RELEASE_QUANTILES = (QUANTILE_LEVELS[0], MEDIAN_QUANTILE, QUANTILE_LEVELS[1])
 
 
 @dataclass
@@ -266,6 +286,52 @@ def report_imputer_fill(feature_names: list[str], feature_matrix: np.ndarray) ->
         )
 
 
+def supports_quantiles(model) -> bool:
+    """Whether *model* is a quantile-capable forest.
+
+    ``hasattr(model, "predict")`` is true of every estimator, so it cannot be
+    the test -- a plain ``RandomForestRegressor`` would pass it and then fail
+    deep inside a batch loop. A quantile forest is the one whose ``predict``
+    takes a ``quantiles`` argument.
+    """
+    try:
+        return "quantiles" in inspect.signature(model.predict).parameters
+    except (TypeError, ValueError):  # C-implemented or unintrospectable predict
+        return False
+
+
+def quantile_interval_names(quantiles: Sequence[float]) -> list[str]:
+    """Band names for the non-median quantiles, in the order given."""
+    return [quantile_band_name(q) for q in quantiles if q != MEDIAN_QUANTILE]
+
+
+def split_quantile_predictions(
+    predictions: np.ndarray,
+    quantiles: Sequence[float],
+) -> tuple[np.ndarray, list[tuple[str, np.ndarray]]]:
+    """Separate the median column from the interval columns.
+
+    The median is band 1 of the released raster, so it has to be the actual
+    0.5 quantile of the same predictive distribution the bounds came from. The
+    old fallback -- take column 0 when 0.5 was not asked for -- silently made
+    the lower bound the product's central estimate, so it is a hard error now.
+    """
+    levels = list(quantiles)
+    if MEDIAN_QUANTILE not in levels:
+        raise ValueError(
+            f"Quantile prediction needs {MEDIAN_QUANTILE} among --quantiles: it "
+            "is the central estimate written to band 1. Got "
+            f"{levels}; --release-quantiles asks for {list(RELEASE_QUANTILES)}."
+        )
+    median = predictions[:, levels.index(MEDIAN_QUANTILE)]
+    bands = [
+        (quantile_band_name(level), predictions[:, i])
+        for i, level in enumerate(levels)
+        if level != MEDIAN_QUANTILE
+    ]
+    return median, bands
+
+
 def predict_in_batches(
     model_artifacts: ModelArtifacts,
     feature_matrix: np.ndarray,
@@ -281,7 +347,14 @@ def predict_in_batches(
         (n_rows, len(quantiles)) array.  None → standard mean prediction.
     """
     n_rows = feature_matrix.shape[0]
-    is_qrf = quantiles is not None and hasattr(model_artifacts.model, "predict")
+    is_qrf = quantiles is not None
+    if is_qrf and not supports_quantiles(model_artifacts.model):
+        raise TypeError(
+            f"{type(model_artifacts.model).__name__} in "
+            f"{model_artifacts.model_dir} cannot predict quantiles. The "
+            "released interval needs a model trained with "
+            "swapstress-train --quantile."
+        )
 
     if is_qrf:
         predictions = np.empty((n_rows, len(quantiles)), dtype=np.float32)
@@ -312,35 +385,54 @@ def build_output_cube(
     valid_idx: np.ndarray,
     shape: tuple[int, int],
     write_linear: bool,
-) -> np.ndarray:
-    """Expand flat valid-pixel predictions back to raster form."""
+    quantile_bands: Sequence[tuple[str, np.ndarray]] = (),
+) -> tuple[np.ndarray, list[str]]:
+    """Expand flat valid-pixel predictions back to raster form.
+
+    Returns the cube and the band names that go with it, together, because the
+    packaging stage finds the quantile bands by name: a cube whose names were
+    filled in separately is one edit away from shipping an unlabelled band that
+    stage 07 then silently drops.
+    """
     height, width = shape
-    log10_grid = np.full(height * width, NODATA_VALUE, dtype=np.float32)
-    log10_grid[valid_idx] = predictions
 
-    bands = [log10_grid.reshape(height, width)]
+    def to_grid(values):
+        grid = np.full(height * width, NODATA_VALUE, dtype=np.float32)
+        grid[valid_idx] = values
+        return grid.reshape(height, width)
+
+    bands = [to_grid(predictions)]
+    names = ["log10_suction_cm"]
+
     if write_linear:
-        linear_grid = np.full(height * width, NODATA_VALUE, dtype=np.float32)
-        linear_grid[valid_idx] = np.power(10.0, predictions).astype(
-            np.float32,
-            copy=False,
-        )
-        bands.append(linear_grid.reshape(height, width))
+        bands.append(to_grid(np.power(10.0, predictions).astype(np.float32)))
+        names.append("suction_cm")
 
-    return np.stack(bands, axis=0)
+    for name, values in quantile_bands:
+        bands.append(to_grid(values))
+        names.append(name)
+
+    return np.stack(bands, axis=0), names
 
 
 def write_prediction_raster(
     out_path: Path,
     profile: dict,
     data: np.ndarray,
-    write_linear: bool,
+    descriptions: Sequence[str],
     depth_cm: float,
     rosetta_level: int,
     model_dir: Path,
     source_path: Path,
+    quantiles: tuple[float, ...] | None = None,
 ) -> None:
     """Write prediction raster(s) with useful metadata."""
+    if len(descriptions) != data.shape[0]:
+        raise ValueError(
+            f"{len(descriptions)} band names for {data.shape[0]} bands: every "
+            "band has to be named, or packaging cannot find it."
+        )
+
     profile.update(
         driver="GTiff",
         dtype="float32",
@@ -352,16 +444,18 @@ def write_prediction_raster(
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with rasterio.open(out_path, "w", **profile) as dst:
         dst.write(data)
-        dst.set_band_description(1, "log10_suction_cm")
-        if write_linear:
-            dst.set_band_description(2, "suction_cm")
+        for index, name in enumerate(descriptions, start=1):
+            dst.set_band_description(index, name)
 
-        dst.update_tags(
-            model_dir=str(model_dir),
-            theta_source=str(source_path),
-            depth_cm=str(depth_cm),
-            rosetta_level=str(rosetta_level),
-        )
+        tags = {
+            "model_dir": str(model_dir),
+            "theta_source": str(source_path),
+            "depth_cm": str(depth_cm),
+            "rosetta_level": str(rosetta_level),
+        }
+        if quantiles:
+            tags["quantiles"] = ",".join(str(q) for q in quantiles)
+        dst.update_tags(**tags)
 
 
 def validate_feature_contract(
@@ -407,14 +501,17 @@ def _predict_one_day(
     theta_flat, profile = read_theta(smap_path, static_stack.grid)
     valid_mask = np.isfinite(theta_flat)
     valid_idx = np.flatnonzero(valid_mask)
+    shape = (static_stack.grid.height, static_stack.grid.width)
 
     if valid_idx.size == 0:
-        cube = build_output_cube(
-            predictions=np.empty(0, dtype=np.float32),
-            valid_idx=valid_idx,
-            shape=(static_stack.grid.height, static_stack.grid.width),
-            write_linear=write_linear,
-        )
+        # An empty day still carries the run's full band list. Dropping the
+        # quantile bands here would make one day of the stack heterogeneous,
+        # and packaging refuses a stack whose bands change part way through.
+        empty = np.empty(0, dtype=np.float32)
+        quantile_bands = [
+            (name, empty) for name in quantile_interval_names(quantiles or ())
+        ]
+        median = empty
     else:
         feature_matrix = build_feature_matrix(
             feature_names=model_artifacts.feature_names,
@@ -433,40 +530,29 @@ def _predict_one_day(
             batch_size=batch_size,
             quantiles=quantiles,
         )
-        if quantiles is not None and predictions.ndim == 2:
-            median_idx = list(quantiles).index(0.5) if 0.5 in quantiles else 0
-            cube = build_output_cube(
-                predictions=predictions[:, median_idx],
-                valid_idx=valid_idx,
-                shape=(static_stack.grid.height, static_stack.grid.width),
-                write_linear=write_linear,
-            )
-            if len(quantiles) >= 2:
-                iqr = predictions[:, -1] - predictions[:, 0]
-                height, width = static_stack.grid.height, static_stack.grid.width
-                iqr_grid = np.full(height * width, NODATA_VALUE, dtype=np.float32)
-                iqr_grid[valid_idx] = iqr
-                cube = np.concatenate(
-                    [cube, iqr_grid.reshape(1, height, width)],
-                    axis=0,
-                )
+        if quantiles is None:
+            median, quantile_bands = predictions, []
         else:
-            cube = build_output_cube(
-                predictions=predictions,
-                valid_idx=valid_idx,
-                shape=(static_stack.grid.height, static_stack.grid.width),
-                write_linear=write_linear,
-            )
+            median, quantile_bands = split_quantile_predictions(predictions, quantiles)
+
+    cube, descriptions = build_output_cube(
+        predictions=median,
+        valid_idx=valid_idx,
+        shape=shape,
+        write_linear=write_linear,
+        quantile_bands=quantile_bands,
+    )
 
     write_prediction_raster(
         out_path=out_path,
         profile=profile,
         data=cube,
-        write_linear=write_linear,
+        descriptions=descriptions,
         depth_cm=depth_cm,
         rosetta_level=rosetta_level,
         model_dir=model_artifacts.model_dir,
         source_path=smap_path,
+        quantiles=quantiles,
     )
     print(f"WROTE {out_name} ({valid_idx.size}/{theta_flat.size} valid theta pixels)")
     return True
@@ -522,6 +608,11 @@ def run_prediction(
         f"rosetta_level={resolved_rosetta}"
     )
     print(f"Dates matched: {len(smap_files)} (n_jobs={n_jobs})")
+    if quantiles is not None:
+        print(
+            f"Quantiles: {list(quantiles)} -> bands "
+            f"{['log10_suction_cm', *quantile_interval_names(quantiles)]}"
+        )
 
     if n_jobs > 1:
         # Avoid oversubscription: limit RF's internal threading when
@@ -659,7 +750,17 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         nargs="*",
         default=None,
-        help="Quantiles for QRF prediction (e.g., 0.1 0.5 0.9). Adds IQR uncertainty band.",
+        help="Quantiles for QRF prediction; must include 0.5, which is written "
+        "to band 1. Each other level becomes its own named band, e.g. 0.025 -> "
+        "log10_suction_cm_q025.",
+    )
+    parser.add_argument(
+        "--release-quantiles",
+        action="store_true",
+        default=None,
+        help="Predict the released set, "
+        f"{' '.join(str(q) for q in RELEASE_QUANTILES)}: the median plus the "
+        "q025/q975 pair the product ships as its prediction interval.",
     )
     parser.add_argument(
         "--n-jobs",
@@ -673,6 +774,19 @@ def build_parser() -> argparse.ArgumentParser:
         help="Print per-feature counts of cells the imputer fills, per day.",
     )
     return parser
+
+
+def resolve_quantiles(config: dict) -> tuple[float, ...] | None:
+    """The quantile levels to predict, from ``--quantiles``/``--release-quantiles``."""
+    explicit = tuple(config["quantiles"]) if config.get("quantiles") else None
+    if not config.get("release_quantiles"):
+        return explicit
+    if explicit is not None and explicit != RELEASE_QUANTILES:
+        raise SystemExit(
+            f"--release-quantiles pins {list(RELEASE_QUANTILES)}, but "
+            f"--quantiles asked for {list(explicit)}. Pass one or the other."
+        )
+    return RELEASE_QUANTILES
 
 
 def main(argv=None) -> None:
@@ -706,7 +820,7 @@ def main(argv=None) -> None:
         overwrite=config.get("overwrite", False),
         write_linear=config.get("write_linear", False),
         config_dict=config,
-        quantiles=tuple(config["quantiles"]) if config.get("quantiles") else None,
+        quantiles=resolve_quantiles(config),
         n_jobs=config.get("n_jobs", 1),
         imputer_fill_report=config.get("imputer_fill_report", False),
     )
