@@ -1,9 +1,9 @@
 """Figure 2: data coverage of the Level 1 product.
 
 A CONUS map of the fraction of days each pixel carries a valid raw retrieval
-over the record, with an inset time series of the daily national valid-pixel
-count. Together these say where and when the raw product is dense or sparse,
-which is the argument for shipping the gap-filled level alongside it.
+over the record, with an inset time series of the daily valid-pixel count.
+Together these say where and when the raw product is dense or sparse, which is
+the argument for shipping the gap-filled level alongside it.
 
 The denominator is **calendar days spanned, not files present**. SMAP's revisit
 leaves whole days with no overpass and therefore no raster at all -- 67 of 366
@@ -11,6 +11,14 @@ in the 2024 record, spread evenly across every month rather than clustered,
 which is the orbital pattern and not a processing failure. Counting only the
 files that exist would divide those days out of the statistic and overstate
 coverage by about a fifth.
+
+The rasters are global; the map is a CONUS crop of them, so the daily count in
+the inset and the median quoted in the header are product-wide, not CONUS-only.
+
+The frame is Conus Albers (EPSG:5070), matching Fig 6. The grid is already
+equal-area, and drawing it on raw lon/lat would stretch the north of the
+country sideways -- the swath geometry the figure is about would be read
+through a distortion that has nothing to do with the satellite.
 
 Usage:
     uv run swapstress-figures --figure coverage
@@ -33,12 +41,13 @@ import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
 import numpy as np
 import rasterio
+from matplotlib.patches import Rectangle
+from pyproj import Transformer
+from rasterio.windows import Window
+from rasterio.windows import transform as window_transform
 
-from swapstress.figures.basemap import (
-    load_conus_states,
-    pixel_corner_lonlat,
-    style_conus_axis,
-)
+from swapstress.figures import style
+from swapstress.figures.basemap import load_conus_states, pixel_corner_lonlat
 
 DATE_PATTERN = re.compile(r"_(\d{8})\.tif$")
 
@@ -47,6 +56,41 @@ DEFAULT_SOURCE_DIR = (
 )
 DEFAULT_OUTPUT_DIR = "figs/descriptor"
 NODATA_VALUE = -9999.0
+
+# Double column. The orbital striping that carries the figure's message is a
+# few 9 km cells wide, and the inset holds a year of daily values: at 89 mm the
+# swaths merge and the inset's months fall under the 5 pt floor. The height is
+# whatever an equal-area CONUS needs at that width, plus the two-line header.
+FIG_WIDTH_MM = style.DOUBLE_COLUMN_MM
+FIG_HEIGHT_MM = 115.5
+
+# NAD83 / Conus Albers, matching Fig 6. The rasters are already on an
+# equal-area grid, so drawing them equal-area keeps CONUS the shape readers
+# know; plotting straight lon/lat would stretch the north of the country
+# sideways.
+MAP_CRS = "EPSG:5070"
+MAP_PAD = 0.015
+
+# Lon/lat box the mesh is cut to before projecting. Albers is a regional
+# projection: handed the whole global grid it sends the far hemisphere to
+# nonsense coordinates, so the window comes first. It is generous enough to
+# cover the drawn extent and everything outside it would be clipped anyway.
+DRAW_BOX = (-134.0, 18.0, -58.0, 56.0)
+
+BOUNDARY_COLOR = "white"
+BOUNDARY_WIDTH = 0.3
+
+# 99 % of retrieved pixels sit below 0.51, so a full 0-1 ramp would spend most
+# of its range on values that never occur. The colorbar's "max" arrow carries
+# the remainder rather than clipping it silently.
+COLOR_MAX = 0.6
+
+# Inset plot box, and the white backing that carries its title and tick labels,
+# both in axes fractions. The corner is the Pacific dead space off southern
+# California: the only block of the frame wide enough for a year of daily
+# values that holds no CONUS.
+INSET_RECT = (0.043, 0.062, 0.285, 0.150)
+INSET_BACKING = (0.018, 0.018, 0.315, 0.226)
 
 
 def parse_date(path: Path) -> date:
@@ -58,7 +102,7 @@ def parse_date(path: Path) -> date:
 
 
 class Coverage:
-    """Per-pixel valid-day counts and the daily national total."""
+    """Per-pixel valid-day counts and the daily product-wide total."""
 
     def __init__(self, valid_days, calendar, daily_counts, profile, n_files):
         self.valid_days = valid_days  # (row, col) int32
@@ -121,78 +165,188 @@ def compute_coverage(source_dir: str, prefix: str = "suction") -> Coverage:
     )
 
 
-def render(coverage: Coverage, output_dir: str, boundaries_root=None) -> Path:
-    """Draw the coverage map with its daily-count inset."""
-    fraction = coverage.fraction
+def _draw_window(profile, box=DRAW_BOX) -> Window:
+    """The sub-window of the global grid that covers *box*.
+
+    The grid is a cylindrical equal-area one, so longitude varies only along
+    columns and latitude only along rows; each edge can be located on its own
+    one-dimensional axis instead of searching the full mesh.
+    """
+    transform, height, width = (
+        profile["transform"],
+        profile["height"],
+        profile["width"],
+    )
+    to_wgs84 = Transformer.from_crs(profile["crs"], "EPSG:4326", always_xy=True)
+    xs = transform.c + np.arange(width + 1) * transform.a
+    ys = transform.f + np.arange(height + 1) * transform.e
+    lon, _ = to_wgs84.transform(xs, np.zeros_like(xs))
+    _, lat = to_wgs84.transform(np.zeros_like(ys), ys)
+
+    west, south, east, north = box
+    cols = np.flatnonzero((lon >= west) & (lon <= east))
+    rows = np.flatnonzero((lat >= south) & (lat <= north))
+    return Window.from_slices(
+        (int(rows[0]), int(rows[-1])), (int(cols[0]), int(cols[-1]))
+    )
+
+
+def _albers_mesh(profile, window: Window):
+    """Pixel *corner* mesh of the window, in Conus Albers.
+
+    Corners rather than centres: flat shading wants one more node than cells in
+    each direction, and centres would shift the image half a 9 km pixel.
+    """
     lon, lat = pixel_corner_lonlat(
-        coverage.profile["transform"],
-        (coverage.profile["height"], coverage.profile["width"]),
-        coverage.profile["crs"],
+        window_transform(window, profile["transform"]),
+        (int(window.height), int(window.width)),
+        profile["crs"],
     )
-    states = load_conus_states(boundaries_root)
+    to_albers = Transformer.from_crs("EPSG:4326", MAP_CRS, always_xy=True)
+    return to_albers.transform(lon, lat)
 
-    fig, ax = plt.subplots(figsize=(11.0, 6.4))
-    mesh = ax.pcolormesh(
-        lon,
-        lat,
-        fraction,
-        cmap="YlGnBu",
-        vmin=0.0,
-        vmax=1.0,
-        shading="flat",
-        zorder=1,
-        rasterized=True,
+
+def _frame_map(ax, states) -> None:
+    """Equal-area CONUS frame: state outlines, extent, no axis furniture.
+
+    The outlines are white because cividis is dark at the low end, where a grey
+    hairline disappears. There are no ticks: projected metres mean nothing to a
+    reader, and the state outlines already say where everything is.
+    """
+    states.boundary.plot(
+        ax=ax, edgecolor=BOUNDARY_COLOR, linewidth=BOUNDARY_WIDTH, alpha=0.85, zorder=3
     )
-    style_conus_axis(ax, states=states, root=boundaries_root)
+    x0, y0, x1, y1 = states.total_bounds
+    dx, dy = (x1 - x0) * MAP_PAD, (y1 - y0) * MAP_PAD
+    ax.set_xlim(x0 - dx, x1 + dx)
+    ax.set_ylim(y0 - dy, y1 + dy)
+    ax.set_aspect("equal")
+    ax.set_axis_off()
 
-    bar = fig.colorbar(mesh, ax=ax, shrink=0.72, pad=0.02)
-    bar.set_label("Fraction of days with a valid Level 1 retrieval", fontsize=9)
-    bar.ax.tick_params(labelsize=8)
 
-    first, last = coverage.calendar[0], coverage.calendar[-1]
-    covered = np.isfinite(fraction)
-    ax.set_title(
-        f"Level 1 retrieval coverage, {first:%Y-%m-%d} to {last:%Y-%m-%d}\n"
-        f"{coverage.n_files} daily rasters over {coverage.n_days} calendar days "
-        f"({coverage.absent_days} with no overpass); "
-        f"median {np.nanmedian(fraction[covered]):.0%} of days per pixel",
-        fontsize=10,
+def _add_colorbar(fig, mesh, ax) -> None:
+    """Colour key, in per cent so it reads against the median quoted above."""
+    bar = fig.colorbar(mesh, ax=ax, extend="max", shrink=0.86, aspect=24, pad=0.012)
+    bar.set_label(
+        "Days with a valid Level 1 retrieval (% of calendar days)",
+        fontsize=style.MAX_TEXT_PT,
+        labelpad=3,
+    )
+    bar.set_ticks([0.0, 0.2, 0.4, 0.6])
+    bar.set_ticklabels(["0", "20", "40", "60"])
+    bar.ax.tick_params(labelsize=style.MAX_TEXT_PT - 1, length=2.0, width=0.5, pad=1.5)
+    bar.outline.set_linewidth(0.5)
+    bar.outline.set_edgecolor(style.AXIS_COLOR)
+
+
+def _panel_backing(ax) -> None:
+    """White card behind the inset, sized to hold its title and tick labels too.
+
+    Without it the inset's own axes patch clips at the plot box and the month
+    labels fall straight onto the mesh, which reads as text lost on the map.
+    """
+    x0, y0, width, height = INSET_BACKING
+    ax.add_patch(
+        Rectangle(
+            (x0, y0),
+            width,
+            height,
+            transform=ax.transAxes,
+            facecolor="white",
+            edgecolor=style.AXIS_COLOR,
+            linewidth=0.4,
+            zorder=4,
+        )
     )
 
-    # Inset over the Pacific/Mexico corner, where the map carries no data. Each
-    # drop to zero is a day with no overpass at all, so the comb is the record's
-    # cadence rather than noise.
-    inset = ax.inset_axes([0.025, 0.045, 0.30, 0.155])
+
+def _add_daily_inset(ax, coverage: Coverage) -> None:
+    """Daily valid-pixel count, over the Pacific/Mexico corner the map leaves empty.
+
+    Each drop to zero is a calendar day with no overpass anywhere, so the comb
+    is the record's cadence rather than noise -- and it is the same 67 days that
+    the map's denominator refuses to discard.
+    """
+    _panel_backing(ax)
+    inset = ax.inset_axes(INSET_RECT)
     inset.fill_between(
         coverage.calendar,
         np.array(coverage.daily_counts) / 1e6,
         step="mid",
-        color="#2b6a99",
+        color=style.CATEGORICAL[0],
         linewidth=0.0,
-        alpha=0.9,
     )
-    inset.set_ylabel("valid px (M)", fontsize=6.0, labelpad=2)
-    inset.tick_params(labelsize=5.5, length=2, pad=1)
+    inset.set_title(
+        "Valid pixels per day, product-wide (millions)",
+        fontsize=style.MIN_TEXT_PT + 1,
+        color=style.AXIS_COLOR,
+        pad=2.0,
+        loc="left",
+    )
     inset.xaxis.set_major_formatter(mdates.DateFormatter("%b"))
     inset.xaxis.set_major_locator(mdates.MonthLocator(interval=3))
+    inset.set_yticks([0.0, 0.4, 0.8])
+    inset.set_ylim(0.0, 0.95)
     inset.margins(x=0.01)
-    inset.set_facecolor("white")
-    inset.patch.set_alpha(0.82)
-    for side in ("top", "right"):
-        inset.spines[side].set_visible(False)
-    inset.set_title(
-        "Daily national valid-pixel count", fontsize=6.0, pad=1.5, loc="left"
+    inset.tick_params(labelsize=style.MIN_TEXT_PT + 0.5, length=1.5, width=0.4, pad=1.0)
+    inset.set_facecolor("none")
+    for side, spine in inset.spines.items():
+        spine.set_visible(side in ("left", "bottom"))
+        spine.set_linewidth(0.4)
+        spine.set_edgecolor(style.AXIS_COLOR)
+
+
+def render(coverage: Coverage, output_dir: str, boundaries_root=None) -> Path:
+    """Draw the coverage map with its daily-count inset."""
+    style.apply()
+
+    # The median below is over every retrieved pixel in the global grid, so it
+    # is taken on the full array; only the drawn mesh is cut to the map window.
+    fraction = coverage.fraction
+    window = _draw_window(coverage.profile)
+    mesh_x, mesh_y = _albers_mesh(coverage.profile, window)
+    drawn = fraction[window.toslices()]
+    states = load_conus_states(boundaries_root, crs=MAP_CRS)
+
+    fig = plt.figure(
+        figsize=style.figsize(FIG_WIDTH_MM, FIG_HEIGHT_MM), layout="constrained"
+    )
+    fig.get_layout_engine().set(w_pad=0.03, h_pad=0.03, wspace=0.0, hspace=0.0)
+    ax = fig.add_subplot()
+
+    mesh = ax.pcolormesh(
+        mesh_x,
+        mesh_y,
+        drawn,
+        cmap=style.SEQUENTIAL,
+        vmin=0.0,
+        vmax=COLOR_MAX,
+        shading="flat",
+        zorder=1,
+        # Rasterises the 9 km cells only. Outlines, ticks and every label stay
+        # vector, which is what the artwork guide actually asks for.
+        rasterized=True,
+    )
+    _frame_map(ax, states)
+    _add_colorbar(fig, mesh, ax)
+
+    first, last = coverage.calendar[0], coverage.calendar[-1]
+    covered = np.isfinite(fraction)
+    ax.set_title(
+        f"Level 1 retrieval coverage, {first:%-d %b}–{last:%-d %b %Y}; "
+        "CONUS detail of the global product\n"
+        f"{coverage.n_files} daily rasters over {coverage.n_days} calendar days "
+        f"({coverage.absent_days} with no overpass); median "
+        f"{np.nanmedian(fraction[covered]):.0%} of days per pixel, product-wide",
+        fontsize=style.MAX_TEXT_PT,
+        color=style.AXIS_COLOR,
+        loc="left",
+        pad=3.0,
     )
 
-    fig.tight_layout()
+    _add_daily_inset(ax, coverage)
 
-    out = Path(output_dir)
-    out.mkdir(parents=True, exist_ok=True)
-    stem = out / "fig02_coverage"
-    for ext in ("png", "pdf"):
-        fig.savefig(f"{stem}.{ext}", dpi=250, bbox_inches="tight", facecolor="white")
-    plt.close(fig)
-    return Path(f"{stem}.png")
+    return style.save(fig, Path(output_dir) / "fig02_coverage")
 
 
 def build_parser() -> argparse.ArgumentParser:
