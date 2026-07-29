@@ -9,11 +9,14 @@ uv sync --all-extras          # installs the package and its stage commands
 ./reproduce.sh --from 03 --to 06
 ```
 
-`uv run swapstress` lists the stages. Every stage takes `--config <file.toml>`,
-accepts CLI overrides of the same names, understands `--dry-run`, and writes a
-`provenance.json` (or `provenance_<stage>.json` where several stages share an
-output directory) recording the merged config, the software version, and the git
-commit it ran from.
+`uv run swapstress` lists the stages, and `uv run swapstress <nn> [args]`
+dispatches to one by number. Every stage takes `--config <file.toml>`, accepts
+CLI overrides of the same names, understands `--dry-run`, and writes a
+provenance record beside its outputs naming the merged config, the software
+version, and the git commit it ran from. Stages that own their output directory
+write `provenance.json`; the ones that share a directory with another stage —
+standardize, extract, build-table, validate, package, figures — write
+`provenance_<run_type>.json` so the last to run does not erase the others.
 
 ## The stages
 
@@ -23,7 +26,7 @@ commit it ran from.
 | 01 | `swapstress-extract` | Samples the covariate stack at every site, then folds the exports into per-source feature tables | Earth Engine credentials, a writable GCS bucket | hours, mostly waiting on EE |
 | 02 | `swapstress-build-table` | Joins features to observations into the observation-level training table | stages 00–01 | minutes |
 | 03 | `swapstress-train` | Fits the quantile random forest, `features + theta -> log10(suction_cm)` | stage 02, many cores | tens of minutes |
-| 04 | `swapstress-validate` | Blocked CV, per-source skill, conditional bias, the PTF baseline | stage 03 | tens of minutes |
+| 04 | `swapstress-validate` | Blocked CV, per-source skill, conditional bias, distribution shift, sensitivity, within-pixel variance, the error lookup | stage 03 | tens of minutes |
 | 05 | `swapstress-predict` | Applies the model to the gridded stack, day by day | stage 03, the EASE-Grid2 static rasters, daily SMAP L3 | hours to days over a full record |
 | 06 | `swapstress-gapfill` | Interpolates the retrieval gaps along the time axis | stage 05 | hours |
 | 07 | `swapstress-package` | Writes the released files: the model output in three representations, plus uncertainty and gap-fill flag | stages 05–06 | minutes to an hour |
@@ -41,6 +44,10 @@ registry, prints them, and marks which inputs are present:
 02 build-table
   in   gshp features          [ok     ] /nas/soils/swapstress/training/gshp_ee_data_9km_global.parquet
   in   gshp observations      [ok     ] /nas/soils/soil_potential_obs/preprocessed/gshp
+  in   gshp published vG      [ok     ] /nas/soils/soil_potential_obs/gshp/WRC_dataset_surya_et_al_2021_final_clean.csv
+  in   ncss features          [ok     ] /nas/soils/swapstress/training/ncss_ee_data_9km_global.parquet
+  in   ncss observations      [ok     ] /nas/soils/soil_potential_obs/preprocessed/ncss
+  ...
   out  training table                  /nas/soils/swapstress/training/obs_level_training_9km_global.parquet
 ```
 
@@ -55,6 +62,13 @@ supposed to already exist.
 Run configs live in `configs/`. A stage's TOML keys are its CLI flag names with
 underscores, so `--obs-table` is `obs_table`. CLI flags override the file.
 
+One key is config-only. `feature_groups` in a train config is a *positive* list
+of the covariate groups to keep; `swapstress/config.py::feature_groups_to_exclude`
+inverts it into the `exclude_groups` the model code works in. There is no
+`--feature-groups` flag — the CLI exposes only `--exclude-groups`. Pruned
+configs are written in the positive form because that is the form
+`swapstress-importance` and `swapstress/model/prune_config.py` produce.
+
 `reproduce.sh` reads these from the environment, so a different release is a
 matter of exporting a few variables rather than editing the script:
 
@@ -67,12 +81,16 @@ matter of exporting a few variables rather than editing the script:
 | `INFERENCE_DIR` | `$RELEASE_DIR/inference` — Level 1 |
 | `GAPFILL_DIR` | `$RELEASE_DIR/gapfill` — Level 2 |
 | `PRODUCT_DIR` | `$RELEASE_DIR/product` |
-| `FIG_DIR` | `figs/descriptor` |
+| `FIG_DIR` | `<repo>/figs/descriptor` |
 | `TRAIN_CONFIG` | `configs/train_9km_global_pruned.toml` |
 | `PREDICT_CONFIG` | `configs/predict_9km_global_pruned.toml` |
 | `GAPFILL_CONFIG` | `configs/gapfill_9km_global_pruned.toml` |
 | `CONTAINER` | `netcdf` — stage 07's output form; `geotiff` for per-day files |
+| `DROP_LINEAR_SUCTION` | `--drop-linear-suction` under `netcdf`, empty under `geotiff`; set explicitly to override |
 | `RUNNER` | `uv run` — set to empty if the console scripts are on `PATH` |
+
+Note that `--container` defaults to `geotiff` when `swapstress-package` is run on
+its own; it is `reproduce.sh` that asks for the NetCDF deposit.
 
 ## Where the paths come from
 
@@ -80,6 +98,10 @@ matter of exporting a few variables rather than editing the script:
 its raw inputs, its site shapefile, its MGRS index, its Earth Engine export
 prefix, and where its standardized observations and feature table land. Adding a
 source is a registry entry plus one standardizer; no stage hardcodes a path.
+
+`docs/DATA_SOURCES.md` describes what each source is, whether its observations
+are laboratory or in-situ, and the unit and filtering conventions stage 00
+applies to it.
 
 ## Stage 01 is two steps
 
@@ -143,7 +165,7 @@ writers consume the same band list. Neither changes what a band means.
 
 | | `--container netcdf` | `--container geotiff` |
 |---|---|---|
-| Layout | time-stacked, one file per year | one file per day |
+| Layout | time-stacked, one file per year (`--group-by all` for one file) | one file per day |
 | Role | the deposit, archive of record | derived convenience form for GIS |
 | Time | a real CF coordinate | encoded in the filename |
 | Dtypes | per variable — `gapfill_flag` is `uint8` | one for all bands, so the flag is float32 |
@@ -181,9 +203,19 @@ Stages 04 and 08 are drivers over a set:
 
 ```bash
 uv run swapstress-validate --model-dir <dir> --analysis loso regional
-uv run swapstress-figures --figure koppen
+uv run swapstress-figures --figure spatial-skill
 ```
 
-`--analysis all` covers everything except `ptf-baseline`, which has its own
-prep/eval subcommands and reads an external Rosetta grid. Extra arguments after
-a single `--analysis` or `--figure` are forwarded to that module.
+The analyses are `baseline`, `loso`, `regional`, `conditional-bias`,
+`distribution-shift`, `sensitivity`, `within-pixel`, `error-lookup`, and
+`ptf-baseline`. `--analysis all` covers everything except `ptf-baseline`, which
+has its own prep/eval subcommands and reads an external Rosetta grid.
+
+The figures are `pipeline`, `coverage`, `pixel-series`, `validation-scatter`,
+`spatial-skill`, and `uncertainty` — Figs 1–6 in that order, and what
+`--figure all` renders. `kfold` and `vg-vs-direct` are supporting analyses that
+render on request but are not part of `all`.
+
+Extra arguments after a **single** `--analysis` or `--figure` are forwarded to
+that module; asking for several at once with trailing arguments is an error
+rather than a guess about which one they belong to.
