@@ -77,6 +77,28 @@ GRID_COLOR = "#d9d9d9"
 AXIS_COLOR = "#333333"
 MUTED_INK = "#666666"
 
+# ---------------------------------------------------------------------------
+# Unit presentation
+# ---------------------------------------------------------------------------
+# The descriptor presents matric potential in megapascals everywhere a reader
+# looks; suction head in cm H2O stays internal to the pipeline and to band
+# metadata. Only the *wording* lives here. The numeric conversion is never
+# redefined in a figure: it is the exact additive log-space shift
+# ``swapstress.units.log10_suction_cm_to_log10_abs_mpa``, which figures import
+# from that single source so the shift and the label cannot drift apart.
+#
+# The resolved sans face (Helvetica/Arial clones) has no subscript-digit
+# glyphs, so ``log10`` has to be mathtext; ``style.apply`` points mathtext back
+# at the body face so the PDF still embeds a single family. Greek psi is set as
+# a plain Unicode character for the same reason it is elsewhere in the set: the
+# body face has it, and leaving it out of mathtext keeps the label one font.
+#
+# No literal space after the ``\log_{10}`` group: mathtext already sets a thin
+# space after a log-like operator, and adding one on top reads as a word gap.
+LOG10_ABS_MPA_UNIT = r"log$_{10}$ |MPa|"
+LOG10_ABS_MPA_AXIS = r"$\log_{10}$|ψ| (MPa)"
+MPA_AXIS = r"ψ (MPa)"
+
 
 def figsize(width_mm: float, height_mm: float) -> tuple[float, float]:
     """A figure size in inches, refusing anything taller than the page."""

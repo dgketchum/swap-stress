@@ -183,10 +183,11 @@ COL_BIAS = 1.000  # right aligned
 BODY_PT = 6.5
 NOTE_PT = 6.0
 
-# The resolved sans face has no subscript-digit glyphs, so the units line is
-# mathtext. Left alone, mathtext sets in DejaVu Sans and the PDF ends up with
-# two font families; style.apply points it back at the body face.
-LOG_CM = r"(log$_{10}$ cm)"
+# RMSE and bias are quoted in the descriptor's presentation unit. Nothing is
+# recomputed for it: the cm-to-MPa change is an additive shift in log space, so
+# a residual spread and a residual mean are the same numbers either way, and
+# only the unit line under the column heading changes.
+LOG_UNIT = f"({style.LOG10_ABS_MPA_UNIT})"
 
 # Baselines and rules of panel c, as fractions of the table axes.
 Y_TITLE = 0.945
@@ -273,8 +274,8 @@ def _draw_table_block(ax, rows, x0, pitch):
     ax.text(x(COL_RMSE), Y_HEAD, "RMSE", ha="right", va="baseline", **head)
     ax.text(x(COL_R2), Y_HEAD, "R²", ha="right", va="baseline", **head)
     ax.text(x(COL_BIAS), Y_HEAD, "Bias", ha="right", va="baseline", **head)
-    ax.text(x(COL_RMSE), Y_UNIT, LOG_CM, ha="right", va="baseline", **unit)
-    ax.text(x(COL_BIAS), Y_UNIT, LOG_CM, ha="right", va="baseline", **unit)
+    ax.text(x(COL_RMSE), Y_UNIT, LOG_UNIT, ha="right", va="baseline", **unit)
+    ax.text(x(COL_BIAS), Y_UNIT, LOG_UNIT, ha="right", va="baseline", **unit)
 
     for y in (Y_TOP_RULE, Y_HEAD_RULE, Y_BOTTOM_RULE):
         _rule(ax, x(0.0), x(1.0), y)

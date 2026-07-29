@@ -4,9 +4,9 @@ The product ships its QRF uncertainty as a quantile pair, ``q025``/``q975``, so
 the figure asks the two questions a reuser has about it.
 
 a  How wide is the interval, and where? The map is ``q975 - q025`` in log10
-   units for one example day. The point is that it is spatially structured
-   rather than flat: the interval is a per-pixel statement, not a global error
-   bar quoted once in a table.
+   units of matric potential for one example day. The point is that it is
+   spatially structured rather than flat: the interval is a per-pixel
+   statement, not a global error bar quoted once in a table.
 b  Is the interval honest? Empirical coverage against nominal, swept from 50%
    to 99% on the spatial holdout. A single number at 95% cannot tell an
    interval that is well calibrated everywhere from one that is too wide in the
@@ -19,9 +19,11 @@ c  Where is it honest? Coverage of that same 95% interval by theta decile. The
 
 Width is drawn rather than shipped: it is exactly derivable from the pair, and
 the pair is not derivable from a width, so the release carries only the pair and
-this figure does the subtraction. The width is the same number whether the bands
-are read as log10(cm) or log10(|MPa|), since the unit change is an additive
-shift in log space.
+this figure does the subtraction. No conversion is applied to the width and none
+is needed: the bands are stored as ``log10(cm)`` and the descriptor presents
+``log10|MPa|``, and because that unit change is an additive shift in log space
+the difference of the two bands is already the same number in either. The bar
+is therefore labelled in the presentation unit while the arithmetic is untouched.
 
 The valid region is swath-shaped because the underlying prediction is Level 1:
 same-day retrievals only, no gap filling. That is intended, and it is *not*
@@ -97,9 +99,6 @@ NOTE_PT = 6.0
 # Helvetica/Arial clones the guide's typeface resolves to have no U+207B, so a
 # literal negative exponent would drop a glyph whichever clone is installed.
 THETA_UNIT = "m³/m³"
-# The resolved sans face has no subscript-digit glyphs either, so this is
-# mathtext; style.apply points mathtext back at the body face.
-LOG_CM = r"log$_{10}$ cm"
 
 # Robust limits, since a QRF width has no fixed range: the far tails are a
 # handful of pixels and would spend most of the ramp on them.
@@ -384,7 +383,7 @@ def render(width, mesh_x, mesh_y, states, coverage, by_theta, date_str, output_d
         pad=0.015,
     )
     cbar.set_label(
-        f"q975 − q025 ({LOG_CM}, unchanged in log$_{{10}}$|MPa|)",
+        f"q975 − q025 ({style.LOG10_ABS_MPA_UNIT})",
         fontsize=NOTE_PT,
         labelpad=1.5,
     )

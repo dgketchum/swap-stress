@@ -1,10 +1,15 @@
 """Figure 4: validation scatter -- the direct model against PTF baselines.
 
-Observed vs predicted log10 suction for three estimators on the same
+Observed vs predicted matric potential for three estimators on the same
 observations: our direct quantile RF (its median, which is the released Level 1
 value), Rosetta, and POLARIS. The PTF columns come from
 ``swapstress.validation.ptf_baseline``, which pushes each site's published van
 Genuchten parameters through the retention equation at the observed theta.
+
+Both axes are ``log10|psi|`` with psi in MPa, the descriptor's presentation
+unit, converted from the stored ``log10_suction_cm`` by the exact additive
+shift in ``swapstress.units``. Because the shift is common to observed and
+predicted, RMSE, bias and R2 are numerically unchanged by it.
 
 **Held-out rows only.** ``ptf_baseline evaluate`` falls back to predicting every
 row with the single fitted model when no k-fold artifacts are present, and that
@@ -33,6 +38,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import math
 import os
 from pathlib import Path
 from typing import List, Optional
@@ -45,6 +51,7 @@ import numpy as np
 import pandas as pd
 
 from swapstress.figures import style
+from swapstress.units import log10_suction_cm_to_log10_abs_mpa
 
 DEFAULT_MODEL_DIR = "/nas/soils/swapstress/models/direct_qrf_9km_global_pruned"
 DEFAULT_PTF_DIR = "/nas/soils/swapstress/releases/v03_20260729/evaluation"
@@ -63,7 +70,19 @@ ESTIMATORS = [
 
 PANEL_LETTERS = ("a", "b", "c")
 
-AXIS_LIMITS = (0.0, 7.0)
+# The drawn window, declared in the pipeline's internal units -- 0 to 7 log10
+# cm covers everything the observations reach -- and then shifted once into the
+# descriptor's presentation unit. Declaring it this way keeps the panels
+# showing exactly the region they always showed: the shift is additive, so the
+# window moves with the data rather than cropping a different part of it.
+AXIS_LIMITS_LOG10_CM = (0.0, 7.0)
+AXIS_LIMITS = tuple(
+    float(log10_suction_cm_to_log10_abs_mpa(v)) for v in AXIS_LIMITS_LOG10_CM
+)
+# One tick per decade of potential, as before -- the shift makes the window
+# ends non-integer, so the whole decades inside it are taken explicitly rather
+# than by truncating the limits (which rounds the wrong way below zero).
+DECADE_TICKS = list(range(math.ceil(AXIS_LIMITS[0]), math.floor(AXIS_LIMITS[1]) + 1))
 
 # The two-column width. The height is chosen so three equal-aspect panels fill
 # that width exactly: any shorter and the square panels shrink, leaving gaps at
@@ -136,10 +155,10 @@ def load_holdout(model_dir: str, ptf_dir: str) -> pd.DataFrame:
 def off_scale(observed: np.ndarray, predicted: np.ndarray) -> int:
     """Pairs the metrics count but the axes cannot show.
 
-    Rosetta and POLARIS put a sixth of their predictions outside 0-7 log10 cm,
-    far beyond anything the observations reach. They stay in the RMSE and R2 --
-    they are real errors -- but they land off the panel, so the count is printed
-    in the corner rather than left to be silently cropped.
+    Rosetta and POLARIS put a sixth of their predictions outside the drawn
+    window, far beyond anything the observations reach. They stay in the RMSE
+    and R2 -- they are real errors -- but they land off the panel, so the count
+    is printed in the corner rather than left to be silently cropped.
     """
     observed = np.asarray(observed, dtype=float)
     predicted = np.asarray(predicted, dtype=float)
@@ -152,7 +171,11 @@ def off_scale(observed: np.ndarray, predicted: np.ndarray) -> int:
 
 def render(df: pd.DataFrame, output_dir: str) -> Path:
     style.apply()
-    observed = df["log10_suction_cm"].values
+    # Everything drawn and every metric quoted is in the presentation unit. The
+    # shift is common to both axes, so RMSE, bias and R2 are the same numbers
+    # they were in log10 cm -- converting here rather than in the caption means
+    # the panel and its annotation can never disagree about which unit they are.
+    observed = log10_suction_cm_to_log10_abs_mpa(df["log10_suction_cm"].values)
     fig, axes = plt.subplots(
         1,
         3,
@@ -163,7 +186,7 @@ def render(df: pd.DataFrame, output_dir: str) -> Path:
     )
 
     for ax, letter, (column, label, color) in zip(axes, PANEL_LETTERS, ESTIMATORS):
-        predicted = df[column].values
+        predicted = log10_suction_cm_to_log10_abs_mpa(df[column].values)
         stats = metrics(observed, predicted)
         # Rasterised marks only: the axes, the 1:1 line and every label below
         # stay vector, which is what the artwork guide asks for.
@@ -188,8 +211,8 @@ def render(df: pd.DataFrame, output_dir: str) -> Path:
         ax.set_xlim(*AXIS_LIMITS)
         ax.set_ylim(*AXIS_LIMITS)
         ax.set_aspect("equal")
-        ax.set_xticks(range(int(AXIS_LIMITS[0]), int(AXIS_LIMITS[1]) + 1))
-        ax.set_yticks(range(int(AXIS_LIMITS[0]), int(AXIS_LIMITS[1]) + 1))
+        ax.set_xticks(DECADE_TICKS)
+        ax.set_yticks(DECADE_TICKS)
         ax.set_title(label, pad=2.5)
         style.panel_label(ax, letter, dx=-0.10, dy=1.02)
         ax.text(
@@ -221,8 +244,8 @@ def render(df: pd.DataFrame, output_dir: str) -> Path:
                 zorder=4,
             )
 
-    axes[0].set_ylabel(r"Predicted $\log_{10}$ suction (cm)")
-    fig.supxlabel(r"Observed $\log_{10}$ suction (cm)", fontsize=style.MAX_TEXT_PT)
+    axes[0].set_ylabel(f"Predicted {style.LOG10_ABS_MPA_AXIS}")
+    fig.supxlabel(f"Observed {style.LOG10_ABS_MPA_AXIS}", fontsize=style.MAX_TEXT_PT)
 
     return style.save(fig, Path(output_dir) / "fig04_validation_scatter")
 
@@ -241,9 +264,9 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: Optional[List[str]] = None) -> None:
     args = build_parser().parse_args(argv)
     df = load_holdout(args.model_dir, args.ptf_dir)
-    observed = df["log10_suction_cm"].values
+    observed = log10_suction_cm_to_log10_abs_mpa(df["log10_suction_cm"].values)
     for column, label, _ in ESTIMATORS:
-        stats = metrics(observed, df[column].values)
+        stats = metrics(observed, log10_suction_cm_to_log10_abs_mpa(df[column].values))
         print(
             f"  {label:16} n={stats['n']:5,d}  RMSE={stats['rmse']:.3f}  "
             f"bias={stats['bias']:+.3f}  R2={stats['r2']:+.3f}"

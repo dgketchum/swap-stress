@@ -1,9 +1,13 @@
-"""Figure 3: daily suction at representative pixels across a climate gradient.
+"""Figure 3: daily matric potential at representative pixels across a gradient.
 
 For each site, the Level 1 retrievals are drawn as points and the Level 2
 gap-filled series as a line beneath them, so a reuser can see three things at
 once: the true observation cadence, where the gaps are, and the drydown/rewet
 dynamics the product resolves.
+
+Both are drawn in the descriptor's presentation unit, ``log10|psi|`` with psi
+in MPa, with a linear MPa axis on the right; the pipeline's internal
+``log10_suction_cm`` never reaches the page.
 
 The Level 2 line is not recomputed here. It comes from
 ``swapstress.inference.gapfill.interpolate_pixel`` -- the same function stage 06
@@ -51,7 +55,7 @@ from swapstress.inference.gapfill import (
     discover_source_rasters,
     interpolate_pixel,
 )
-from swapstress.inference.product import MPA_TO_CM
+from swapstress.units import log10_suction_cm_to_log10_abs_mpa
 
 DEFAULT_SOURCE_DIR = (
     "/nas/soils/swapstress/releases/global_pruned_refresh_20260520/inference_l3"
@@ -73,8 +77,8 @@ LEVEL1_COLOR = style.CATEGORICAL[0]
 LEVEL2_COLOR = style.CATEGORICAL[1]
 CLAMP_COLOR = "#d5d5d5"
 
-# Round matric-potential values to label the right-hand axis with. The
-# conversion is an exact shift in log space, so these land on exact positions.
+# Round matric-potential values to label the right-hand axis with. The panels
+# are drawn in log10 of the same magnitude, so these land on exact positions.
 MPA_TICKS = (0.01, 0.1, 1.0, 10.0)
 
 # Double column across, because a year of daily values needs the width. The
@@ -89,6 +93,13 @@ def site_series(source_dir: str, prefix: str) -> tuple[pd.DatetimeIndex, list[di
 
     One raster is opened at a time and sampled at the site pixels, so this costs
     a few hundred small windowed reads rather than a stack of global arrays.
+
+    The rasters carry ``log10_suction_cm``; the returned series are in
+    ``log10|psi|`` with psi in MPa, the descriptor's presentation unit. The
+    conversion is the exact additive shift from ``swapstress.units``, applied
+    *after* the gap-fill so the sentinel ``NODATA_VALUE`` is never shifted --
+    and, being additive, it commutes with the linear interpolation anyway, so
+    the drawn Level 2 line is still the one the released raster carries.
     """
     rasters = discover_source_rasters(source_dir, prefix)
     if not rasters:
@@ -122,6 +133,7 @@ def site_series(source_dir: str, prefix: str) -> tuple[pd.DatetimeIndex, list[di
                 "it is not a land pixel in this product."
             )
         filled = interpolate_pixel(day_index, raw[s], day_index)
+        filled = np.where(filled == NODATA_VALUE, np.nan, filled)
         first, last = np.flatnonzero(observed)[[0, -1]]
         out.append(
             {
@@ -129,8 +141,8 @@ def site_series(source_dir: str, prefix: str) -> tuple[pd.DatetimeIndex, list[di
                 "place": place,
                 "lon": lon,
                 "lat": lat,
-                "raw": raw[s],
-                "filled": np.where(filled == NODATA_VALUE, np.nan, filled),
+                "raw": log10_suction_cm_to_log10_abs_mpa(raw[s]),
+                "filled": log10_suction_cm_to_log10_abs_mpa(filled),
                 "observed": observed,
                 "clamped": (day_index < first) | (day_index > last),
             }
@@ -203,16 +215,16 @@ def render(span: pd.DatetimeIndex, series: list[dict], output_dir: str) -> Path:
             color=style.AXIS_COLOR,
         )
 
-        # Matric potential on the right. This is the same measure in another
-        # unit, not a second measure on a second scale: log10(cm) -> log10(MPa)
-        # is a constant offset, so these ticks are exact, not approximated.
+        # Linear matric potential on the right, against the log10 magnitude on
+        # the left. Same measure, same unit, two readings of one scale, so
+        # these ticks are exact rather than approximated.
         #
         # A secondary axis rather than a twin: ``set_yticks`` widens a twin's
         # limits to reach its outermost tick, which silently slides the MPa
         # labels off the values they name. A secondary axis re-derives its
         # limits from the parent at every draw, so it cannot come loose.
         mpa = ax.secondary_yaxis("right", functions=(lambda y: y, lambda y: y))
-        labelled = [(t, np.log10(t * MPA_TO_CM)) for t in MPA_TICKS]
+        labelled = [(t, np.log10(t)) for t in MPA_TICKS]
         labelled = [(t, y) for t, y in labelled if low <= y <= high]
         mpa.set_yticks([y for _, y in labelled])
         mpa.set_yticklabels([f"\N{MINUS SIGN}{t:g}" for t, _ in labelled])
@@ -223,9 +235,9 @@ def render(span: pd.DatetimeIndex, series: list[dict], output_dir: str) -> Path:
     # One unit label per side for the whole stack -- centred on the middle
     # panel on the right, figure-level on the left -- rather than three times.
     mpa_axes[len(mpa_axes) // 2].set_ylabel(
-        r"$\psi$ (MPa)", rotation=270, va="bottom", labelpad=7
+        style.MPA_AXIS, rotation=270, va="bottom", labelpad=7
     )
-    fig.supylabel(r"$\log_{10}\,\psi$ (cm)", fontsize=style.MAX_TEXT_PT)
+    fig.supylabel(style.LOG10_ABS_MPA_AXIS, fontsize=style.MAX_TEXT_PT)
 
     # Month names sit mid-month between boundary ticks, so a tick means the
     # first of the month and no label straddles the year's ends.
@@ -287,7 +299,9 @@ def clamped_spans(clamped: np.ndarray) -> list[tuple[int, int]]:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="fig03_pixel_series",
-        description="Figure 3: daily suction at pixels across a climate gradient.",
+        description=(
+            "Figure 3: daily matric potential at pixels across a climate gradient."
+        ),
     )
     parser.add_argument("--source-dir", default=DEFAULT_SOURCE_DIR)
     parser.add_argument("--prefix", default=DEFAULT_PREFIX)
@@ -302,7 +316,7 @@ def main(argv: Optional[List[str]] = None) -> None:
     for s in series:
         print(
             f"  {s['region']:18} {s['observed'].sum():3d} retrieval days  "
-            f"log10 psi {np.nanmin(s['raw']):.2f}-{np.nanmax(s['raw']):.2f}"
+            f"log10|psi| MPa {np.nanmin(s['raw']):.2f}-{np.nanmax(s['raw']):.2f}"
         )
     path = render(span, series, args.output_dir)
     print(f"Saved to {os.path.abspath(path)}")
