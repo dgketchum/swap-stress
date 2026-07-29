@@ -1,10 +1,10 @@
 run_type = "gapfill"
 
-source_dir = "/nas/soils/swapstress/releases/global_pruned_refresh_20260520/inference"
-output_dir = "/nas/soils/swapstress/releases/global_pruned_refresh_20260520/gapfill"
+source_dir = "/nas/soils/swapstress/releases/v03_20260729/inference"
+output_dir = "/nas/soils/swapstress/releases/v03_20260729/gapfill"
 
 prefix = "suction"
 band_description = "log10_suction_cm"
 start_date = "20150401"
-end_date = "20260415"
+end_date = "20260414"
 overwrite = false

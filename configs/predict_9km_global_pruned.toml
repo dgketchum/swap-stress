@@ -3,11 +3,12 @@ run_type = "predict"
 model_dir = "/nas/soils/swapstress/models/direct_rf_9km_global_pruned"
 static_dir = "/nas/soils/swapstress/inference/global_features/rasters_ease2"
 smap_dir = "/nas/soils/smap/SPL3SMP_E/daily_tif"
-output_dir = "/nas/soils/swapstress/releases/global_pruned_refresh_20260520/inference"
+output_dir = "/nas/soils/swapstress/releases/v03_20260729/inference"
 
-start_date = "20240101"
-end_date = "20241231"
+start_date = "20150401"
+end_date = "20260414"
 depth_cm = 5.0
 batch_size = 50000
 overwrite = false
 write_linear = false
+release_quantiles = true
