@@ -63,15 +63,13 @@ from swapstress.inference.product import (
 
 matplotlib.use("Agg")
 
-RELEASE_DIR = Path("/nas/soils/swapstress/releases/global_pruned_refresh_20260520")
+RELEASE_DIR = Path("/nas/soils/swapstress/releases/v03_20260729")
 # Level 1 rather than gap-filled: the interval is the model's own statement
 # about a same-day retrieval, and a gap-filled pixel has no quantiles of its own.
-PRED_DIR = RELEASE_DIR / "inference_l3"
-# Stage 04 writes the validation tables beside the model, not into the release
-# tree.
-ERROR_DIR = Path(
-    "/nas/soils/swapstress/models/direct_rf_9km_global_pruned/error_analysis"
-)
+PRED_DIR = RELEASE_DIR / "inference"
+# Stage 04 writes its tables straight into ``--output-dir``, with no
+# subdirectory of its own, so the release run's coverage CSVs sit here.
+ERROR_DIR = RELEASE_DIR / "evaluation"
 COVERAGE_CSV = "quantile_coverage.csv"
 COVERAGE_BY_THETA_CSV = "quantile_coverage_by_theta.csv"
 

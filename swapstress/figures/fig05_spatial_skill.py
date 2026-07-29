@@ -37,10 +37,15 @@ matplotlib.use("Agg")
 
 # ── Paths ────────────────────────────────────────────────────────────
 BECK_TIF = Path("/nas/soils/swapstress/ancillary/Beck_KG_V1_present_0p0083.tif")
-# The regional CV results are written by stage 04 beside the model, not into
-# the release tree -- the old release path here never existed.
-MODEL_DIR = Path("/nas/soils/swapstress/models/direct_rf_9km_global_pruned")
-CV_CSV = MODEL_DIR / "error_analysis" / "v01" / "regional_cv_results.csv"
+# Stage 04 writes the regional CV straight into its ``--output-dir``, making no
+# subdirectory of its own, so the 0.3 release run leaves it in the release
+# evaluation tree beside the other validation tables. At the default
+# ``--level both`` it also writes ``regional_cv_results_major.csv`` and
+# ``..._subclass.csv``; the unsuffixed file read here is the two concatenated.
+# The CONUS filter below keeps only the sub-class rows, because the major-zone
+# rows (A-E) are not Beck class labels and so match nothing on the map.
+EVAL_DIR = Path("/nas/soils/swapstress/releases/v03_20260729/evaluation")
+CV_CSV = EVAL_DIR / "regional_cv_results.csv"
 STATES_SHP = Path(states_shapefile())
 LAKES_SHP = Path(lakes_shapefile())
 OUT_DIR = Path("figs/descriptor")

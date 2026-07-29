@@ -1,9 +1,12 @@
 """Figure 1: how the dataset is built.
 
 A schematic of the prediction chain: static landscape covariates and daily
-SMAP L3 soil moisture enter a random forest trained on harmonised (theta,
-suction) pairs, which emits suction on the days SMAP retrieved -- Level 1 --
-and, after a temporal gap-fill, a value for every calendar day -- Level 2.
+SMAP L3 soil moisture enter a quantile random forest trained on harmonised
+(theta, suction) pairs, which emits a median and a 95% prediction interval on
+the days SMAP retrieved -- Level 1 -- and, after a temporal gap-fill, a value
+for every calendar day -- Level 2. The released rasters name the headline band
+in megapascals, ``matric_potential_MPa`` (signed, negative), beside the
+``log10_suction_cm`` the model actually predicts.
 Feature groups reflect the global-pruned ablation (sentinel-1, SMAP climatology
 and land cover were dropped at threshold r2_drop <= 0).
 
@@ -357,10 +360,10 @@ def build_figure():
         COL_C_W,
         NEUTRAL,
         [
-            ("Random forest", TITLE_PT, "bold", INK),
+            ("Quantile random forest", TITLE_PT, "bold", INK),
             ("250 trees", BODY_PT, "normal", BODY_INK),
             ("Median imputation", BODY_PT, "normal", BODY_INK),
-            ("5-fold MGRS spatial CV", BODY_PT, "normal", BODY_INK),
+            ("9 km spatial-group holdout", BODY_PT, "normal", BODY_INK),
         ],
     )
 
@@ -381,12 +384,7 @@ def build_figure():
         NEUTRAL,
         [
             ("Level 1", TITLE_PT, "bold", INK),
-            (
-                r"$\mathregular{log_{10}}$ suction (cm $\mathregular{H_2O}$)",
-                BODY_PT,
-                "normal",
-                BODY_INK,
-            ),
+            ("QRF median + q025 / q975", BODY_PT, "normal", BODY_INK),
             ("9 km, 2015–present", BODY_PT, "normal", BODY_INK),
             (f"{VALID_PIXELS} land pixels", BODY_PT, "normal", BODY_INK),
             ("Retrieval days only", NOTE_PT, "normal", BODY_INK),
@@ -419,8 +417,10 @@ def build_figure():
         NEUTRAL,
         [
             ("Level 2", TITLE_PT, "bold", INK),
-            ("Gap-filled daily suction", BODY_PT, "normal", BODY_INK),
-            ("Same grid, every calendar day", BODY_PT, "normal", BODY_INK),
+            ("Gap-filled daily median", BODY_PT, "normal", BODY_INK),
+            ("matric_potential_MPa (negative)", BODY_PT, "normal", BODY_INK),
+            ("with log10_suction_cm", BODY_PT, "normal", BODY_INK),
+            ("Same grid, every calendar day", NOTE_PT, "normal", BODY_INK),
         ],
         fill=0.13,
         lw=0.9,

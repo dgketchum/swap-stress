@@ -1,7 +1,8 @@
 """Figure 4: validation scatter -- the direct model against PTF baselines.
 
 Observed vs predicted log10 suction for three estimators on the same
-observations: our direct RF, Rosetta, and POLARIS. The PTF columns come from
+observations: our direct quantile RF (its median, which is the released Level 1
+value), Rosetta, and POLARIS. The PTF columns come from
 ``swapstress.validation.ptf_baseline``, which pushes each site's published van
 Genuchten parameters through the retention equation at the observed theta.
 
@@ -17,6 +18,12 @@ are being asked the same out-of-sample question.
 Drawn to ``swapstress.figures.style``: 183 mm double-column, panel labels at
 8 pt bold and everything else between 5 and 7 pt, one sans typeface throughout,
 and only the point clouds rasterised.
+
+The defaults point at the 0.3 release. ``ptf_baseline evaluate`` writes
+``ptf_comparison_observations.parquet`` straight into the directory given as its
+``--output`` -- it makes no subdirectory of its own -- so the release rerun
+against ``.../releases/v03_20260729/evaluation`` leaves the table there, beside
+the coverage tables the other stage-04 analyses wrote.
 
 Usage:
     uv run swapstress-figures --figure validation-scatter
@@ -39,8 +46,8 @@ import pandas as pd
 
 from swapstress.figures import style
 
-DEFAULT_MODEL_DIR = "/nas/soils/swapstress/models/direct_rf_9km_global_pruned"
-DEFAULT_PTF_DIR = "/nas/soils/swapstress/evaluation/ptf_baseline"
+DEFAULT_MODEL_DIR = "/nas/soils/swapstress/models/direct_qrf_9km_global_pruned"
+DEFAULT_PTF_DIR = "/nas/soils/swapstress/releases/v03_20260729/evaluation"
 DEFAULT_OUTPUT_DIR = "figs/descriptor"
 
 # The columns that identify one observation in both tables.
@@ -49,7 +56,7 @@ JOIN_KEYS = ["sample_id", "source", "theta", "log10_suction_cm"]
 # Colours are the validated categorical trio, taken in a fixed order so each
 # estimator keeps its hue across the descriptor.
 ESTIMATORS = [
-    ("rf_pred", "SWAP direct RF", style.CATEGORICAL[0]),
+    ("rf_pred", "SWAP direct QRF", style.CATEGORICAL[0]),
     ("ros_log10_suction", "Rosetta", style.CATEGORICAL[1]),
     ("pol_log10_suction", "POLARIS", style.CATEGORICAL[2]),
 ]
