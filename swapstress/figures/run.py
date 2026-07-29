@@ -98,8 +98,11 @@ def main(argv: Optional[List[str]] = None) -> None:
     failed = []
     for name in requested:
         print(f"\n=== {name} ===")
-        module = importlib.import_module(FIGURES[name])
         try:
+            # Imported inside the guard: these modules pull in geopandas,
+            # rasterio and scikit-learn at module level, and one missing
+            # optional dependency should cost that figure, not the batch.
+            module = importlib.import_module(FIGURES[name])
             module.main(["--output-dir", output_dir, *extra])
         except Exception:
             traceback.print_exc()
