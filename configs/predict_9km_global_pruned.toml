@@ -2,7 +2,7 @@ run_type = "predict"
 
 model_dir = "/nas/soils/swapstress/models/direct_rf_9km_global_pruned"
 static_dir = "/nas/soils/swapstress/inference/global_features/rasters_ease2"
-smap_dir = "/nas/soils/smap/SPL3SMP_E/daily_tif"
+smap_dir = "/nas/soils/smap/SPL3SMP_E/daily_tif_global"
 output_dir = "/nas/soils/swapstress/releases/v03_20260729/inference"
 
 start_date = "20150401"
