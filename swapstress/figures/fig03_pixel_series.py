@@ -12,8 +12,12 @@ applies to every pixel -- run over the same calendar span the stage would use
 released Level 2 raster carries at that pixel, not a lookalike.
 
 Where Level 2 is held flat rather than interpolated -- before the first
-retrieval and after the last, which ``np.interp`` clamps -- the line is shaded.
-That is the product's weakest region and the figure should not hide it.
+retrieval and after the last, which ``np.interp`` clamps -- the line is shaded,
+and the legend names the shading rather than leaving it to the caption. That is
+the product's weakest region and the figure should not hide it. The shading
+covers each clamped day's full width, so a one-day clamp still draws: at the
+Humid Southeast and Arid Southwest pixels that is all there is, a single day at
+either end of the year, and it should read as the sliver it actually is.
 
 Usage:
     uv run swapstress-figures --figure pixel-series
@@ -24,6 +28,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import string
 from pathlib import Path
 from typing import List, Optional
 
@@ -32,11 +37,15 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
+import matplotlib.ticker as mticker
 import numpy as np
 import pandas as pd
 import rasterio
+from matplotlib.lines import Line2D
+from matplotlib.patches import Patch
 from pyproj import Transformer
 
+from swapstress.figures import style
 from swapstress.inference.gapfill import (
     NODATA_VALUE,
     discover_source_rasters,
@@ -57,13 +66,22 @@ SITES = [
     ("Great Plains", "Hays, KS", -99.3, 38.9),
 ]
 
-LEVEL1_COLOR = "#1f4e79"
-LEVEL2_COLOR = "#c0562a"
-CLAMP_COLOR = "#b0b0b0"
+# The two data layers take the first two slots of the validated categorical
+# palette. The clamp shading is deliberately achromatic: it marks a region of
+# the record, not a third series, and must not compete with either layer.
+LEVEL1_COLOR = style.CATEGORICAL[0]
+LEVEL2_COLOR = style.CATEGORICAL[1]
+CLAMP_COLOR = "#d5d5d5"
 
 # Round matric-potential values to label the right-hand axis with. The
 # conversion is an exact shift in log space, so these land on exact positions.
 MPA_TICKS = (0.01, 0.1, 1.0, 10.0)
+
+# Double column across, because a year of daily values needs the width. The
+# depth is set by the panels: the three share one y scale so the climate
+# offsets stay comparable, which costs each panel some empty range, and the
+# stack has to stay tall enough that the drydown and rewet swings still read.
+FIGURE_HEIGHT_MM = 140.0
 
 
 def site_series(source_dir: str, prefix: str) -> tuple[pd.DatetimeIndex, list[dict]]:
@@ -121,86 +139,140 @@ def site_series(source_dir: str, prefix: str) -> tuple[pd.DatetimeIndex, list[di
 
 
 def render(span: pd.DatetimeIndex, series: list[dict], output_dir: str) -> Path:
+    """Draw the three panels at Nature's double-column width.
+
+    Sizing is declared once, in millimetres, and survives to disk: the figure is
+    written at exactly its declared size rather than cropped to its content, so
+    it drops into a 183 mm column without rescaling the type.
+    """
+    style.apply()
+    with matplotlib.rc_context(style.mathtext_params()):
+        return _draw(span, series, output_dir)
+
+
+def _draw(span: pd.DatetimeIndex, series: list[dict], output_dir: str) -> Path:
     fig, axes = plt.subplots(
-        len(series), 1, figsize=(10.5, 2.5 * len(series)), sharex=True
+        len(series),
+        1,
+        figsize=style.figsize(style.DOUBLE_COLUMN_MM, FIGURE_HEIGHT_MM),
+        sharex=True,
+        sharey=True,
+        layout="constrained",
     )
     axes = np.atleast_1d(axes)
 
     low = min(np.nanmin(s["filled"]) for s in series) - 0.25
     high = max(np.nanmax(s["filled"]) for s in series) + 0.25
 
-    for ax, s in zip(axes, series):
+    # A clamped run of a single day is still a real day of the record, so the
+    # shading covers each day's full width rather than collapsing to no width.
+    half_day = pd.Timedelta(hours=12)
+
+    mpa_axes = []
+    for ax, letter, s in zip(axes, string.ascii_lowercase, series):
+        ax.set_axisbelow(True)
+        ax.grid(axis="y")
+
         for start, stop in clamped_spans(s["clamped"]):
             ax.axvspan(
-                span[start], span[stop], color=CLAMP_COLOR, alpha=0.18, lw=0, zorder=0
+                span[start] - half_day,
+                span[stop] + half_day,
+                facecolor=CLAMP_COLOR,
+                edgecolor="none",
+                zorder=0,
             )
 
-        ax.plot(
-            span,
-            s["filled"],
-            color=LEVEL2_COLOR,
-            lw=1.3,
-            zorder=2,
-            label="Level 2 (gap-filled)",
-        )
+        ax.plot(span, s["filled"], color=LEVEL2_COLOR, lw=0.6, zorder=2)
         ax.scatter(
             span[s["observed"]],
             s["raw"][s["observed"]],
-            s=9,
+            s=3.0,
             color=LEVEL1_COLOR,
+            linewidths=0,
             zorder=3,
-            label="Level 1 (retrieval days)",
         )
 
         ax.set_ylim(low, high)
-        ax.set_ylabel(r"$\log_{10}\,\psi$ (cm)", fontsize=9)
-        ax.tick_params(labelsize=8)
-        ax.grid(axis="y", alpha=0.15)
-        for side in ("top", "right"):
-            ax.spines[side].set_visible(False)
+        ax.yaxis.set_major_locator(mticker.MultipleLocator(1.0))
+
+        style.panel_label(ax, letter, dx=0.0, dy=1.02)
         ax.text(
-            0.008,
-            0.94,
-            f"{s['region']}  ·  {s['place']}  ·  "
-            f"{s['observed'].sum()} of {len(span)} days",
+            0.017,
+            1.02,
+            f"{s['region']} · {s['place']} · "
+            f"{s['observed'].sum()} of {len(span)} days retrieved",
             transform=ax.transAxes,
-            va="top",
-            fontsize=9,
-            bbox=dict(facecolor="white", alpha=0.75, edgecolor="none", pad=2),
+            va="bottom",
+            ha="left",
+            fontsize=style.MAX_TEXT_PT,
+            color=style.AXIS_COLOR,
         )
 
-        # Matric potential on the right. log10(cm) -> log10(MPa) is a constant
-        # offset, so these ticks are exact rather than approximated.
-        mpa = ax.twinx()
-        mpa.set_ylim(low, high)
-        mpa.set_yticks([np.log10(t * MPA_TO_CM) for t in MPA_TICKS])
-        mpa.set_yticklabels([f"-{t:g}" for t in MPA_TICKS], fontsize=7)
-        mpa.set_ylabel("MPa", fontsize=8, rotation=270, labelpad=11)
-        mpa.tick_params(length=0)
-        for side in ("top", "left"):
-            mpa.spines[side].set_visible(False)
+        # Matric potential on the right. This is the same measure in another
+        # unit, not a second measure on a second scale: log10(cm) -> log10(MPa)
+        # is a constant offset, so these ticks are exact, not approximated.
+        #
+        # A secondary axis rather than a twin: ``set_yticks`` widens a twin's
+        # limits to reach its outermost tick, which silently slides the MPa
+        # labels off the values they name. A secondary axis re-derives its
+        # limits from the parent at every draw, so it cannot come loose.
+        mpa = ax.secondary_yaxis("right", functions=(lambda y: y, lambda y: y))
+        labelled = [(t, np.log10(t * MPA_TO_CM)) for t in MPA_TICKS]
+        labelled = [(t, y) for t, y in labelled if low <= y <= high]
+        mpa.set_yticks([y for _, y in labelled])
+        mpa.set_yticklabels([f"\N{MINUS SIGN}{t:g}" for t, _ in labelled])
+        mpa.tick_params(length=0, labelsize=style.MAX_TEXT_PT - 1)
+        mpa.spines["right"].set_visible(False)
+        mpa_axes.append(mpa)
 
-    # The wettest panel is the one with headroom, the axes being on a shared
-    # scale so the climate offsets stay comparable.
-    axes[0].legend(fontsize=8, loc="upper right", framealpha=0.9, ncol=2)
-    axes[-1].xaxis.set_major_formatter(mdates.DateFormatter("%b"))
-    axes[-1].xaxis.set_major_locator(mdates.MonthLocator())
-    axes[-1].set_xlim(span[0], span[-1])
-    fig.suptitle(
-        f"Daily suction across a climate gradient — {span[0].year}\n"
-        "shaded: Level 2 held flat outside the observed range",
-        fontsize=11,
-        y=0.995,
+    # One unit label per side for the whole stack -- centred on the middle
+    # panel on the right, figure-level on the left -- rather than three times.
+    mpa_axes[len(mpa_axes) // 2].set_ylabel(
+        r"$\psi$ (MPa)", rotation=270, va="bottom", labelpad=7
     )
-    fig.tight_layout()
+    fig.supylabel(r"$\log_{10}\,\psi$ (cm)", fontsize=style.MAX_TEXT_PT)
 
-    out = Path(output_dir)
-    out.mkdir(parents=True, exist_ok=True)
-    stem = out / "fig03_pixel_series"
-    for ext in ("png", "pdf"):
-        fig.savefig(f"{stem}.{ext}", dpi=250, bbox_inches="tight", facecolor="white")
-    plt.close(fig)
-    return Path(f"{stem}.png")
+    # Month names sit mid-month between boundary ticks, so a tick means the
+    # first of the month and no label straddles the year's ends.
+    bottom = axes[-1]
+    bottom.set_xlim(span[0], span[-1])
+    bottom.xaxis.set_major_locator(mdates.MonthLocator())
+    bottom.xaxis.set_major_formatter(mticker.NullFormatter())
+    bottom.xaxis.set_minor_locator(mdates.MonthLocator(bymonthday=16))
+    bottom.xaxis.set_minor_formatter(mdates.DateFormatter("%b"))
+    bottom.tick_params(axis="x", which="minor", length=0)
+    bottom.set_xlabel(str(span[0].year))
+
+    fig.legend(
+        handles=legend_handles(),
+        loc="outside lower center",
+        ncol=3,
+        columnspacing=1.8,
+        handletextpad=0.5,
+    )
+
+    return style.save(fig, Path(output_dir) / "fig03_pixel_series")
+
+
+def legend_handles() -> list:
+    """Legend proxies, so the shading is named rather than left to the caption."""
+    return [
+        Line2D(
+            [],
+            [],
+            linestyle="none",
+            marker="o",
+            markersize=2.0,
+            color=LEVEL1_COLOR,
+            label="Level 1 retrieval",
+        ),
+        Line2D([], [], color=LEVEL2_COLOR, lw=0.8, label="Level 2 gap-filled"),
+        Patch(
+            facecolor=CLAMP_COLOR,
+            edgecolor="none",
+            label="Level 2 held flat outside the observed range",
+        ),
+    ]
 
 
 def clamped_spans(clamped: np.ndarray) -> list[tuple[int, int]]:
