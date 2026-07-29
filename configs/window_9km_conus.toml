@@ -1,0 +1,7 @@
+run_type = "window"
+source_dir = "/nas/soils/swapstress/releases/v03_20260729/inference"
+output_dir = "/nas/soils/swapstress/releases/v03_20260729/inference_conus"
+start_date = "20150401"
+end_date = "20260414"
+grid_scope = "conus"
+overwrite = false

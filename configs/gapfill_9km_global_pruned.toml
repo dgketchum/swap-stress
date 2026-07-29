@@ -1,6 +1,6 @@
 run_type = "gapfill"
 
-source_dir = "/nas/soils/swapstress/releases/v03_20260729/inference"
+source_dir = "/nas/soils/swapstress/releases/v03_20260729/inference_conus"
 output_dir = "/nas/soils/swapstress/releases/v03_20260729/gapfill"
 
 prefix = "suction"

@@ -10,5 +10,6 @@ end_date = "20260414"
 depth_cm = 5.0
 batch_size = 50000
 overwrite = false
+n_jobs = 16
 write_linear = false
 release_quantiles = true

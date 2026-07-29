@@ -66,7 +66,9 @@ matplotlib.use("Agg")
 RELEASE_DIR = Path("/nas/soils/swapstress/releases/v03_20260729")
 # Level 1 rather than gap-filled: the interval is the model's own statement
 # about a same-day retrieval, and a gap-filled pixel has no quantiles of its own.
-PRED_DIR = RELEASE_DIR / "inference"
+# The CONUS window, not the global grid: the released product is CONUS
+# (global training, CONUS application) and the map should show the deposit.
+PRED_DIR = RELEASE_DIR / "inference_conus"
 # Stage 04 writes its tables straight into ``--output-dir``, with no
 # subdirectory of its own, so the release run's coverage CSVs sit here.
 ERROR_DIR = RELEASE_DIR / "evaluation"
