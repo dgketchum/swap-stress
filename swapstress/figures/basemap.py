@@ -27,6 +27,10 @@ LAKES_SUBPATH = "boundaries/natural_earth/ne_110m_lakes.shp"
 
 # Territories that are not CONUS and would blow out the map extent.
 NON_CONUS = {"HI", "AK", "AS", "GU", "MP", "PR", "VI"}
+
+# The geographic window each map figure clips to before projecting. Albers is a
+# regional projection, so a global grid has to be cut to roughly this box first
+# or the far hemisphere lands at nonsense coordinates.
 CONUS_LON = (-127.0, -65.0)
 CONUS_LAT = (24.0, 50.0)
 
@@ -82,16 +86,10 @@ def pixel_corner_lonlat(transform, shape: Tuple[int, int], crs) -> Tuple:
     return to_wgs84.transform(x_grid, y_grid)
 
 
-def style_conus_axis(ax, states=None, root: Optional[str] = None) -> None:
-    """Apply the shared CONUS map framing to *ax*."""
-    if states is None:
-        states = load_conus_states(root)
-    states.boundary.plot(ax=ax, edgecolor="#999", linewidth=0.35, zorder=3)
-    ax.set_xlim(*CONUS_LON)
-    ax.set_ylim(*CONUS_LAT)
-    ax.set_aspect("auto")
-    ax.set_xlabel("Longitude", fontsize=8)
-    ax.set_ylabel("Latitude", fontsize=8)
-    ax.tick_params(labelsize=7)
-    for side in ("top", "right"):
-        ax.spines[side].set_visible(False)
+# A ``style_conus_axis`` helper used to live here, framing maps on raw lon/lat
+# with ``set_aspect("auto")`` and 8 pt axis labels. Both are wrong for the
+# descriptor: the aspect stretched CONUS sideways by roughly a quarter, and 8 pt
+# breaks Nature's 7 pt ceiling. Every map figure now projects to EPSG:5070
+# (Albers) with equal aspect and styles its own axis, so the helper had no
+# callers left and is gone rather than fixed -- there is no shared framing to
+# share once each map carries its own projection.
