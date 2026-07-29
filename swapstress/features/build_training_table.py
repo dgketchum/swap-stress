@@ -689,10 +689,10 @@ def main(argv=None):
     config.setdefault("fit_method", "bayes")
 
     output_path = config.get("output") or default_output_path(
-        config["data_root"], config["scale"], config["embeddings"]
+        config["data_root"], config["scale"], config.get("embeddings")
     )
 
-    if config["dry_run"]:
+    if config.get("dry_run"):
         # The observations come from preprocessed/ (prefer_preprocessed=True);
         # fit_results_dir is only consulted when that directory is absent, so it
         # is not reported as a required input.
@@ -711,7 +711,7 @@ def main(argv=None):
         data_root=config["data_root"],
         output_path=output_path,
         fit_method=config["fit_method"],
-        include_embeddings=config["embeddings"],
+        include_embeddings=config.get("embeddings"),
         prefer_preprocessed=True,
         scale=config["scale"],
     )

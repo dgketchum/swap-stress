@@ -89,3 +89,33 @@ def test_store_true_flags_default_none():
     assert not offenders, (
         f"store_true flags whose False default would override TOML true: {offenders}"
     )
+
+
+def test_store_true_flags_never_indexed_directly():
+    """The flip side of default=None: a flag left unspecified on the CLI and
+    absent from the TOML never reaches the merged config, so ``config["flag"]``
+    raises KeyError at stage startup. Consumers must use ``config.get()``."""
+    import re
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1] / "swapstress"
+    texts = {path: path.read_text() for path in sorted(root.rglob("*.py"))}
+
+    flag_keys = set()
+    for text in texts.values():
+        for match in re.finditer(
+            r'add_argument\(\s*"--([\w-]+)"[^)]*?action="store_true"[^)]*?\)',
+            text,
+            re.S,
+        ):
+            flag_keys.add(match.group(1).replace("-", "_"))
+
+    pattern = re.compile(r'config\[["\'](%s)["\']\]' % "|".join(sorted(flag_keys)))
+    offenders = [
+        f'{path.name}: config["{m.group(1)}"]'
+        for path, text in texts.items()
+        for m in pattern.finditer(text)
+    ]
+    assert not offenders, (
+        f"direct indexing of None-default flags (KeyError when unset): {offenders}"
+    )

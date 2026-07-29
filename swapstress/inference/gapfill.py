@@ -345,7 +345,7 @@ def main(argv=None) -> None:
 
     config = resolve(build_parser(), argv, required=["output_dir"])
 
-    if config["dry_run"]:
+    if config.get("dry_run"):
         report_paths(
             "06 gapfill",
             {"predictions": config.get("source_dir", DEFAULT_SOURCE_DIR)},

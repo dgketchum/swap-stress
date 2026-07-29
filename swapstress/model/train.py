@@ -351,7 +351,7 @@ def main(argv=None):
 
     config = resolve(build_parser(), argv, required=["obs_table", "output_dir"])
 
-    if config["dry_run"]:
+    if config.get("dry_run"):
         report_paths(
             "03 train",
             {"training table": config["obs_table"]},

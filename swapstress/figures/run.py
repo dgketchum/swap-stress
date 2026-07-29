@@ -83,7 +83,7 @@ def main(argv: Optional[List[str]] = None) -> None:
         requested = list(MAIN_FIGURES)
     output_dir = config.get("output_dir") or DEFAULT_OUTPUT_DIR
 
-    if config["dry_run"]:
+    if config.get("dry_run"):
         report_paths("08 figures", {}, {"figures": output_dir})
         print(f"  renders {' '.join(requested)}")
         return

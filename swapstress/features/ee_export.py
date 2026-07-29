@@ -275,7 +275,7 @@ def main(argv=None):
     do_export = config["step"] in ("export", "all")
     do_tables = config["step"] in ("tables", "all")
 
-    if config["dry_run"]:
+    if config.get("dry_run"):
         for name in config["sources"]:
             paths = DataPaths(config["data_root"], get_source(name), config["scale"])
             report_paths(
@@ -306,7 +306,7 @@ def main(argv=None):
                 split_tiles=source.ee_split_tiles,
                 check_dir=paths.ee_extracts_dir,
                 region=source.ee_region,
-                diagnose=config["diagnose"],
+                diagnose=config.get("diagnose"),
             )
 
     if do_tables:

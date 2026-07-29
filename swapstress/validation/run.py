@@ -110,7 +110,7 @@ def main(argv: Optional[List[str]] = None) -> None:
         config["model_dir"], "error_analysis"
     )
 
-    if config["dry_run"]:
+    if config.get("dry_run"):
         report_paths(
             "04 validate",
             {"model dir": config["model_dir"]},

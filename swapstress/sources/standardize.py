@@ -620,7 +620,7 @@ def main(argv=None):
         if not inputs:
             inputs = {"directory": paths.raw_dir}
 
-        if config["dry_run"]:
+        if config.get("dry_run"):
             report_paths(
                 f"00 standardize [{name}]",
                 inputs,

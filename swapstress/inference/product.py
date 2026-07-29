@@ -1015,7 +1015,7 @@ def main(argv=None) -> None:
     config.setdefault("container", "geotiff")
     config.setdefault("group_by", "year")
 
-    if config["dry_run"]:
+    if config.get("dry_run"):
         inputs = {"model rasters": config["source_dir"]}
         if config["level"] == 2:
             inputs["level 1 rasters"] = config.get("level1_dir")

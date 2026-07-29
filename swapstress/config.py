@@ -43,7 +43,10 @@ def load_config(
     Returns
     -------
     dict
-        Merged configuration.  CLI values override TOML values.
+        Merged configuration.  CLI values override TOML values.  Keys that
+        are ``None`` on the CLI and absent from the TOML do not appear in the
+        result — consumers must use ``config.get()``, never direct indexing,
+        for any key with a ``None`` CLI default.
     """
     if config_path is not None:
         with open(config_path, "rb") as f:
