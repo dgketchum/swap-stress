@@ -14,6 +14,10 @@ first thing a reviewer probes. This module therefore keeps only the
 observations that fall in the model's spatial holdout, so all three estimators
 are being asked the same out-of-sample question.
 
+Drawn to ``swapstress.figures.style``: 183 mm double-column, panel labels at
+8 pt bold and everything else between 5 and 7 pt, one sans typeface throughout,
+and only the point clouds rasterised.
+
 Usage:
     uv run swapstress-figures --figure validation-scatter
     uv run python -m swapstress.figures.fig04_validation_scatter --model-dir <dir>
@@ -33,6 +37,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
+from swapstress.figures import style
+
 DEFAULT_MODEL_DIR = "/nas/soils/swapstress/models/direct_rf_9km_global_pruned"
 DEFAULT_PTF_DIR = "/nas/soils/swapstress/evaluation/ptf_baseline"
 DEFAULT_OUTPUT_DIR = "figs/descriptor"
@@ -40,13 +46,23 @@ DEFAULT_OUTPUT_DIR = "figs/descriptor"
 # The columns that identify one observation in both tables.
 JOIN_KEYS = ["sample_id", "source", "theta", "log10_suction_cm"]
 
+# Colours are the validated categorical trio, taken in a fixed order so each
+# estimator keeps its hue across the descriptor.
 ESTIMATORS = [
-    ("rf_pred", "SWAP direct RF", "#1f4e79"),
-    ("ros_log10_suction", "Rosetta", "#b5651d"),
-    ("pol_log10_suction", "POLARIS", "#7a4b8f"),
+    ("rf_pred", "SWAP direct RF", style.CATEGORICAL[0]),
+    ("ros_log10_suction", "Rosetta", style.CATEGORICAL[1]),
+    ("pol_log10_suction", "POLARIS", style.CATEGORICAL[2]),
 ]
 
+PANEL_LETTERS = ("a", "b", "c")
+
 AXIS_LIMITS = (0.0, 7.0)
+
+# The two-column width. The height is chosen so three equal-aspect panels fill
+# that width exactly: any shorter and the square panels shrink, leaving gaps at
+# the sides; any taller and the extra is dead space under the axes.
+FIGURE_WIDTH_MM = style.DOUBLE_COLUMN_MM
+FIGURE_HEIGHT_MM = 66.0
 
 
 def metrics(observed: np.ndarray, predicted: np.ndarray) -> dict:
@@ -110,34 +126,73 @@ def load_holdout(model_dir: str, ptf_dir: str) -> pd.DataFrame:
     return merged
 
 
-def render(df: pd.DataFrame, output_dir: str) -> Path:
-    observed = df["log10_suction_cm"].values
-    fig, axes = plt.subplots(1, 3, figsize=(13.0, 4.6), sharex=True, sharey=True)
+def off_scale(observed: np.ndarray, predicted: np.ndarray) -> int:
+    """Pairs the metrics count but the axes cannot show.
 
-    for ax, (column, label, color) in zip(axes, ESTIMATORS):
+    Rosetta and POLARIS put a sixth of their predictions outside 0-7 log10 cm,
+    far beyond anything the observations reach. They stay in the RMSE and R2 --
+    they are real errors -- but they land off the panel, so the count is printed
+    in the corner rather than left to be silently cropped.
+    """
+    observed = np.asarray(observed, dtype=float)
+    predicted = np.asarray(predicted, dtype=float)
+    keep = np.isfinite(observed) & np.isfinite(predicted)
+    low, high = AXIS_LIMITS
+    inside = (predicted >= low) & (predicted <= high)
+    inside &= (observed >= low) & (observed <= high)
+    return int((keep & ~inside).sum())
+
+
+def render(df: pd.DataFrame, output_dir: str) -> Path:
+    style.apply()
+    with matplotlib.rc_context(style.mathtext_params()):
+        return _draw(df, output_dir)
+
+
+def _draw(df: pd.DataFrame, output_dir: str) -> Path:
+    observed = df["log10_suction_cm"].values
+    fig, axes = plt.subplots(
+        1,
+        3,
+        figsize=style.figsize(FIGURE_WIDTH_MM, FIGURE_HEIGHT_MM),
+        sharex=True,
+        sharey=True,
+        layout="constrained",
+    )
+
+    for ax, letter, (column, label, color) in zip(axes, PANEL_LETTERS, ESTIMATORS):
         predicted = df[column].values
         stats = metrics(observed, predicted)
+        # Rasterised marks only: the axes, the 1:1 line and every label below
+        # stay vector, which is what the artwork guide asks for.
         ax.scatter(
             observed,
             predicted,
-            s=6,
-            alpha=0.18,
+            s=2.0,
+            alpha=0.22,
             color=color,
             edgecolors="none",
             rasterized=True,
+            zorder=2,
         )
-        ax.plot(AXIS_LIMITS, AXIS_LIMITS, "k--", linewidth=0.9, zorder=3)
+        ax.plot(
+            AXIS_LIMITS,
+            AXIS_LIMITS,
+            color="black",
+            linewidth=0.6,
+            dashes=(2.6, 1.8),
+            zorder=3,
+        )
         ax.set_xlim(*AXIS_LIMITS)
         ax.set_ylim(*AXIS_LIMITS)
         ax.set_aspect("equal")
-        ax.set_title(label, fontsize=11)
-        ax.set_xlabel(r"Observed $\log_{10}$ suction (cm)", fontsize=9)
-        ax.tick_params(labelsize=8)
-        for side in ("top", "right"):
-            ax.spines[side].set_visible(False)
+        ax.set_xticks(range(int(AXIS_LIMITS[0]), int(AXIS_LIMITS[1]) + 1))
+        ax.set_yticks(range(int(AXIS_LIMITS[0]), int(AXIS_LIMITS[1]) + 1))
+        ax.set_title(label, pad=2.5)
+        style.panel_label(ax, letter, dx=-0.10, dy=1.02)
         ax.text(
-            0.04,
-            0.96,
+            0.035,
+            0.97,
             f"n = {stats['n']:,}\n"
             f"RMSE = {stats['rmse']:.2f}\n"
             f"bias = {stats['bias']:+.2f}\n"
@@ -145,25 +200,29 @@ def render(df: pd.DataFrame, output_dir: str) -> Path:
             transform=ax.transAxes,
             va="top",
             ha="left",
-            fontsize=8.5,
-            bbox=dict(facecolor="white", alpha=0.8, edgecolor="none", pad=3),
+            fontsize=style.MAX_TEXT_PT - 1,
+            linespacing=1.35,
+            zorder=4,
+            bbox=dict(facecolor="white", alpha=0.7, edgecolor="none", pad=1.2),
         )
+        dropped = off_scale(observed, predicted)
+        if dropped:
+            ax.text(
+                0.97,
+                0.03,
+                f"{dropped:,} off scale",
+                transform=ax.transAxes,
+                va="bottom",
+                ha="right",
+                fontsize=style.MIN_TEXT_PT,
+                color=style.MUTED_INK,
+                zorder=4,
+            )
 
-    axes[0].set_ylabel(r"Predicted $\log_{10}$ suction (cm)", fontsize=9)
-    fig.suptitle(
-        "Spatial holdout: the direct model against PTF-derived retention",
-        fontsize=12,
-        y=1.0,
-    )
-    fig.tight_layout()
+    axes[0].set_ylabel(r"Predicted $\log_{10}$ suction (cm)")
+    fig.supxlabel(r"Observed $\log_{10}$ suction (cm)", fontsize=style.MAX_TEXT_PT)
 
-    out = Path(output_dir)
-    out.mkdir(parents=True, exist_ok=True)
-    stem = out / "fig04_validation_scatter"
-    for ext in ("png", "pdf"):
-        fig.savefig(f"{stem}.{ext}", dpi=250, bbox_inches="tight", facecolor="white")
-    plt.close(fig)
-    return Path(f"{stem}.png")
+    return style.save(fig, Path(output_dir) / "fig04_validation_scatter")
 
 
 def build_parser() -> argparse.ArgumentParser:
