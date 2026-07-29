@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Soil Water Retention Curve modeling and stress analysis"
 readme = "README.md"
 requires-python = ">=3.10"
-license = {text = "MIT"}
+license = {text = "Apache-2.0"}
 dependencies = [
     # Core scientific
     "numpy",
