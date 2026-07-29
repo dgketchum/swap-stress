@@ -2,9 +2,16 @@
 
 A schematic of the prediction chain: static landscape covariates and daily
 SMAP L3 soil moisture enter a random forest trained on harmonised (theta,
-suction) pairs, which emits daily CONUS suction maps. Feature groups reflect
-the global-pruned ablation (sentinel-1, SMAP climatology and land cover were
-dropped at threshold r2_drop <= 0).
+suction) pairs, which emits suction on the days SMAP retrieved -- Level 1 --
+and, after a temporal gap-fill, a value for every calendar day -- Level 2.
+Feature groups reflect the global-pruned ablation (sentinel-1, SMAP climatology
+and land cover were dropped at threshold r2_drop <= 0).
+
+Gap-fill is drawn as a stage of its own rather than folded into a line of the
+product card. The Level 1 / Level 2 split is what Figs 2 and 3 are about -- Fig
+2 maps where Level 1 is sparse, Fig 3 draws Level 1 as points over the Level 2
+line -- so the schematic has to show the two as separate things a reuser can
+download, with the rule that turns one into the other named in between.
 
 The schematic is drawn in matplotlib rather than hand-written SVG so that it
 inherits ``style`` -- the same typeface, the same 7 pt ceiling and the same
@@ -33,6 +40,7 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 from matplotlib.colors import to_rgb
+from matplotlib.path import Path as MplPath
 from matplotlib.patches import FancyArrowPatch, FancyBboxPatch, Rectangle
 
 from swapstress.figures import style
@@ -45,12 +53,20 @@ FIG_H_MM = 90.0
 
 MARGIN_MM = 3.5
 
-# Three columns: covariate stack | model spine | product
+# Three columns: covariate stack | model spine | product ladder
 COL_L_X, COL_L_W = 3.0, 52.0
 COL_C_X, COL_C_W = 67.0, 49.0
 COL_R_X, COL_R_W = 128.0, 52.0
 
 CARD_H_MM = 22.0
+# The gap-fill stage is a rule applied to the level above it, not a product a
+# reuser downloads, so it is a shorter band between the two full-height cards.
+BAND_H_MM = 15.0
+# Vertical run between stacked stages. Set to the 12 mm gutter between the
+# columns, which also lands the ladder on the spine's grid: Level 1 tops out
+# with SMAP, the gap-fill band sits at the model's mid-height, and Level 2
+# bottoms out with the training card.
+STACK_GAP_MM = 12.0
 CARD_ROUND_MM = 1.4
 MID_Y = FIG_H_MM / 2.0
 
@@ -170,28 +186,48 @@ def _block_height(lines) -> float:
     return sum(_mm(size) * LEADING for _, size, _, _ in lines)
 
 
-def _panel(ax, x: float, y: float, w: float, accent: str, lines, fill=0.10, lw=0.6):
-    """A card of the standard height with its text block vertically centred."""
-    _card(ax, x, y, w, CARD_H_MM, accent, fill=fill, lw=lw)
+def _panel(
+    ax,
+    x: float,
+    y: float,
+    w: float,
+    accent: str,
+    lines,
+    fill=0.10,
+    lw=0.6,
+    h: float = CARD_H_MM,
+):
+    """A card of height *h* with its text block vertically centred."""
+    _card(ax, x, y, w, h, accent, fill=fill, lw=lw)
     block = _block_height(lines)
-    _stack(ax, x + w / 2.0, y + (CARD_H_MM + block) / 2.0, lines)
+    _stack(ax, x + w / 2.0, y + (h + block) / 2.0, lines)
+
+
+_ARROW_KW = dict(
+    arrowstyle="-|>",
+    mutation_scale=5.0,
+    linewidth=0.8,
+    color=ARROW_INK,
+    shrinkA=0,
+    shrinkB=0,
+    joinstyle="miter",
+    zorder=1,
+)
 
 
 def _arrow(ax, x1: float, y1: float, x2: float, y2: float) -> None:
-    ax.add_patch(
-        FancyArrowPatch(
-            (x1, y1),
-            (x2, y2),
-            arrowstyle="-|>",
-            mutation_scale=5.0,
-            linewidth=0.8,
-            color=ARROW_INK,
-            shrinkA=0,
-            shrinkB=0,
-            joinstyle="miter",
-            zorder=1,
-        )
-    )
+    ax.add_patch(FancyArrowPatch((x1, y1), (x2, y2), **_ARROW_KW))
+
+
+def _elbow(ax, points) -> None:
+    """A right-angled arrow through *points*, head on the last.
+
+    The model sits at mid-height but the product ladder is a stack, so the arrow
+    into its top card has to rise as well as run. Two bends rather than a
+    diagonal: every other connector here is orthogonal, and a lone slanted line
+    would read as a different kind of relation.
+    """
+    ax.add_patch(FancyArrowPatch(path=MplPath(points), **_ARROW_KW))
 
 
 # ---------------------------------------------------------------------------
@@ -328,14 +364,23 @@ def build_figure():
         ],
     )
 
+    # Product ladder, centred on the model so the column reads as one block:
+    # Level 1, the rule that fills it, then Level 2. Both levels are released,
+    # so both carry the stronger fill; the gap-fill band between them is lighter
+    # because it is a step, not something a reuser downloads.
+    stack_h = 2 * CARD_H_MM + BAND_H_MM + 2 * STACK_GAP_MM
+    l1_y = MID_Y + stack_h / 2.0 - CARD_H_MM
+    fill_y = l1_y - STACK_GAP_MM - BAND_H_MM
+    l2_y = fill_y - STACK_GAP_MM - CARD_H_MM
+
     _panel(
         ax,
         COL_R_X,
-        rf_y,
+        l1_y,
         COL_R_W,
         NEUTRAL,
         [
-            ("Daily CONUS maps", TITLE_PT, "bold", INK),
+            ("Level 1", TITLE_PT, "bold", INK),
             (
                 r"$\mathregular{log_{10}}$ suction (cm $\mathregular{H_2O}$)",
                 BODY_PT,
@@ -344,20 +389,62 @@ def build_figure():
             ),
             ("9 km, 2015–present", BODY_PT, "normal", BODY_INK),
             (f"{VALID_PIXELS} land pixels", BODY_PT, "normal", BODY_INK),
-            ("Gap-filled along time axis", NOTE_PT, "normal", BODY_INK),
+            ("Retrieval days only", NOTE_PT, "normal", BODY_INK),
         ],
-        # The released product is the terminus: same neutral, a shade stronger.
+        fill=0.13,
+        lw=0.9,
+    )
+
+    _panel(
+        ax,
+        COL_R_X,
+        fill_y,
+        COL_R_W,
+        NEUTRAL,
+        [
+            ("Temporal gap-fill", TITLE_PT, "bold", INK),
+            ("Linear interpolation per pixel", BODY_PT, "normal", BODY_INK),
+            ("Ends held flat, not observed", NOTE_PT, "normal", BODY_INK),
+        ],
+        fill=0.05,
+        lw=0.6,
+        h=BAND_H_MM,
+    )
+
+    _panel(
+        ax,
+        COL_R_X,
+        l2_y,
+        COL_R_W,
+        NEUTRAL,
+        [
+            ("Level 2", TITLE_PT, "bold", INK),
+            ("Gap-filled daily suction", BODY_PT, "normal", BODY_INK),
+            ("Same grid, every calendar day", BODY_PT, "normal", BODY_INK),
+        ],
         fill=0.13,
         lw=0.9,
     )
 
     # Flow: covariates and the model spine converge on the random forest, which
-    # emits the product.
+    # emits Level 1; the ladder then runs down to Level 2.
     spine_x = COL_C_X + COL_C_W / 2.0
+    ladder_x = COL_R_X + COL_R_W / 2.0
+    turn_x = (COL_C_X + COL_C_W + COL_R_X) / 2.0
     _arrow(ax, COL_L_X + COL_L_W, MID_Y, COL_C_X, MID_Y)
     _arrow(ax, spine_x, smap_y, spine_x, rf_y + CARD_H_MM)
     _arrow(ax, spine_x, train_y + CARD_H_MM, spine_x, rf_y)
-    _arrow(ax, COL_C_X + COL_C_W, MID_Y, COL_R_X, MID_Y)
+    _elbow(
+        ax,
+        [
+            (COL_C_X + COL_C_W, MID_Y),
+            (turn_x, MID_Y),
+            (turn_x, l1_y + CARD_H_MM / 2.0),
+            (COL_R_X, l1_y + CARD_H_MM / 2.0),
+        ],
+    )
+    _arrow(ax, ladder_x, l1_y, ladder_x, fill_y + BAND_H_MM)
+    _arrow(ax, ladder_x, fill_y, ladder_x, l2_y + CARD_H_MM)
 
     return fig
 
