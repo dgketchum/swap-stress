@@ -85,11 +85,12 @@ DRAW_BOX = (-134.0, 18.0, -58.0, 56.0)
 BOUNDARY_COLOR = "white"
 BOUNDARY_WIDTH = 0.3
 
-# In-frame retrieved pixels top out at 0.52 and 99 % sit below 0.46, so a full
-# 0-1 ramp would spend most of its range on values that never occur. The mesh
-# overhangs the frame and a few high-latitude cells outside it do run past this
-# ceiling, so the colorbar keeps its "max" arrow rather than clipping silently.
-COLOR_MAX = 0.6
+# In-frame retrieved pixels top out at 0.519 and 99 % sit below 0.46, so the
+# ramp ends at the in-frame maximum to spend its full range on values that
+# occur. A few high-latitude cells in the mesh overhang outside the frame run
+# past the ceiling and clamp to the top color; they sit outside the domain the
+# statistics describe, so no "max" arrow is drawn for them.
+COLOR_MAX = 0.52
 
 # Inset plot box, and the white backing that carries its title and tick labels,
 # both in axes fractions. The corner is the Pacific dead space off southern
@@ -295,7 +296,7 @@ def _frame_map(ax, frame: MapFrame) -> None:
 
 def _add_colorbar(fig, mesh, ax) -> None:
     """Colour key, in per cent so it reads against the median quoted above."""
-    bar = fig.colorbar(mesh, ax=ax, extend="max", shrink=0.86, aspect=24, pad=0.012)
+    bar = fig.colorbar(mesh, ax=ax, shrink=0.86, aspect=24, pad=0.012)
     bar.set_label(
         "Days with a valid Level 1 retrieval (% of calendar days)",
         fontsize=style.MAX_TEXT_PT,
