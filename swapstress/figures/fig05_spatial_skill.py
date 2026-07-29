@@ -1,8 +1,12 @@
-"""Figure 7. Koppen transferability — three-panel layout.
+"""Figure 5. Koppen-zone transferability -- three panels.
 
-Left:   Table of per-subclass LOSO accuracy (colored swatches).
-Top-R:  CONUS Koppen map with standard Beck colors.
-Bot-R:  CONUS choropleth colored by LOSO R² per climate zone.
+a  CONUS Koppen-Geiger classes, in the standard Beck colours.
+b  Leave-one-class-out (LOCO) R² painted back onto those classes.
+c  The per-class LOCO statistics behind panel b, ordered by decreasing R².
+
+Panel c doubles as the colour key for panel a: every evaluated class carries its
+Beck swatch. Sizes and type follow ``swapstress.figures.style`` -- Nature's
+183 mm double column, 7 pt ceiling, 8 pt bold panel letters.
 
 Usage:
     uv run swapstress-figures --figure spatial-skill
@@ -19,8 +23,14 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import rasterio
-from matplotlib.colors import ListedColormap, BoundaryNorm, to_rgba
+from matplotlib.colors import BoundaryNorm, ListedColormap
+from matplotlib.patches import Patch, Rectangle
+from rasterio.features import geometry_mask
+from rasterio.transform import array_bounds
+from rasterio.warp import Resampling, calculate_default_transform, reproject
 from rasterio.windows import from_bounds
+
+from swapstress.figures import style
 from swapstress.figures.basemap import lakes_shapefile, states_shapefile
 
 matplotlib.use("Agg")
@@ -39,7 +49,23 @@ OUT_DIR = Path("figs/descriptor")
 LON_MIN, LON_MAX = -125.0, -66.5
 LAT_MIN, LAT_MAX = 24.5, 49.5
 
+# CONUS Albers. The Beck grid is 0.0083 deg lon/lat, so drawing it on raw
+# degrees stretches the country sideways; warping to an equal-area frame gives
+# the shape a reader expects and matches the rest of the figure set. 800 m is
+# just finer than the source cell (about 740 m of longitude at 37 N).
+CONUS_CRS = "EPSG:5070"
+CONUS_RES_M = 800.0
+
 EXCLUDE_STUSPS = {"AK", "HI", "AS", "GU", "MP", "PR", "VI"}
+
+# ── R2 encoding ──────────────────────────────────────────────────────
+# Sequential, not diverging: 16 of the 17 evaluated classes are positive and the
+# single negative one is marginal, so a midpoint at zero would spend half the
+# ramp on 0.08 of range. Limits are padded round numbers around the observed
+# -0.08 to 0.66, with a tick on zero so "no better than the mean" stays findable.
+R2_VMIN, R2_VMAX = -0.10, 0.70
+R2_TICKS = (0.0, 0.2, 0.4, 0.6)
+NOT_EVALUATED = "#cbcbcb"
 
 # ── Beck Koppen labels and colors ────────────────────────────────────
 BECK_LABELS = {
@@ -135,177 +161,218 @@ KOPPEN_DESCRIPTIONS = {
     "ET": "Tundra",
 }
 
+# ── Table geometry, as fractions of one block's width ────────────────
+# Two blocks side by side hold the 17 rows; a single 17-row column would leave
+# the bottom third of a double-column figure empty.
+BLOCK_W = 0.470
+BLOCK_X = (0.0, 0.530)
+
+SWATCH_X0, SWATCH_X1 = 0.000, 0.028
+COL_CLASS = 0.052  # left aligned
+COL_DESC = 0.145  # left aligned
+COL_N = 0.574  # right aligned
+COL_RMSE = 0.722  # right aligned
+COL_R2 = 0.841  # right aligned
+COL_BIAS = 1.000  # right aligned
+
+BODY_PT = 6.5
+NOTE_PT = 6.0
+
+# The resolved sans face has no subscript-digit glyphs, so the units line is
+# mathtext. Left alone, mathtext sets in DejaVu Sans and the PDF ends up with
+# two font families; style.mathtext_params points it back at the body face.
+LOG_CM = r"(log$_{10}$ cm)"
+
+# Baselines and rules of panel c, as fractions of the table axes.
+Y_TITLE = 0.945
+Y_TOP_RULE = 0.865
+Y_HEAD = 0.805
+Y_UNIT = 0.748
+Y_HEAD_RULE = 0.700
+Y_FIRST = 0.630
+Y_BOTTOM_RULE = 0.000
+SWATCH_H = 0.052
+
 
 def load_conus_koppen():
-    """Load Beck Koppen raster windowed to CONUS."""
+    """Beck Koppen over CONUS, warped to Albers equal area.
+
+    Nearest neighbour, because the values are class codes and must not be
+    averaged. Returns the class array and its extent in projected metres.
+    """
     with rasterio.open(BECK_TIF) as src:
         window = from_bounds(LON_MIN, LAT_MIN, LON_MAX, LAT_MAX, src.transform)
         data = src.read(1, window=window)
-    return data
+        src_transform = src.window_transform(window)
+        src_crs = src.crs
+
+    dst_transform, width, height = calculate_default_transform(
+        src_crs,
+        CONUS_CRS,
+        data.shape[1],
+        data.shape[0],
+        left=LON_MIN,
+        bottom=LAT_MIN,
+        right=LON_MAX,
+        top=LAT_MAX,
+        resolution=CONUS_RES_M,
+    )
+    dst = np.zeros((height, width), dtype=data.dtype)
+    reproject(
+        source=data,
+        destination=dst,
+        src_transform=src_transform,
+        src_crs=src_crs,
+        dst_transform=dst_transform,
+        dst_crs=CONUS_CRS,
+        src_nodata=0,
+        dst_nodata=0,
+        resampling=Resampling.nearest,
+    )
+    return dst, dst_transform
+
+
+def _draw_map(ax, states, lakes, edgecolor, bounds):
+    """Common furniture for both map panels."""
+    states.boundary.plot(ax=ax, edgecolor=edgecolor, linewidth=0.25)
+    lakes.plot(ax=ax, facecolor="white", edgecolor="none", zorder=5)
+    ax.set_xlim(bounds[0], bounds[1])
+    ax.set_ylim(bounds[2], bounds[3])
+    ax.set_aspect("equal")
+    ax.set_axis_off()
+
+
+def _rule(ax, x0, x1, y):
+    ax.plot(
+        [x0, x1],
+        [y, y],
+        color=style.AXIS_COLOR,
+        linewidth=0.5,
+        solid_capstyle="butt",
+        clip_on=False,
+    )
+
+
+def _draw_table_block(ax, rows, x0, pitch):
+    """Write one block of the statistics table in axes coordinates."""
+
+    def x(frac):
+        return x0 + frac * BLOCK_W
+
+    head = dict(fontsize=BODY_PT, fontweight="bold", color=style.AXIS_COLOR)
+    unit = dict(fontsize=NOTE_PT, color=style.MUTED_INK)
+
+    ax.text(x(COL_CLASS), Y_HEAD, "Class", ha="left", va="baseline", **head)
+    ax.text(x(COL_DESC), Y_HEAD, "Description", ha="left", va="baseline", **head)
+    ax.text(x(COL_N), Y_HEAD, "n", ha="right", va="baseline", **head)
+    ax.text(x(COL_RMSE), Y_HEAD, "RMSE", ha="right", va="baseline", **head)
+    ax.text(x(COL_R2), Y_HEAD, "R²", ha="right", va="baseline", **head)
+    ax.text(x(COL_BIAS), Y_HEAD, "Bias", ha="right", va="baseline", **head)
+    ax.text(x(COL_RMSE), Y_UNIT, LOG_CM, ha="right", va="baseline", **unit)
+    ax.text(x(COL_BIAS), Y_UNIT, LOG_CM, ha="right", va="baseline", **unit)
+
+    for y in (Y_TOP_RULE, Y_HEAD_RULE, Y_BOTTOM_RULE):
+        _rule(ax, x(0.0), x(1.0), y)
+
+    body = dict(fontsize=BODY_PT, color=style.AXIS_COLOR)
+    for i, row in enumerate(rows):
+        y = Y_FIRST - i * pitch
+        ax.add_patch(
+            Rectangle(
+                (x(SWATCH_X0), y - 0.007),
+                (SWATCH_X1 - SWATCH_X0) * BLOCK_W,
+                SWATCH_H,
+                facecolor=BECK_COLORS.get(row["code"], "#ffffff"),
+                edgecolor="#9a9a9a",
+                linewidth=0.25,
+            )
+        )
+        ax.text(x(COL_CLASS), y, row["label"], ha="left", va="baseline", **body)
+        ax.text(x(COL_DESC), y, row["desc"], ha="left", va="baseline", **body)
+        ax.text(x(COL_N), y, row["n"], ha="right", va="baseline", **body)
+        ax.text(x(COL_RMSE), y, row["rmse"], ha="right", va="baseline", **body)
+        ax.text(x(COL_R2), y, row["r2"], ha="right", va="baseline", **body)
+        ax.text(x(COL_BIAS), y, row["bias"], ha="right", va="baseline", **body)
 
 
 def build_figure(output_dir=OUT_DIR):
+    style.apply()
+
     cv = pd.read_csv(CV_CSV)
     label_to_code = {v: k for k, v in BECK_LABELS.items()}
 
-    # Sort table by major zone group, then alphabetically within group
-    cv["_major"] = cv["held_out_region"].str[0]
-    major_order = {"A": 0, "B": 1, "C": 2, "D": 3, "E": 4}
-    cv["_sort"] = cv["_major"].map(major_order).astype(float) * 100
-    cv["_sort"] += cv["held_out_region"].rank(method="dense")
-    cv = cv.sort_values("_sort").reset_index(drop=True)
+    koppen_data, dst_transform = load_conus_koppen()
 
-    # ── Load map data ─────────────────────────────────────────────────
-    koppen_data = load_conus_koppen()
+    states = gpd.read_file(STATES_SHP)
+    conus_states = states[~states.STUSPS.isin(EXCLUDE_STUSPS)].to_crs(CONUS_CRS)
 
-    # Filter table to classes that appear in the CONUS map
+    lakes = gpd.read_file(LAKES_SHP)
+    lakes_conus = lakes.cx[LON_MIN:LON_MAX, LAT_MIN:LAT_MAX]
+    lakes_conus = lakes_conus[lakes_conus["scalerank"] <= 3].to_crs(CONUS_CRS)
+
+    # Clip to the states. The lon/lat window is a curved quadrilateral once
+    # warped, and its arc cutting across Canada reads as a data artefact; the
+    # analysis is a CONUS one, so the silhouette should be CONUS.
+    inside = geometry_mask(
+        conus_states.geometry,
+        out_shape=koppen_data.shape,
+        transform=dst_transform,
+        invert=True,
+        all_touched=True,
+    )
+    koppen_data = np.where(inside, koppen_data, 0)
+    rows, cols = koppen_data.shape
+    left, bottom, right, top = array_bounds(rows, cols, dst_transform)
+    extent = [left, right, bottom, top]
+
+    # Keep the classes that actually appear on the map, best first -- the
+    # ranking is the point of the panel, so it is the row order.
     conus_codes = set(np.unique(koppen_data)) - {0}
     conus_labels = {BECK_LABELS[c] for c in conus_codes if c in BECK_LABELS}
-    cv = cv[cv["held_out_region"].isin(conus_labels)].reset_index(drop=True)
+    cv = cv[cv["held_out_region"].isin(conus_labels)].copy()
+    cv = cv.sort_values("r2", ascending=False).reset_index(drop=True)
 
-    # Standard Beck colormap
-    color_list = ["#FFFFFF"]
-    for i in range(1, 31):
-        color_list.append(BECK_COLORS.get(i, "#FFFFFF"))
+    # Standard Beck colormap.
+    color_list = ["#FFFFFF"] + [BECK_COLORS.get(i, "#FFFFFF") for i in range(1, 31)]
     cmap_beck = ListedColormap(color_list)
-    bounds_beck = np.arange(-0.5, 31.5, 1)
-    norm_beck = BoundaryNorm(bounds_beck, cmap_beck.N)
+    norm_beck = BoundaryNorm(np.arange(-0.5, 31.5, 1), cmap_beck.N)
 
     koppen_float = koppen_data.astype(np.float32)
     koppen_float[koppen_data == 0] = np.nan
 
-    # ── R² choropleth: map each pixel's code -> LOSO R² ──────────────
+    # R2 choropleth: map each pixel's class code -> its LOCO R2. Classified
+    # pixels whose class was not evaluated are drawn grey rather than left
+    # white, so they cannot be misread as ocean.
     r2_by_label = dict(zip(cv["held_out_region"], cv["r2"]))
-    r2_map = np.full_like(koppen_data, np.nan, dtype=np.float32)
+    r2_map = np.full(koppen_data.shape, np.nan, dtype=np.float32)
     for code, label in BECK_LABELS.items():
         if label in r2_by_label:
             r2_map[koppen_data == code] = r2_by_label[label]
+    unevaluated = np.where((koppen_data != 0) & np.isnan(r2_map), 1.0, np.nan)
 
-    # Load states and lakes
-    states = gpd.read_file(STATES_SHP)
-    conus_states = states[~states.STUSPS.isin(EXCLUDE_STUSPS)].copy()
+    x0, y0, x1, y1 = conus_states.total_bounds
+    pad = 0.012 * (x1 - x0)
+    bounds = [x0 - pad, x1 + pad, y0 - pad, y1 + pad]
 
-    lakes = gpd.read_file(LAKES_SHP)
-    lakes_conus = lakes.cx[LON_MIN:LON_MAX, LAT_MIN:LAT_MAX]
-    lakes_conus = lakes_conus[lakes_conus["scalerank"] <= 3].copy()
-
-    extent = [LON_MIN, LON_MAX, LAT_MIN, LAT_MAX]
-
-    # ── Figure layout ─────────────────────────────────────────────────
-    fig = plt.figure(figsize=(16, 9), dpi=200)
-    gs = fig.add_gridspec(
-        2,
-        2,
-        width_ratios=[1, 1.6],
-        height_ratios=[1, 1],
-        hspace=0.06,
-        wspace=0.04,
-        left=0.01,
-        right=0.96,
-        top=0.94,
-        bottom=0.03,
+    # ── Layout ────────────────────────────────────────────────────────
+    fig = plt.figure(
+        figsize=style.figsize(style.DOUBLE_COLUMN_MM, 113.0),
+        layout="constrained",
     )
+    fig.get_layout_engine().set(w_pad=0.012, h_pad=0.012, wspace=0.03, hspace=0.01)
+    # Rows sized to what they need: map + title, colour key, then the table.
+    # The maps are the widest CONUS that fits a column at their 1.6:1 shape;
+    # the key row is deep enough that the colour bar is a bar, not a hairline.
+    gs = fig.add_gridspec(3, 2, height_ratios=[1.0, 0.165, 0.71])
 
-    ax_tbl = fig.add_subplot(gs[:, 0])  # left: table spans both rows
-    ax_kop = fig.add_subplot(gs[0, 1])  # top-right: Koppen map
-    ax_r2 = fig.add_subplot(gs[1, 1])  # bot-right: R² choropleth
+    ax_kop = fig.add_subplot(gs[0, 0])
+    ax_r2 = fig.add_subplot(gs[0, 1])
+    key_gs = gs[1, 1].subgridspec(1, 2, width_ratios=[1.0, 1.4], wspace=0.08)
+    ax_key = fig.add_subplot(key_gs[0, 0])
+    cax = fig.add_subplot(key_gs[0, 1])
+    ax_tbl = fig.add_subplot(gs[2, :])
 
-    # ── Left panel: table ─────────────────────────────────────────────
-    ax_tbl.set_axis_off()
-
-    col_labels = [
-        "",
-        "Class",
-        "Description",
-        "n",
-        "RMSE\n(log\u2081\u2080 cm)",
-        "R\u00b2",
-        "Bias\n(log\u2081\u2080 cm)",
-    ]
-    n_rows = len(cv)
-    n_cols = len(col_labels)
-
-    cell_text = []
-    cell_colors = []
-    for _, row in cv.iterrows():
-        lbl = row["held_out_region"]
-        desc = KOPPEN_DESCRIPTIONS.get(lbl, "")
-        code = label_to_code.get(lbl)
-        beck_color = BECK_COLORS.get(code, "#FFFFFF") if code else "#FFFFFF"
-
-        r2_val = row["r2"]
-        # White background for all cells except the swatch column
-        white = (1.0, 1.0, 1.0, 1.0)
-        swatch = to_rgba(beck_color)
-        cell_colors.append([swatch, white, white, white, white, white, white])
-
-        cell_text.append(
-            [
-                "",
-                lbl,
-                desc,
-                f"{int(row['n_test']):,}",
-                f"{row['rmse']:.2f}",
-                f"{r2_val:.2f}",
-                f"{row['bias']:+.2f}",
-            ]
-        )
-
-    table = ax_tbl.table(
-        cellText=cell_text,
-        colLabels=col_labels,
-        cellColours=cell_colors,
-        colColours=["#D8D8D8"] * n_cols,
-        cellLoc="center",
-        loc="upper center",
-        bbox=[0.0, 0.0, 1.0, 1.0],
-    )
-    table.auto_set_font_size(False)
-    table.set_fontsize(8)
-
-    # Header styling
-    for j in range(n_cols):
-        cell = table[0, j]
-        cell.set_text_props(fontweight="bold", fontsize=8.5)
-        cell.set_edgecolor("#AAAAAA")
-        cell.set_height(0.045)
-
-    # Data cell styling
-    for i in range(n_rows):
-        for j in range(n_cols):
-            cell = table[i + 1, j]
-            cell.set_edgecolor("#DDDDDD")
-            cell.set_height(0.038)
-
-        # Swatch column: no text, just color
-        table[i + 1, 0].set_width(0.04)
-        table[0, 0].set_width(0.04)
-
-        # Left-align description
-        table[i + 1, 2].set_text_props(ha="left")
-
-        # Highlight poor R²
-        r2_val = cv.iloc[i]["r2"]
-        if r2_val < 0.25:
-            table[i + 1, 5].set_text_props(fontweight="bold", color="#C0392B")
-        elif r2_val >= 0.65:
-            table[i + 1, 5].set_text_props(fontweight="bold", color="#1A7A2E")
-
-    # Column widths
-    col_widths = [0.04, 0.07, 0.38, 0.11, 0.12, 0.12, 0.12]
-    for j, w in enumerate(col_widths):
-        for i in range(n_rows + 1):
-            table[i, j].set_width(w)
-
-    ax_tbl.set_title(
-        "Leave-One-Class-Out CV",
-        fontsize=11,
-        fontweight="bold",
-        pad=8,
-        loc="center",
-    )
-
-    # ── Top-right: Koppen classification map ──────────────────────────
+    # ── a: Koppen classification ──────────────────────────────────────
     ax_kop.imshow(
         koppen_float,
         cmap=cmap_beck,
@@ -314,62 +381,104 @@ def build_figure(output_dir=OUT_DIR):
         origin="upper",
         interpolation="nearest",
     )
-    conus_states.boundary.plot(ax=ax_kop, edgecolor="#2C2C2A", linewidth=0.4)
-    lakes_conus.plot(ax=ax_kop, facecolor="white", edgecolor="none", zorder=5)
-    ax_kop.set_xlim(LON_MIN, LON_MAX)
-    ax_kop.set_ylim(LAT_MIN, LAT_MAX)
-    ax_kop.set_aspect("equal")
-    ax_kop.set_axis_off()
-    ax_kop.set_title(
-        "K\u00f6ppen-Geiger Classification",
-        fontsize=10,
-        fontweight="bold",
-        pad=4,
-    )
+    _draw_map(ax_kop, conus_states, lakes_conus, "#2c2c2a", bounds)
+    ax_kop.set_title("Köppen–Geiger climate class", pad=3)
+    style.panel_label(ax_kop, "a", dx=0.0, dy=1.02)
 
-    # ── Bottom-right: R² choropleth ───────────────────────────────────
-    cmap_r2 = plt.cm.RdYlBu
-    im_r2 = ax_r2.imshow(
-        r2_map,
-        cmap=cmap_r2,
-        vmin=0.0,
-        vmax=0.85,
+    # ── b: LOCO R2 choropleth ─────────────────────────────────────────
+    ax_r2.imshow(
+        unevaluated,
+        cmap=ListedColormap([NOT_EVALUATED]),
+        vmin=0,
+        vmax=1,
         extent=extent,
         origin="upper",
         interpolation="nearest",
     )
-    conus_states.boundary.plot(ax=ax_r2, edgecolor="#2C2C2A", linewidth=0.4)
-    lakes_conus.plot(ax=ax_r2, facecolor="white", edgecolor="none", zorder=5)
-    ax_r2.set_xlim(LON_MIN, LON_MAX)
-    ax_r2.set_ylim(LAT_MIN, LAT_MAX)
-    ax_r2.set_aspect("equal")
-    ax_r2.set_axis_off()
-    ax_r2.set_title(
-        "LOCO Transferability  (R\u00b2 by climate zone)",
-        fontsize=10,
-        fontweight="bold",
-        pad=4,
+    im_r2 = ax_r2.imshow(
+        r2_map,
+        cmap=style.SEQUENTIAL,
+        vmin=R2_VMIN,
+        vmax=R2_VMAX,
+        extent=extent,
+        origin="upper",
+        interpolation="nearest",
+    )
+    # Mid grey holds up against both ends of cividis; the near-black used on
+    # panel a vanishes into the dark low-skill zones.
+    _draw_map(ax_r2, conus_states, lakes_conus, "#7a7a7a", bounds)
+    ax_r2.set_title("Leave-one-class-out skill", pad=3)
+    style.panel_label(ax_r2, "b", dx=0.0, dy=1.02)
+
+    ax_key.set_axis_off()
+    ax_key.legend(
+        handles=[Patch(facecolor=NOT_EVALUATED, edgecolor="none")],
+        labels=["Class not evaluated"],
+        loc="center right",
+        frameon=False,
+        fontsize=NOTE_PT,
+        handlelength=1.0,
+        handleheight=1.0,
+        handletextpad=0.4,
+        borderpad=0.0,
+        borderaxespad=0.0,
     )
 
-    # Colorbar for R² map
-    cax = fig.add_axes([0.62, 0.025, 0.22, 0.015])
-    cb = fig.colorbar(im_r2, cax=cax, orientation="horizontal")
-    cb.set_label("R\u00b2", fontsize=8)
-    cb.ax.tick_params(labelsize=7)
+    cb = fig.colorbar(im_r2, cax=cax, orientation="horizontal", ticks=list(R2_TICKS))
+    cb.set_label("Held-out R²", fontsize=NOTE_PT, labelpad=1.5)
+    cb.ax.tick_params(labelsize=NOTE_PT, length=1.5, width=0.4, pad=1.5)
+    cb.outline.set_linewidth(0.4)
+    cb.outline.set_edgecolor(style.AXIS_COLOR)
 
-    # ── Save ──────────────────────────────────────────────────────────
+    # ── c: per-class statistics ───────────────────────────────────────
+    ax_tbl.set_axis_off()
+    ax_tbl.set_xlim(0, 1)
+    ax_tbl.set_ylim(0, 1)
+
+    records = [
+        {
+            "label": r["held_out_region"],
+            "code": label_to_code.get(r["held_out_region"]),
+            "desc": KOPPEN_DESCRIPTIONS.get(r["held_out_region"], ""),
+            "n": f"{int(r['n_test']):,}",
+            "rmse": f"{r['rmse']:.2f}",
+            "r2": f"{r['r2']:.2f}",
+            "bias": f"{r['bias']:+.2f}",
+        }
+        for _, r in cv.iterrows()
+    ]
+    split = (len(records) + 1) // 2
+    blocks = [records[:split], records[split:]]
+
+    # Both blocks share one pitch and one bottom rule, so the shorter block
+    # still lines up with the taller one.
+    pitch = (Y_FIRST - Y_BOTTOM_RULE - 0.045) / max(split - 1, 1)
+    for x0, rows in zip(BLOCK_X, blocks):
+        _draw_table_block(ax_tbl, rows, x0, pitch)
+
+    ax_tbl.text(
+        0.026,
+        Y_TITLE,
+        "Leave-one-class-out cross-validation, by decreasing R²",
+        ha="left",
+        va="baseline",
+        fontsize=style.MAX_TEXT_PT,
+        color=style.AXIS_COLOR,
+    )
+    style.panel_label(ax_tbl, "c", dx=0.0, dy=Y_TITLE)
+
     out_dir = Path(output_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
-    for ext in ("png", "pdf"):
-        out_path = out_dir / f"fig05_spatial_skill.{ext}"
-        fig.savefig(out_path, bbox_inches="tight", facecolor="white")
-        print(f"Saved: {out_path.absolute()}")
-    plt.close(fig)
+    # Mathtext is resolved at draw time, so the font setting has to be live
+    # during the write; rc_context keeps it off the figures rendered after.
+    with matplotlib.rc_context(style.mathtext_params()):
+        png = style.save(fig, out_dir / "fig05_spatial_skill")
+    print(f"Saved: {png}")
+    print(f"Saved: {png.with_suffix('.pdf')}")
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(
-        description="Figure 7: Koppen-zone transferability"
+        description="Figure 5: Koppen-zone transferability"
     )
     parser.add_argument("--output-dir", default=str(OUT_DIR))
     args = parser.parse_args(argv)
