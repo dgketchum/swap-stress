@@ -180,7 +180,7 @@ NOTE_PT = 6.0
 
 # The resolved sans face has no subscript-digit glyphs, so the units line is
 # mathtext. Left alone, mathtext sets in DejaVu Sans and the PDF ends up with
-# two font families; style.mathtext_params points it back at the body face.
+# two font families; style.apply points it back at the body face.
 LOG_CM = r"(log$_{10}$ cm)"
 
 # Baselines and rules of panel c, as fractions of the table axes.
@@ -468,10 +468,7 @@ def build_figure(output_dir=OUT_DIR):
     style.panel_label(ax_tbl, "c", dx=0.0, dy=Y_TITLE)
 
     out_dir = Path(output_dir)
-    # Mathtext is resolved at draw time, so the font setting has to be live
-    # during the write; rc_context keeps it off the figures rendered after.
-    with matplotlib.rc_context(style.mathtext_params()):
-        png = style.save(fig, out_dir / "fig05_spatial_skill")
+    png = style.save(fig, out_dir / "fig05_spatial_skill")
     print(f"Saved: {png}")
     print(f"Saved: {png.with_suffix('.pdf')}")
 

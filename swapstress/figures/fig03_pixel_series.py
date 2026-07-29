@@ -146,11 +146,6 @@ def render(span: pd.DatetimeIndex, series: list[dict], output_dir: str) -> Path:
     it drops into a 183 mm column without rescaling the type.
     """
     style.apply()
-    with matplotlib.rc_context(style.mathtext_params()):
-        return _draw(span, series, output_dir)
-
-
-def _draw(span: pd.DatetimeIndex, series: list[dict], output_dir: str) -> Path:
     fig, axes = plt.subplots(
         len(series),
         1,

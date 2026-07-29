@@ -145,11 +145,6 @@ def off_scale(observed: np.ndarray, predicted: np.ndarray) -> int:
 
 def render(df: pd.DataFrame, output_dir: str) -> Path:
     style.apply()
-    with matplotlib.rc_context(style.mathtext_params()):
-        return _draw(df, output_dir)
-
-
-def _draw(df: pd.DataFrame, output_dir: str) -> Path:
     observed = df["log10_suction_cm"].values
     fig, axes = plt.subplots(
         1,

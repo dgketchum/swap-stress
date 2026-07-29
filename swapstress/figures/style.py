@@ -78,11 +78,6 @@ AXIS_COLOR = "#333333"
 MUTED_INK = "#666666"
 
 
-def mm(*values: float) -> tuple[float, ...]:
-    """Millimetres to inches, for figsize."""
-    return tuple(v / MM_PER_INCH for v in values)
-
-
 def figsize(width_mm: float, height_mm: float) -> tuple[float, float]:
     """A figure size in inches, refusing anything taller than the page."""
     if height_mm > MAX_DEPTH_MM:
