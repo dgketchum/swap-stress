@@ -42,7 +42,6 @@ dependencies = [
     "quantile-forest>=1.4.1",
     "pymc>=5.25.1",
     "mgrs>=1.5.4",
-    "cairosvg>=2.9.0",
     "netcdf4>=1.7.3",
 ]
 
