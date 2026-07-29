@@ -6,9 +6,9 @@ by name against one model directory, so the descriptor's validation section can
 be regenerated with a single command instead of eight.
 
 ``--analysis all`` runs the set that only needs the trained model and its cached
-test set. The PTF baseline is excluded from that set: it has its own two-step
-prep/eval interface and reads an external Rosetta grid, so it is asked for
-explicitly.
+test set. Two are excluded and asked for by name: the PTF baseline, which has
+its own two-step prep/eval interface and reads an external Rosetta grid, and
+quantile coverage, which needs a model trained with ``--quantile``.
 """
 
 from __future__ import annotations
@@ -30,12 +30,17 @@ ANALYSES = {
     "sensitivity": "swapstress.validation.sensitivity",
     "within-pixel": "swapstress.validation.within_pixel_variance",
     "error-lookup": "swapstress.validation.empirical_error_lookup",
+    "quantile-coverage": "swapstress.validation.quantile_coverage",
     "ptf-baseline": "swapstress.validation.ptf_baseline",
 }
 
-# Everything --analysis all covers. See the module docstring for why the PTF
-# baseline is not in it.
-DEFAULT_ANALYSES = [name for name in ANALYSES if name != "ptf-baseline"]
+# Not in --analysis all, each for its own reason. The PTF baseline has its own
+# prep/eval interface and reads an external Rosetta grid. Quantile coverage
+# needs a quantile forest: a plain RandomForestRegressor has no predictive
+# distribution, so it would fail every run of a non-quantile model.
+ON_REQUEST = {"ptf-baseline", "quantile-coverage"}
+
+DEFAULT_ANALYSES = [name for name in ANALYSES if name not in ON_REQUEST]
 
 # The PTF baseline dispatches on a prep/eval subcommand instead of taking the
 # shared --model-dir/--output-dir pair, so it gets only what the caller passed.
