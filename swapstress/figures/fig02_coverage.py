@@ -12,8 +12,13 @@ which is the orbital pattern and not a processing failure. Counting only the
 files that exist would divide those days out of the statistic and overstate
 coverage by about a fifth.
 
-The rasters are global; the map is a CONUS crop of them, so the daily count in
-the inset and the median quoted in the header are product-wide, not CONUS-only.
+The rasters are global; the map is a CONUS crop of them, and every number the
+figure quotes is cut to that same crop. The per-pixel fraction, the inset's
+daily count and the median in the header all count only cells whose centres
+fall inside the drawn extent, so a reader can check any of them against the map
+beside it. A product-wide statistic would be a different figure's number: the
+tropics and the high latitudes have their own revisit, and mixing them in would
+put a value in the header that nothing on the page can confirm.
 
 The frame is Conus Albers (EPSG:5070), matching Fig 6. The grid is already
 equal-area, and drawing it on raw lon/lat would stretch the north of the
@@ -80,9 +85,10 @@ DRAW_BOX = (-134.0, 18.0, -58.0, 56.0)
 BOUNDARY_COLOR = "white"
 BOUNDARY_WIDTH = 0.3
 
-# 99 % of retrieved pixels sit below 0.51, so a full 0-1 ramp would spend most
-# of its range on values that never occur. The colorbar's "max" arrow carries
-# the remainder rather than clipping it silently.
+# In-frame retrieved pixels top out at 0.52 and 99 % sit below 0.46, so a full
+# 0-1 ramp would spend most of its range on values that never occur. The mesh
+# overhangs the frame and a few high-latitude cells outside it do run past this
+# ceiling, so the colorbar keeps its "max" arrow rather than clipping silently.
 COLOR_MAX = 0.6
 
 # Inset plot box, and the white backing that carries its title and tick labels,
@@ -101,14 +107,58 @@ def parse_date(path: Path) -> date:
     return date(int(stamp[:4]), int(stamp[4:6]), int(stamp[6:]))
 
 
-class Coverage:
-    """Per-pixel valid-day counts and the daily product-wide total."""
+def source_paths(source_dir: str, prefix: str) -> List[Path]:
+    paths = sorted(Path(source_dir).glob(f"{prefix}_*.tif"))
+    if not paths:
+        raise FileNotFoundError(f"No {prefix}_*.tif rasters under {source_dir}")
+    return paths
 
-    def __init__(self, valid_days, calendar, daily_counts, profile, n_files):
-        self.valid_days = valid_days  # (row, col) int32
+
+class MapFrame:
+    """The slice of the global grid the map draws, and its Albers mesh.
+
+    ``window`` is deliberately larger than the drawn extent: Albers curves the
+    graticule, so a lon/lat box cut to CONUS exactly would leave the corners of
+    the rectangular frame empty. ``inside`` is the subset of those cells whose
+    centres land within the extent -- the cells a reader can actually see, and
+    therefore the only ones the figure's statistics count. Keeping the two apart
+    means the drawn mesh still overhangs the frame edge, so no hairline of blank
+    cells appears along the border.
+    """
+
+    def __init__(self, profile, states):
+        self.states = states
+        self.window = _draw_window(profile)
+        self.mesh_x, self.mesh_y = _albers_mesh(profile, self.window)
+        self.extent = _frame_extent(states)
+        self.inside = _cells_inside(self.mesh_x, self.mesh_y, self.extent)
+
+    @property
+    def shape(self) -> tuple:
+        return int(self.window.height), int(self.window.width)
+
+
+def open_frame(
+    source_dir: str, prefix: str = "suction", boundaries_root=None
+) -> MapFrame:
+    """Read the grid geometry off the first raster and build the drawn frame."""
+    with rasterio.open(source_paths(source_dir, prefix)[0]) as src:
+        profile = src.profile.copy()
+    return MapFrame(profile, load_conus_states(boundaries_root, crs=MAP_CRS))
+
+
+class Coverage:
+    """Per-pixel valid-day counts and the daily in-frame total.
+
+    ``valid_days`` spans the whole mesh window so the map has something to draw
+    at its edges; ``daily_counts`` is restricted to ``frame.inside``, as is the
+    median the header quotes.
+    """
+
+    def __init__(self, valid_days, calendar, daily_counts, n_files):
+        self.valid_days = valid_days  # (row, col) int32, whole mesh window
         self.calendar = calendar  # every day in the span, including absent ones
-        self.daily_counts = daily_counts  # valid px per calendar day, 0 if absent
-        self.profile = profile
+        self.daily_counts = daily_counts  # valid in-frame px per day, 0 if absent
         self.n_files = n_files
 
     @property
@@ -126,32 +176,29 @@ class Coverage:
         return self.n_days - self.n_files
 
 
-def compute_coverage(source_dir: str, prefix: str = "suction") -> Coverage:
+def compute_coverage(
+    source_dir: str, frame: MapFrame, prefix: str = "suction"
+) -> Coverage:
     """Accumulate valid-retrieval counts across a directory of daily rasters.
 
-    One day is held at a time; only the count array persists.
+    Only ``frame.window`` is read from each file -- the rasters are global and
+    the figure is not -- and one day is held at a time; only the count array
+    persists.
     """
-    paths = sorted(Path(source_dir).glob(f"{prefix}_*.tif"))
-    if not paths:
-        raise FileNotFoundError(f"No {prefix}_*.tif rasters under {source_dir}")
-
+    paths = source_paths(source_dir, prefix)
     dates = [parse_date(p) for p in paths]
     span = (max(dates) - min(dates)).days + 1
     calendar = [min(dates) + timedelta(days=i) for i in range(span)]
     by_date = {d: 0 for d in calendar}
 
-    valid_days = None
-    profile = None
+    valid_days = np.zeros(frame.shape, dtype=np.int32)
     for path, day in zip(paths, dates):
         with rasterio.open(path) as src:
-            data = src.read(1)
+            data = src.read(1, window=frame.window)
             nodata = src.nodata if src.nodata is not None else NODATA_VALUE
-            if profile is None:
-                profile = src.profile.copy()
-                valid_days = np.zeros(data.shape, dtype=np.int32)
         valid = np.isfinite(data) & (data != nodata)
         valid_days += valid
-        by_date[day] = int(valid.sum())
+        by_date[day] = int((valid & frame.inside).sum())
 
     print(
         f"{len(paths)} rasters over {span} calendar days ({span - len(paths)} absent)"
@@ -160,7 +207,6 @@ def compute_coverage(source_dir: str, prefix: str = "suction") -> Coverage:
         valid_days=valid_days,
         calendar=calendar,
         daily_counts=[by_date[d] for d in calendar],
-        profile=profile,
         n_files=len(paths),
     )
 
@@ -206,20 +252,43 @@ def _albers_mesh(profile, window: Window):
     return to_albers.transform(lon, lat)
 
 
-def _frame_map(ax, states) -> None:
+def _frame_extent(states) -> tuple:
+    """Albers ``(x0, y0, x1, y1)`` the map is drawn to: CONUS plus a hair."""
+    x0, y0, x1, y1 = states.total_bounds
+    dx, dy = (x1 - x0) * MAP_PAD, (y1 - y0) * MAP_PAD
+    return x0 - dx, y0 - dy, x1 + dx, y1 + dy
+
+
+def _cells_inside(mesh_x, mesh_y, extent) -> np.ndarray:
+    """Which cells of a corner mesh have their centre inside *extent*.
+
+    The centre is the mean of the four corners, which is exact enough at 9 km
+    and avoids projecting a second mesh. Corners outside the Albers domain come
+    back as ``inf``; the comparisons drop those, which is the wanted answer.
+    """
+    centre_x = 0.25 * (
+        mesh_x[:-1, :-1] + mesh_x[1:, :-1] + mesh_x[:-1, 1:] + mesh_x[1:, 1:]
+    )
+    centre_y = 0.25 * (
+        mesh_y[:-1, :-1] + mesh_y[1:, :-1] + mesh_y[:-1, 1:] + mesh_y[1:, 1:]
+    )
+    x0, y0, x1, y1 = extent
+    return (centre_x >= x0) & (centre_x <= x1) & (centre_y >= y0) & (centre_y <= y1)
+
+
+def _frame_map(ax, frame: MapFrame) -> None:
     """Equal-area CONUS frame: state outlines, extent, no axis furniture.
 
     The outlines are white because cividis is dark at the low end, where a grey
     hairline disappears. There are no ticks: projected metres mean nothing to a
     reader, and the state outlines already say where everything is.
     """
-    states.boundary.plot(
+    frame.states.boundary.plot(
         ax=ax, edgecolor=BOUNDARY_COLOR, linewidth=BOUNDARY_WIDTH, alpha=0.85, zorder=3
     )
-    x0, y0, x1, y1 = states.total_bounds
-    dx, dy = (x1 - x0) * MAP_PAD, (y1 - y0) * MAP_PAD
-    ax.set_xlim(x0 - dx, x1 + dx)
-    ax.set_ylim(y0 - dy, y1 + dy)
+    x0, y0, x1, y1 = frame.extent
+    ax.set_xlim(x0, x1)
+    ax.set_ylim(y0, y1)
     ax.set_aspect("equal")
     ax.set_axis_off()
 
@@ -263,21 +332,25 @@ def _panel_backing(ax) -> None:
 def _add_daily_inset(ax, coverage: Coverage) -> None:
     """Daily valid-pixel count, over the Pacific/Mexico corner the map leaves empty.
 
-    Each drop to zero is a calendar day with no overpass anywhere, so the comb
-    is the record's cadence rather than noise -- and it is the same 67 days that
-    the map's denominator refuses to discard.
+    Counted over the drawn frame, like everything else on the figure. Most drops
+    to zero are calendar days with no overpass at all, so the comb is the
+    record's cadence rather than noise -- the same 67 days the map's denominator
+    refuses to discard. One is not: 23 September 2024 has a raster, but its
+    granules only reach the eastern hemisphere, so nothing lands in frame. That
+    is exactly the kind of hole a product-wide count would hide.
     """
     _panel_backing(ax)
+    counts = np.array(coverage.daily_counts) / 1e3
     inset = ax.inset_axes(INSET_RECT)
     inset.fill_between(
         coverage.calendar,
-        np.array(coverage.daily_counts) / 1e6,
+        counts,
         step="mid",
         color=style.CATEGORICAL[0],
         linewidth=0.0,
     )
     inset.set_title(
-        "Valid pixels per day, product-wide (millions)",
+        "Valid pixels per day, in frame (thousands)",
         fontsize=style.MIN_TEXT_PT + 1,
         color=style.AXIS_COLOR,
         pad=2.0,
@@ -285,8 +358,8 @@ def _add_daily_inset(ax, coverage: Coverage) -> None:
     )
     inset.xaxis.set_major_formatter(mdates.DateFormatter("%b"))
     inset.xaxis.set_major_locator(mdates.MonthLocator(interval=3))
-    inset.set_yticks([0.0, 0.4, 0.8])
-    inset.set_ylim(0.0, 0.95)
+    inset.set_yticks([0, 30, 60])
+    inset.set_ylim(0.0, max(72.0, counts.max() * 1.08))
     inset.margins(x=0.01)
     inset.tick_params(labelsize=style.MIN_TEXT_PT + 0.5, length=1.5, width=0.4, pad=1.0)
     inset.set_facecolor("none")
@@ -296,17 +369,15 @@ def _add_daily_inset(ax, coverage: Coverage) -> None:
         spine.set_edgecolor(style.AXIS_COLOR)
 
 
-def render(coverage: Coverage, output_dir: str, boundaries_root=None) -> Path:
+def render(coverage: Coverage, frame: MapFrame, output_dir: str) -> Path:
     """Draw the coverage map with its daily-count inset."""
     style.apply()
 
-    # The median below is over every retrieved pixel in the global grid, so it
-    # is taken on the full array; only the drawn mesh is cut to the map window.
+    # Drawn over the whole mesh window so the frame edge has no blank hairline;
+    # quoted over ``frame.inside`` only, which is what a reader can see.
     fraction = coverage.fraction
-    window = _draw_window(coverage.profile)
-    mesh_x, mesh_y = _albers_mesh(coverage.profile, window)
-    drawn = fraction[window.toslices()]
-    states = load_conus_states(boundaries_root, crs=MAP_CRS)
+    mesh_x, mesh_y = frame.mesh_x, frame.mesh_y
+    quoted = fraction[frame.inside & np.isfinite(fraction)]
 
     fig = plt.figure(
         figsize=style.figsize(FIG_WIDTH_MM, FIG_HEIGHT_MM), layout="constrained"
@@ -317,7 +388,7 @@ def render(coverage: Coverage, output_dir: str, boundaries_root=None) -> Path:
     mesh = ax.pcolormesh(
         mesh_x,
         mesh_y,
-        drawn,
+        fraction,
         cmap=style.SEQUENTIAL,
         vmin=0.0,
         vmax=COLOR_MAX,
@@ -327,17 +398,20 @@ def render(coverage: Coverage, output_dir: str, boundaries_root=None) -> Path:
         # vector, which is what the artwork guide actually asks for.
         rasterized=True,
     )
-    _frame_map(ax, states)
+    _frame_map(ax, frame)
     _add_colorbar(fig, mesh, ax)
 
     first, last = coverage.calendar[0], coverage.calendar[-1]
-    covered = np.isfinite(fraction)
+    print(
+        f"{quoted.size} retrieved pixels in frame; "
+        f"median {np.median(quoted):.1%} of calendar days per pixel"
+    )
     ax.set_title(
         f"Level 1 retrieval coverage, {first:%-d %b}–{last:%-d %b %Y}; "
         "CONUS detail of the global product\n"
         f"{coverage.n_files} daily rasters over {coverage.n_days} calendar days "
         f"({coverage.absent_days} with no overpass); median "
-        f"{np.nanmedian(fraction[covered]):.0%} of days per pixel, product-wide",
+        f"{np.median(quoted):.0%} of days per pixel across the frame",
         fontsize=style.MAX_TEXT_PT,
         color=style.AXIS_COLOR,
         loc="left",
@@ -376,8 +450,11 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: Optional[List[str]] = None) -> None:
     args = build_parser().parse_args(argv)
-    coverage = compute_coverage(args.source_dir, prefix=args.prefix)
-    path = render(coverage, args.output_dir, boundaries_root=args.boundaries_root)
+    frame = open_frame(
+        args.source_dir, prefix=args.prefix, boundaries_root=args.boundaries_root
+    )
+    coverage = compute_coverage(args.source_dir, frame, prefix=args.prefix)
+    path = render(coverage, frame, args.output_dir)
     print(f"Saved to {os.path.abspath(path)}")
 
 
