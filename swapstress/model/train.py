@@ -327,7 +327,7 @@ def build_parser():
     parser.add_argument(
         "--kfold",
         action="store_true",
-        default=False,
+        default=None,
         help="Run full k-fold cross-validation instead of single holdout.",
     )
     parser.add_argument(
@@ -339,7 +339,7 @@ def build_parser():
     parser.add_argument(
         "--quantile",
         action="store_true",
-        default=False,
+        default=None,
         help="Use RandomForestQuantileRegressor (enables quantile prediction at inference).",
     )
     return parser

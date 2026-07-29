@@ -115,6 +115,7 @@ def add_common_args(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
     parser.add_argument(
         "--dry-run",
         action="store_true",
+        default=None,
         help="Resolve and print every input and output path, then exit.",
     )
     return parser

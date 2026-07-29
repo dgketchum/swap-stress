@@ -771,6 +771,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--imputer-fill-report",
         action="store_true",
+        default=None,
         help="Print per-feature counts of cells the imputer fills, per day.",
     )
     return parser

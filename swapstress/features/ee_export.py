@@ -253,6 +253,7 @@ def build_parser():
     parser.add_argument(
         "--diagnose",
         action="store_true",
+        default=None,
         help="Probe one point band by band and report nulls instead of exporting.",
     )
     return parser

@@ -974,12 +974,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--drop-linear-suction",
         action="store_true",
+        default=None,
         help="Omit the suction_cm band. It is an exact transform of "
         "log10_suction_cm and compresses worst; recommended for the deposit.",
     )
     parser.add_argument(
         "--require-quantiles",
         action="store_true",
+        default=None,
         help=f"Refuse a source raster without the {Q025_BAND_NAME} / "
         f"{Q975_BAND_NAME} pair. Use for a release run, where a day silently "
         "missing its prediction interval is the failure to catch.",
@@ -987,6 +989,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--overwrite",
         action="store_true",
+        default=None,
         help="Rewrite files that already exist.",
     )
     return parser

@@ -658,6 +658,7 @@ def build_parser():
     parser.add_argument(
         "--embeddings",
         action="store_true",
+        default=None,
         help="Include embeddings (250m only).",
     )
     parser.add_argument(

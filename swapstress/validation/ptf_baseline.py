@@ -471,7 +471,7 @@ def build_parser():
         default=os.path.join(DEFAULT_OUTPUT_DIR, "site_vg_params.parquet"),
         help="Output parquet for site-level vG params",
     )
-    p_prep.add_argument("--overwrite", action="store_true")
+    p_prep.add_argument("--overwrite", action="store_true", default=None)
     p_prep.set_defaults(func=run_prep)
 
     # --- evaluate ---

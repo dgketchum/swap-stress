@@ -66,3 +66,26 @@ class TestConsoleScripts:
         options = module.build_parser()._option_string_actions
         assert "--dry-run" in options
         assert "--config" in options
+
+
+def test_store_true_flags_default_none():
+    """A store_true flag with a False default silently overrides a TOML
+    ``key = true`` in load_config's merge, which treats only None as "not
+    specified". Every boolean stage flag must default to None."""
+    import re
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1] / "swapstress"
+    offenders = []
+    for path in sorted(root.rglob("*.py")):
+        text = path.read_text()
+        for match in re.finditer(
+            r'add_argument\(\s*"(--[\w-]+)"[^)]*?action="store_true"[^)]*?\)',
+            text,
+            re.S,
+        ):
+            if "default=None" not in match.group(0):
+                offenders.append(f"{path.name}: {match.group(1)}")
+    assert not offenders, (
+        f"store_true flags whose False default would override TOML true: {offenders}"
+    )

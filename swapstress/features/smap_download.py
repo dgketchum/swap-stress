@@ -570,11 +570,13 @@ if __name__ == "__main__":
     parser.add_argument(
         "--download-only",
         action="store_true",
+        default=None,
         help="Download HDF5 files but skip GeoTIFF conversion.",
     )
     parser.add_argument(
         "--overwrite",
         action="store_true",
+        default=None,
         help="Overwrite existing GeoTIFFs.",
     )
     args = parser.parse_args()

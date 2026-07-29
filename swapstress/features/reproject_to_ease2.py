@@ -157,6 +157,7 @@ def main():
     parser.add_argument(
         "--overwrite",
         action="store_true",
+        default=None,
         help="Overwrite existing *_ease2.tif files",
     )
     args = parser.parse_args()
