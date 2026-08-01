@@ -388,6 +388,7 @@ def main(argv=None):
                 "resolution_m": config.get("resolution_m", 250),
                 "n_jobs": n_jobs,
                 "config_dict": config,
+                "quantile": config.get("quantile", False),
             },
         )
     else:
