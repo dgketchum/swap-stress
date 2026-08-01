@@ -10,11 +10,16 @@ Subcommands
 -----------
 prep      Extract Rosetta L2 and POLARIS 0-5 cm vG parameters at training sites.
 evaluate  Compare PTF-derived suction against observed and model-predicted values.
+fix-polaris-units  Correct pol_alpha in a prep output written before the kPa fix.
 
 Usage:
     python -m swapstress.validation.ptf_baseline prep \
         --training-table /nas/soils/swapstress/training/obs_level_training_9km_global.parquet \
         --output /nas/soils/swapstress/evaluation/ptf_baseline/site_vg_params.parquet
+
+    python -m swapstress.validation.ptf_baseline fix-polaris-units \
+        --vg-params /nas/soils/swapstress/evaluation/ptf_baseline/site_vg_params.parquet \
+        --output /nas/soils/swapstress/evaluation/ptf_baseline/site_vg_params_cm.parquet
 
     python -m swapstress.validation.ptf_baseline evaluate \
         --training-table /nas/soils/swapstress/training/obs_level_training_9km_global.parquet \
@@ -32,12 +37,18 @@ import pandas as pd
 import rasterio
 
 from swapstress.swrc import psi_from_theta
+from swapstress.units import KPA_TO_CM
 
 DEFAULT_TRAINING_TABLE = (
     "/nas/soils/swapstress/training/obs_level_training_9km_global.parquet"
 )
 DEFAULT_ROSETTA_TIF = "/nas/soils/rosetta/geotiff/US_R3H3_L2_VG.tiff"
 DEFAULT_OUTPUT_DIR = "/nas/soils/swapstress/evaluation/ptf_baseline"
+
+# Present in any prep output whose pol_alpha is on the pipeline's cm^-1 basis.
+# Its absence marks a table written before the kPa fix, whose pol_alpha is
+# high by exactly KPA_TO_CM; evaluate refuses those.
+POL_ALPHA_UNITS_COL = "pol_alpha_units"
 
 # ---------------------------------------------------------------------------
 # Prep: extract vG parameters at training sites
@@ -112,7 +123,10 @@ def _sample_polaris_at_sites(lats, lons, sample_ids):
     """Sample POLARIS 0-5 cm vG parameters from EE at (lat, lon) coordinates.
 
     Returns dict with keys: pol_theta_r, pol_theta_s, pol_alpha, pol_n.
-    Alpha is converted from log10(1/cm) to 1/cm; n is in natural scale.
+    POLARIS distributes alpha as log10(kPa^-1) -- per the readme correction of
+    2019-06-02, not the log10(cm^-1) of its early documentation -- so alpha is
+    exponentiated and divided by KPA_TO_CM to land in 1/cm. n is distributed
+    in natural scale and taken as-is.
     """
     import ee
 
@@ -181,7 +195,7 @@ def _sample_polaris_at_sites(lats, lons, sample_ids):
         if ts is not None:
             theta_s[i] = ts
         if a is not None:
-            alpha[i] = 10.0**a  # log10(1/cm) -> 1/cm
+            alpha[i] = 10.0**a / KPA_TO_CM  # log10(1/kPa) -> 1/cm
         if nv is not None:
             n_param[i] = nv  # already natural scale
 
@@ -235,11 +249,62 @@ def run_prep(args):
     )
     for k, v in pol.items():
         sites.loc[conus, k] = v
+    sites[POL_ALPHA_UNITS_COL] = "cm^-1"
     n_pol = int(np.isfinite(sites.get("pol_alpha", pd.Series(dtype=float))).sum())
     print(f"  {n_pol}/{len(conus_sites)} CONUS sites with valid POLARIS params")
 
     sites.to_parquet(str(output_path), index=False)
     print(f"\nWrote {output_path}")
+
+
+# ---------------------------------------------------------------------------
+# Fix: correct POLARIS alpha units in a pre-fix prep output
+# ---------------------------------------------------------------------------
+
+
+def fix_polaris_units_frame(vg):
+    """Return a copy of *vg* with pol_alpha corrected from 1/kPa to 1/cm.
+
+    Prep outputs written before the kPa fix exponentiated the POLARIS alpha
+    band without converting units, leaving pol_alpha high by exactly KPA_TO_CM
+    (and composed suction low by log10(KPA_TO_CM) = 1.0085). The EE sample is
+    cached and never rerun, so the correction is applied to the cached table
+    rather than by resampling. Raises ValueError on a table that already
+    carries the units marker, so the division cannot be applied twice.
+    """
+    if POL_ALPHA_UNITS_COL in vg.columns:
+        raise ValueError(
+            f"table already has '{POL_ALPHA_UNITS_COL}': pol_alpha is already "
+            "in 1/cm and must not be divided again"
+        )
+    out = vg.copy()
+    out["pol_alpha"] = out["pol_alpha"] / KPA_TO_CM
+    out[POL_ALPHA_UNITS_COL] = "cm^-1"
+    return out
+
+
+def run_fix_polaris_units(args):
+    """Correct a cached prep parquet and write it to a new path."""
+    in_path = Path(args.vg_params)
+    output_path = Path(args.output)
+    if output_path.resolve() == in_path.resolve():
+        raise SystemExit(
+            "output must differ from --vg-params: the cached EE sample stays as written"
+        )
+    if output_path.exists() and not args.overwrite:
+        print(f"Output exists: {output_path} (use --overwrite)")
+        return
+
+    vg = pd.read_parquet(in_path)
+    try:
+        fixed = fix_polaris_units_frame(vg)
+    except ValueError as exc:
+        raise SystemExit(f"{in_path}: {exc}")
+
+    n_fixed = int(np.isfinite(fixed["pol_alpha"]).sum())
+    fixed.to_parquet(str(output_path), index=False)
+    print(f"Corrected pol_alpha (/{KPA_TO_CM:.5f}) on {n_fixed} sites")
+    print(f"Wrote {output_path}")
 
 
 # ---------------------------------------------------------------------------
@@ -340,6 +405,13 @@ def run_evaluate(args):
 
     # Load site-level vG params and join
     vg = pd.read_parquet(args.vg_params)
+    if POL_ALPHA_UNITS_COL not in vg.columns:
+        raise SystemExit(
+            f"{args.vg_params} lacks '{POL_ALPHA_UNITS_COL}': it predates the "
+            "POLARIS alpha kPa->cm fix, so its composed suction would be low "
+            "by 1.0085 log10 units. Run the fix-polaris-units subcommand on "
+            "it first."
+        )
     print(f"  {len(vg)} sites with vG params")
 
     obs = rl2[["sample_id", "source", "theta", "log10_suction_cm"]].copy()
@@ -473,6 +545,24 @@ def build_parser():
     )
     p_prep.add_argument("--overwrite", action="store_true", default=None)
     p_prep.set_defaults(func=run_prep)
+
+    # --- fix-polaris-units ---
+    p_fix = sub.add_parser(
+        "fix-polaris-units",
+        help="Correct pol_alpha (1/kPa -> 1/cm) in a pre-fix prep output",
+    )
+    p_fix.add_argument(
+        "--vg-params",
+        default=os.path.join(DEFAULT_OUTPUT_DIR, "site_vg_params.parquet"),
+        help="Site-level vG params parquet written before the kPa fix",
+    )
+    p_fix.add_argument(
+        "--output",
+        required=True,
+        help="Where the corrected parquet lands (must differ from --vg-params)",
+    )
+    p_fix.add_argument("--overwrite", action="store_true", default=None)
+    p_fix.set_defaults(func=run_fix_polaris_units)
 
     # --- evaluate ---
     p_eval = sub.add_parser(

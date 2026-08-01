@@ -32,6 +32,12 @@ MPA_TO_CM = 10197.16
 # Derived, never hardcoded separately, so the two cannot drift apart.
 LOG10_MPA_TO_CM = math.log10(MPA_TO_CM)  # 4.0084792...
 
+# 1 kPa of head under the same hydrostatic definition: 10.19716 cm of water.
+# POLARIS distributes its van Genuchten alpha as log10(kPa^-1) -- per the
+# readme correction of 2019-06-02, not the cm^-1 its early documentation
+# claimed -- so this is the factor that brings it onto the pipeline's cm basis.
+KPA_TO_CM = MPA_TO_CM / 1000.0
+
 
 def suction_cm_to_mpa(suction_cm):
     """Positive suction head (cm H2O) -> signed matric potential (MPa, negative)."""
