@@ -1,4 +1,4 @@
-"""Figure 4: validation scatter -- the direct model against PTF baselines.
+"""Descriptor Fig 5: validation scatter -- the direct model against PTF baselines.
 
 Observed vs predicted matric potential for three estimators on the same
 observations: our direct quantile RF (its median, which is the released Level 1
@@ -32,7 +32,7 @@ the coverage tables the other stage-04 analyses wrote.
 
 Usage:
     uv run swapstress-figures --figure validation-scatter
-    uv run python -m swapstress.figures.fig04_validation_scatter --model-dir <dir>
+    uv run python -m swapstress.figures.fig05_ptf_comparison --model-dir <dir>
 """
 
 from __future__ import annotations
@@ -247,13 +247,13 @@ def render(df: pd.DataFrame, output_dir: str) -> Path:
     axes[0].set_ylabel(f"Predicted {style.LOG10_ABS_MPA_AXIS}")
     fig.supxlabel(f"Observed {style.LOG10_ABS_MPA_AXIS}", fontsize=style.MAX_TEXT_PT)
 
-    return style.save(fig, Path(output_dir) / "fig04_validation_scatter")
+    return style.save(fig, Path(output_dir) / "fig05_ptf_comparison")
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="fig04_validation_scatter",
-        description="Figure 4: held-out validation scatter against PTF baselines.",
+        prog="fig05_ptf_comparison",
+        description="Descriptor Fig 5: held-out validation scatter against PTF baselines.",
     )
     parser.add_argument("--model-dir", default=DEFAULT_MODEL_DIR)
     parser.add_argument("--ptf-dir", default=DEFAULT_PTF_DIR)

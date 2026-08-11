@@ -1,4 +1,4 @@
-"""Figure 3: daily matric potential at representative pixels across a gradient.
+"""Supporting analysis (was Fig 3): daily matric potential at representative pixels across a gradient.
 
 For each site, the Level 1 retrievals are drawn as points and the Level 2
 gap-filled series as a line beneath them, so a reuser can see three things at
@@ -25,7 +25,7 @@ either end of the year, and it should read as the sliver it actually is.
 
 Usage:
     uv run swapstress-figures --figure pixel-series
-    uv run python -m swapstress.figures.fig03_pixel_series --source-dir <dir>
+    uv run python -m swapstress.figures.pixel_series --source-dir <dir>
 """
 
 from __future__ import annotations
@@ -258,7 +258,7 @@ def render(span: pd.DatetimeIndex, series: list[dict], output_dir: str) -> Path:
         handletextpad=0.5,
     )
 
-    return style.save(fig, Path(output_dir) / "fig03_pixel_series")
+    return style.save(fig, Path(output_dir) / "pixel_series")
 
 
 def legend_handles() -> list:
@@ -298,9 +298,9 @@ def clamped_spans(clamped: np.ndarray) -> list[tuple[int, int]]:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="fig03_pixel_series",
+        prog="pixel_series",
         description=(
-            "Figure 3: daily matric potential at pixels across a climate gradient."
+            "Supporting analysis: daily matric potential at pixels across a climate gradient."
         ),
     )
     parser.add_argument("--source-dir", default=DEFAULT_SOURCE_DIR)

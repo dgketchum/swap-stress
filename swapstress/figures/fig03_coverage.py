@@ -1,4 +1,4 @@
-"""Figure 2: data coverage of the Level 1 product.
+"""Descriptor Fig 3: data coverage of the Level 1 product.
 
 A CONUS map of the fraction of days each pixel carries a valid raw retrieval
 over the record, with an inset time series of the daily valid-pixel count.
@@ -20,14 +20,14 @@ beside it. A product-wide statistic would be a different figure's number: the
 tropics and the high latitudes have their own revisit, and mixing them in would
 put a value in the header that nothing on the page can confirm.
 
-The frame is Conus Albers (EPSG:5070), matching Fig 6. The grid is already
+The frame is Conus Albers (EPSG:5070), matching Figs 6 and 7. The grid is already
 equal-area, and drawing it on raw lon/lat would stretch the north of the
 country sideways -- the swath geometry the figure is about would be read
 through a distortion that has nothing to do with the satellite.
 
 Usage:
     uv run swapstress-figures --figure coverage
-    uv run python -m swapstress.figures.fig02_coverage --source-dir <level1-dir>
+    uv run python -m swapstress.figures.fig03_coverage --source-dir <level1-dir>
 """
 
 from __future__ import annotations
@@ -56,9 +56,7 @@ from swapstress.figures.basemap import load_conus_states, pixel_corner_lonlat
 
 DATE_PATTERN = re.compile(r"_(\d{8})\.tif$")
 
-DEFAULT_SOURCE_DIR = (
-    "/nas/soils/swapstress/releases/global_pruned_refresh_20260520/inference_l3"
-)
+DEFAULT_SOURCE_DIR = "/nas/soils/swapstress/releases/v03_20260729/inference_conus"
 DEFAULT_OUTPUT_DIR = "figs/descriptor"
 NODATA_VALUE = -9999.0
 
@@ -69,7 +67,7 @@ NODATA_VALUE = -9999.0
 FIG_WIDTH_MM = style.DOUBLE_COLUMN_MM
 FIG_HEIGHT_MM = 115.5
 
-# NAD83 / Conus Albers, matching Fig 6. The rasters are already on an
+# NAD83 / Conus Albers, matching Figs 6 and 7. The rasters are already on an
 # equal-area grid, so drawing them equal-area keeps CONUS the shape readers
 # know; plotting straight lon/lat would stretch the north of the country
 # sideways.
@@ -357,8 +355,10 @@ def _add_daily_inset(ax, coverage: Coverage) -> None:
         pad=2.0,
         loc="left",
     )
-    inset.xaxis.set_major_formatter(mdates.DateFormatter("%b"))
-    inset.xaxis.set_major_locator(mdates.MonthLocator(interval=3))
+    # The record is eleven years; month ticks (the single-year original) shred
+    # into each other at this width, so tick alternate Januaries instead.
+    inset.xaxis.set_major_formatter(mdates.DateFormatter("%Y"))
+    inset.xaxis.set_major_locator(mdates.YearLocator(base=2))
     inset.set_yticks([0, 30, 60])
     inset.set_ylim(0.0, max(72.0, counts.max() * 1.08))
     inset.margins(x=0.01)
@@ -408,7 +408,7 @@ def render(coverage: Coverage, frame: MapFrame, output_dir: str) -> Path:
         f"median {np.median(quoted):.1%} of calendar days per pixel"
     )
     ax.set_title(
-        f"Level 1 retrieval coverage, {first:%-d %b}–{last:%-d %b %Y}; "
+        f"Level 1 retrieval coverage, {first:%-d %b %Y} – {last:%-d %b %Y}; "
         "CONUS detail of the global product\n"
         f"{coverage.n_files} daily rasters over {coverage.n_days} calendar days "
         f"({coverage.absent_days} with no overpass); median "
@@ -421,13 +421,13 @@ def render(coverage: Coverage, frame: MapFrame, output_dir: str) -> Path:
 
     _add_daily_inset(ax, coverage)
 
-    return style.save(fig, Path(output_dir) / "fig02_coverage")
+    return style.save(fig, Path(output_dir) / "fig03_coverage")
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="fig02_coverage",
-        description="Figure 2: Level 1 retrieval coverage.",
+        prog="fig03_coverage",
+        description="Descriptor Fig 3: Level 1 retrieval coverage.",
     )
     parser.add_argument(
         "--source-dir",

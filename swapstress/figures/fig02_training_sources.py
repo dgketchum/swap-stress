@@ -34,7 +34,7 @@ TRAINING_TABLE = Path(
 LAND_SUBPATH = "boundaries/natural_earth/ne_110m_land.shp"
 
 OUT_DIR = Path("figs/descriptor")
-STEM = "fig_training_sources"
+STEM = "fig02_training_sources"
 
 # Fixed source order (Table 1, descending pairs) and the five-slot palette
 # validated in that adjacency. Keys are the training table's source labels.

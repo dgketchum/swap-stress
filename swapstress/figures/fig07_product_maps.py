@@ -1,4 +1,4 @@
-"""Figure 6: the released prediction interval -- how wide, and how honest.
+"""Descriptor Fig 7 (rework pending): the released prediction interval -- how wide, and how honest.
 
 The product ships its QRF uncertainty as a quantile pair, ``q025``/``q975``, so
 the figure asks the two questions a reuser has about it.
@@ -124,7 +124,7 @@ def read_interval_width(path: Path):
     """
     if not path.exists():
         raise FileNotFoundError(
-            f"No prediction raster at {path}. Fig 6 maps the released quantile "
+            f"No prediction raster at {path}. Fig 7 maps the released quantile "
             "pair, which comes from the 0.3 release run "
             "(`swapstress-predict --release-quantiles`)."
         )
@@ -398,7 +398,7 @@ def render(width, mesh_x, mesh_y, states, coverage, by_theta, date_str, output_d
     style.panel_label(ax_theta, "c", dx=-0.22, dy=1.02)
 
     out = Path(output_dir)
-    path = style.save(fig, out / f"fig06_uncertainty_{date_str.replace('-', '')}")
+    path = style.save(fig, out / f"fig07_product_maps_{date_str.replace('-', '')}")
     print(f"Saved: {path}")
     print(f"Saved: {path.with_suffix('.pdf')}")
     return path
@@ -417,7 +417,7 @@ def build_figure(date_str, output_dir, pred_dir=PRED_DIR, error_dir=ERROR_DIR):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(
-        description="Figure 6: released prediction interval width and coverage"
+        description="Descriptor Fig 7: released prediction interval width and coverage"
     )
     parser.add_argument("--date", default="2024-07-15")
     parser.add_argument("--output-dir", default="figs/descriptor")

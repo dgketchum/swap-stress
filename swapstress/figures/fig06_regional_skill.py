@@ -1,4 +1,4 @@
-"""Figure 5. Koppen-zone transferability -- three panels.
+"""Descriptor Fig 6: Koppen-zone transferability -- three panels.
 
 a  CONUS Koppen-Geiger classes, in the standard Beck colours.
 b  Leave-one-class-out (LOCO) R² painted back onto those classes.
@@ -474,14 +474,14 @@ def build_figure(output_dir=OUT_DIR):
     style.panel_label(ax_tbl, "c", dx=0.0, dy=Y_TITLE)
 
     out_dir = Path(output_dir)
-    png = style.save(fig, out_dir / "fig05_spatial_skill")
+    png = style.save(fig, out_dir / "fig06_regional_skill")
     print(f"Saved: {png}")
     print(f"Saved: {png.with_suffix('.pdf')}")
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(
-        description="Figure 5: Koppen-zone transferability"
+        description="Descriptor Fig 6: Koppen-zone transferability"
     )
     parser.add_argument("--output-dir", default=str(OUT_DIR))
     args = parser.parse_args(argv)

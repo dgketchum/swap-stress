@@ -1,16 +1,18 @@
-"""Supporting analysis: 5-fold spatial cross-validation on MGRS tiles.
+"""Descriptor Fig 4: 5-fold spatial cross-validation on MGRS tiles.
 
 Three panels:
   a  Pooled density of all five folds' test predictions against observations
   b  CONUS map of the MGRS tiles, coloured by the fold they were held out in
   c  Per-fold metrics
 
-This backs the Technical Validation text rather than being one of the
-descriptor's Figs 1-6, so ``swapstress-figures`` renders it on request and not
-as part of ``--figure all``. It still follows ``swapstress.figures.style``: the
-same 183 mm double column, the same 7 pt ceiling and the same shared ``save``,
-so a supporting panel dropped beside a main figure does not arrive in a
-different typeface or at a different width.
+Promoted from supporting analysis to the descriptor's validation composite in
+the 2026-07-29 figure lineup. The folds are the v0.3 QRF retrained per fold
+(``configs/train_9km_global_pruned_qrf_kfold.toml``, quantile forest, median
+predictions) -- the earlier panel's numbers came from the plain RF on the old
+table and are quarantined; never point ``KFOLD_DIR`` back at a pre-v0.3 run.
+Axes present log10 |psi| in MPa; the fold predictions are stored model-native
+(log10 suction cm) and shift through ``swapstress.units`` at draw time, so R2
+and RMSE are identical in either unit.
 
 Usage:
     uv run swapstress-figures --figure kfold
@@ -35,17 +37,16 @@ from shapely.geometry import Polygon
 from swapstress.figures import style
 from swapstress.figures.basemap import states_shapefile
 from swapstress.model.data import _tile_to_fold
+from swapstress.units import log10_suction_cm_to_log10_abs_mpa
 
 # ---------------------------------------------------------------------------
 # Paths and constants
 # ---------------------------------------------------------------------------
 
-# Stage 04 writes the folds into an ``evaluation/kfold`` subdirectory; the
-# release ``evaluation/`` root also holds the L3-vs-L4 comparison, so the fold
-# directories are one level further down than they look.
-KFOLD_DIR = Path(
-    "/nas/soils/swapstress/releases/global_pruned_refresh_20260520/evaluation/kfold"
-)
+# The v0.3 QRF kfold rerun writes fold_k/ directly under the model dir, not
+# under an ``evaluation/kfold`` subdirectory as the superseded stage-04 run
+# did.
+KFOLD_DIR = Path("/nas/soils/swapstress/models/direct_qrf_9km_global_pruned_kfold")
 TRAINING_TABLE = Path(
     "/nas/soils/swapstress/training/obs_level_training_9km_global.parquet"
 )
@@ -58,10 +59,13 @@ EXCLUDE_STUSPS = {"AK", "HI", "AS", "GU", "MP", "PR", "VI"}
 
 # Fold identity is a nominal label, not a quantity, so it needs a qualitative
 # set -- and five of them, which is more than the validated categorical trio in
-# ``style`` covers. These are the Tableau 10 leading five: distinguishable
-# under the common CVD forms and used nowhere a reader must read a value off
-# them, only to tell one holdout block from its neighbour.
-FOLD_COLORS = ["#4e79a7", "#f28e2b", "#e15759", "#76b7b2", "#59a14f"]
+# ``style`` covers. Same five-slot extension of that trio as the Fig 2 source
+# palette (``training_sources.SOURCES``): the trio unchanged plus two hues,
+# validated as a set in this adjacency (worst adjacent pair dE 11.0 protan,
+# normal-vision floor 21.9). The earlier Tableau 10 leading five failed the
+# same checks (chroma floor, green-teal normal-vision dE 14.0). Folds and
+# sources share no semantics across figures; reuse keeps one validated set.
+FOLD_COLORS = ["#2166AC", "#D55E00", "#7B3294", "#117733", "#BB8800"]
 
 # Double column. The scatter is equal-aspect and the map needs the width to
 # keep 100 km tiles from merging, so the two sit side by side rather than
@@ -151,8 +155,8 @@ def load_conus_states() -> gpd.GeoDataFrame:
 
 def draw_scatter(ax, pred_df, summary):
     """Hexbin density of pooled predictions. Returns the mappable for the key."""
-    obs = pred_df["observed"].values
-    prd = pred_df["predicted"].values
+    obs = log10_suction_cm_to_log10_abs_mpa(pred_df["observed"].values)
+    prd = log10_suction_cm_to_log10_abs_mpa(pred_df["predicted"].values)
 
     hb = ax.hexbin(
         obs,
@@ -175,8 +179,8 @@ def draw_scatter(ax, pred_df, summary):
     ax.set_ylim(lo, hi)
     ax.set_aspect("equal")
 
-    ax.set_xlabel(r"Observed $\log_{10}$ suction (cm)")
-    ax.set_ylabel(r"Predicted $\log_{10}$ suction (cm)")
+    ax.set_xlabel(f"Observed {style.LOG10_ABS_MPA_AXIS}")
+    ax.set_ylabel(f"Predicted {style.LOG10_ABS_MPA_AXIS}")
 
     agg = summary["aggregated"]
     n_total = sum(f["n_test"] for f in summary["per_fold"])
@@ -377,7 +381,7 @@ def render(pred_df, summary, tiles_gdf, states, output_dir: str) -> Path:
         fontsize=style.MAX_TEXT_PT,
     )
 
-    return style.save(fig, Path(output_dir) / "kfold_validation")
+    return style.save(fig, Path(output_dir) / "fig04_kfold_validation")
 
 
 def main(argv=None):

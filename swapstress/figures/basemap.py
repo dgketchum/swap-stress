@@ -31,7 +31,7 @@ NON_CONUS = {"HI", "AK", "AS", "GU", "MP", "PR", "VI"}
 # The CONUS lon/lat window the onboarding notebooks' display helpers frame on.
 # Not what the descriptor figures clip to: each of those projects to Albers
 # (EPSG:5070) and carries its own window in its own units -- ``DRAW_BOX`` in
-# Fig 2, ``LON_MIN``/``LAT_MIN`` in Fig 5 -- so this pair is display plumbing
+# Fig 3, ``LON_MIN``/``LAT_MIN`` in Fig 6 -- so this pair is display plumbing
 # for the notebooks, not shared figure geometry.
 CONUS_LON = (-127.0, -65.0)
 CONUS_LAT = (24.0, 50.0)

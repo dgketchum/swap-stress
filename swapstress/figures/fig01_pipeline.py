@@ -1,4 +1,4 @@
-"""Figure 1: how the dataset is built.
+"""Descriptor Fig 1: how the dataset is built.
 
 A schematic of the prediction chain: static landscape covariates and daily
 SMAP L3 soil moisture enter a quantile random forest trained on harmonised
@@ -14,7 +14,7 @@ and land cover were dropped at threshold r2_drop <= 0).
 
 Gap-fill is drawn as a stage of its own rather than folded into a line of the
 product card. The Level 1 / Level 2 split is what Figs 2 and 3 are about -- Fig
-2 maps where Level 1 is sparse, Fig 3 draws Level 1 as points over the Level 2
+3 maps where Level 1 is sparse; the pixel-series supporting panel draws Level 1 over the Level 2
 line -- so the schematic has to show the two as separate things a reuser can
 download, with the rule that turns one into the other named in between.
 
@@ -457,7 +457,7 @@ def build_figure():
 
 
 def main(argv=None) -> None:
-    parser = argparse.ArgumentParser(description="Generate Fig 1: pipeline schematic")
+    parser = argparse.ArgumentParser(description="Descriptor Fig 1: pipeline schematic")
     parser.add_argument(
         "--output-dir",
         default="figs/descriptor",

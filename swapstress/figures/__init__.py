@@ -1,7 +1,7 @@
 """Figures and tables for the Scientific Data descriptor.
 
 ``fig01``-``fig06`` are the descriptor's main figures, in its own numbering;
-``kfold_validation`` and ``vg_vs_direct`` are supporting analyses that render on
+``pixel_series`` and ``vg_vs_direct`` are supporting analyses that render on
 request. All of them draw through ``style``, which carries Nature's artwork
 specification -- widths in millimetres, the 7 pt type ceiling, the shared
 palette and the ``save`` that writes at the declared size. ``run`` is the single
