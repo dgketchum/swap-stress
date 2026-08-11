@@ -642,14 +642,30 @@ def read_source_raster(path: Path) -> tuple:
     return log10, quantiles[0], quantiles[1], profile
 
 
-def derive_gapfill_flag(level2: np.ndarray, level1_path: Optional[Path]) -> np.ndarray:
+def derive_gapfill_flag(
+    level2: np.ndarray,
+    level1_path: Optional[Path],
+    whole_day_gap: bool = False,
+) -> np.ndarray:
     """Mark pixels that Level 2 has and Level 1 does not.
 
     The gapfill stage records ``is_gap_filled`` per file, which says whether a
     whole day was interpolated, not which pixels were. Comparing the two levels
     is what recovers the per-pixel answer.
+
+    ``whole_day_gap`` is for the calendar days the SMAP record simply does not
+    have -- no overpass, no granule, so inference wrote no Level 1 raster at
+    all. Every valid Level 2 pixel on such a day is interpolated by
+    construction, and the flag says so without a Level 1 file to compare
+    against. The caller asserts that state explicitly, having checked the
+    Level 1 directory really is populated for the rest of the record; a bare
+    missing file stays an error, because silently treating a misconfigured
+    ``--level1-dir`` as one long gap would flag the whole release as
+    interpolated.
     """
     filled = np.isfinite(level2) & (level2 != NODATA_VALUE)
+    if whole_day_gap:
+        return filled.astype(np.float32)
     if level1_path is None or not level1_path.exists():
         # Without the Level 1 day there is no way to tell a retrieved pixel from
         # an interpolated one, and guessing would put a wrong flag in a released
@@ -686,8 +702,15 @@ def _day_bands(
     level: int,
     level1: Optional[Path],
     require_quantiles: bool = False,
+    level1_names: Optional[set] = None,
 ) -> tuple:
-    """Read one source raster and derive its released bands."""
+    """Read one source raster and derive its released bands.
+
+    *level1_names* is the set of raster filenames the Level 1 directory holds,
+    computed once by the caller. A Level 2 day absent from a populated Level 1
+    directory is a no-overpass day -- fully interpolated -- rather than an
+    error; see :func:`derive_gapfill_flag`.
+    """
     log10, q025, q975, profile = read_source_raster(path)
     if require_quantiles and q025 is None:
         # The stacked container would catch this by refusing a day whose bands
@@ -702,7 +725,12 @@ def _day_bands(
         )
     flag = None
     if level == 2:
-        flag = derive_gapfill_flag(log10, (level1 / path.name) if level1 else None)
+        whole_day_gap = bool(level1_names) and path.name not in level1_names
+        flag = derive_gapfill_flag(
+            log10,
+            (level1 / path.name) if level1 else None,
+            whole_day_gap=whole_day_gap,
+        )
     bands = build_bands(log10, q025=q025, q975=q975, gapfill_flag=flag)
     return bands, profile, flag
 
@@ -738,6 +766,7 @@ def _package_geotiff(
     overwrite: bool,
     require_quantiles: bool,
     writer: Callable[..., Path],
+    level1_names: Optional[set] = None,
 ) -> List[Path]:
     """One file per day."""
     written: List[Path] = []
@@ -748,7 +777,9 @@ def _package_geotiff(
             print(f"  exists, skipping: {out_path.name}")
             continue
 
-        bands, profile, flag = _day_bands(path, level, level1, require_quantiles)
+        bands, profile, flag = _day_bands(
+            path, level, level1, require_quantiles, level1_names
+        )
         writer(
             out_path=out_path,
             profile=profile,
@@ -779,6 +810,7 @@ def _package_netcdf(
     require_quantiles: bool,
     source_dir: Path,
     group_by: str,
+    level1_names: Optional[set] = None,
 ) -> List[Path]:
     """One time-stacked file per group."""
     written: List[Path] = []
@@ -794,7 +826,7 @@ def _package_netcdf(
         try:
             for i, path in enumerate(paths):
                 bands, profile, flag = _day_bands(
-                    path, level, level1, require_quantiles
+                    path, level, level1, require_quantiles, level1_names
                 )
                 if stack is None:
                     stack = NetCDFStack(
@@ -873,6 +905,19 @@ def package_release(
         raise FileNotFoundError(f"No {prefix}_*.tif rasters under {source}")
     print(f"{len(rasters)} daily rasters in {source}")
 
+    # The Level 1 inventory, taken once: a Level 2 day missing from a populated
+    # Level 1 directory is a no-overpass day (fully interpolated, flagged as
+    # such), while an empty directory is a misconfiguration and stops here
+    # before any file is written.
+    level1_names: Optional[set] = None
+    if level == 2 and level1 is not None:
+        level1_names = {p.name for p in find_rasters(level1, prefix)}
+        if not level1_names:
+            raise FileNotFoundError(
+                f"No {prefix}_*.tif rasters under --level1-dir {level1}; "
+                "cannot derive gapfill_flag against an empty Level 1 record."
+            )
+
     if container == "geotiff":
         return _package_geotiff(
             rasters,
@@ -885,6 +930,7 @@ def package_release(
             overwrite,
             require_quantiles,
             writer,
+            level1_names,
         )
     if container == "netcdf":
         return _package_netcdf(
@@ -899,6 +945,7 @@ def package_release(
             require_quantiles,
             source,
             group_by,
+            level1_names,
         )
     raise ValueError(f"--container expects 'geotiff' or 'netcdf', got '{container}'")
 

@@ -246,6 +246,53 @@ class TestGapfillFlag:
         with pytest.raises(FileNotFoundError, match="gapfill_flag"):
             derive_gapfill_flag(SAMPLE, None)
 
+    def test_whole_day_gap_flags_every_valid_pixel(self):
+        """A no-overpass day has no Level 1 raster; all of Level 2 is filled."""
+        flag = derive_gapfill_flag(SAMPLE, None, whole_day_gap=True)
+        valid = SAMPLE != NODATA_VALUE
+        assert np.all(flag[valid] == 1.0)
+        assert np.all(flag[~valid] == 0.0)
+
+    def test_no_overpass_day_packages_with_full_flag(self, tmp_path):
+        """The record has calendar days with no SMAP granule at all: Level 2
+        interpolates them, Level 1 has no file. Packaging must flag the whole
+        day rather than refuse it -- but only when the Level 1 directory is
+        otherwise populated."""
+        level1 = tmp_path / "l1"
+        level2 = tmp_path / "l2"
+        level1.mkdir()
+        level2.mkdir()
+        _write_source(level1 / "suction_20240101.tif", SAMPLE)
+        _write_source(level2 / "suction_20240101.tif", SAMPLE)
+        _write_source(level2 / "suction_20240102.tif", SAMPLE)  # no L1 file
+
+        written = package_release(
+            source_dir=str(level2),
+            output_dir=str(tmp_path / "release"),
+            level=2,
+            level1_dir=str(level1),
+        )
+        with rasterio.open(written[1]) as dst:
+            names = list(dst.descriptions)
+            flag = dst.read(names.index("gapfill_flag") + 1)
+        valid = SAMPLE != NODATA_VALUE
+        assert np.all(flag[valid] == 1.0)
+
+    def test_empty_level1_dir_is_a_misconfiguration(self, tmp_path):
+        """An empty --level1-dir must not read as one long gap."""
+        level1 = tmp_path / "l1"
+        level2 = tmp_path / "l2"
+        level1.mkdir()
+        level2.mkdir()
+        _write_source(level2 / "suction_20240101.tif", SAMPLE)
+        with pytest.raises(FileNotFoundError, match="empty Level 1"):
+            package_release(
+                source_dir=str(level2),
+                output_dir=str(tmp_path / "release"),
+                level=2,
+                level1_dir=str(level1),
+            )
+
 
 class TestReadSource:
     def test_reads_log10_and_ignores_linear_band(self, tmp_path):
