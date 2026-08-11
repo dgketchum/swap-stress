@@ -25,6 +25,7 @@ from typing import List, Optional
 # Descriptor Fig 1-6 -> module providing main(argv).
 MAIN_FIGURES = {
     "pipeline": "swapstress.figures.fig01_pipeline",
+    "training-sources": "swapstress.figures.training_sources",
     "coverage": "swapstress.figures.fig02_coverage",
     "pixel-series": "swapstress.figures.fig03_pixel_series",
     "validation-scatter": "swapstress.figures.fig04_validation_scatter",
