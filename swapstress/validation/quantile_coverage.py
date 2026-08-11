@@ -1,9 +1,10 @@
 """Prediction interval coverage (PICP) for the QRF on the spatial holdout.
 
-The product ships a QRF prediction interval as the ``log10_suction_cm_q025`` /
-``log10_suction_cm_q975`` pair, so the descriptor has to say whether that
-interval is honest: of the held-out observations, what fraction actually fall
-inside it. That fraction is the prediction interval coverage probability, PICP,
+The product ships a QRF prediction interval as the ``matric_potential_MPa_q025``
+/ ``matric_potential_MPa_q975`` pair (an exact transform of the model-native
+log10-cm pair, evaluated here in log space where coverage is identical), so the
+descriptor has to say whether that interval is honest: of the held-out
+observations, what fraction actually fall inside it. That fraction is the prediction interval coverage probability, PICP,
 and a nominal 95% interval covering ~94% is the number SWSM reports and the one
 Fig 6 quotes.
 

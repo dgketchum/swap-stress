@@ -1,8 +1,10 @@
 """Tests for swapstress.inference.product — the released band stack.
 
 The gate for this stage is the round trip: write the product, read it back, and
-confirm the MPa band is exactly the documented function of the model's own
-output and is negative everywhere it is valid.
+confirm the MPa bands are exactly the documented function of the model's own
+output and negative everywhere valid. The one subtlety worth its own tests is
+the quantile swap: negation reverses quantile order, so the released q025 band
+must come from the model-native q975 raster and vice versa.
 """
 
 import numpy as np
@@ -15,6 +17,8 @@ from swapstress.inference.product import (
     CHUNK_Y,
     FLAG_FILL_VALUE,
     GRID_EPSG,
+    MPA_Q025,
+    MPA_Q975,
     NODATA_VALUE,
     Q025_BAND_NAME,
     Q975_BAND_NAME,
@@ -58,6 +62,11 @@ def _interval(data, below=0.20, above=0.55):
     return low, high
 
 
+def _mpa(log10):
+    """The documented conversion, model-native log10 cm -> signed MPa."""
+    return -np.power(10.0, np.asarray(log10, dtype=np.float64)) / MPA_TO_CM
+
+
 def _profile(shape):
     height, width = shape
     return {
@@ -83,44 +92,34 @@ def _write_source(path, data, descriptions=("log10_suction_cm",)):
 
 
 class TestBuildBands:
-    def test_default_band_order(self):
+    def test_median_only_run_is_one_band(self):
         bands = build_bands(SAMPLE)
-        assert [s.name for s in bands.specs] == [
-            "log10_suction_cm",
-            "matric_potential_MPa",
-            "suction_cm",
-        ]
+        assert [s.name for s in bands.specs] == ["matric_potential_MPa"]
 
     def test_mpa_is_the_documented_conversion(self):
         bands = build_bands(SAMPLE)
         valid = bands.valid
-        expected = -np.power(10.0, SAMPLE[valid].astype(np.float64)) / MPA_TO_CM
         assert bands.band("matric_potential_MPa")[valid] == pytest.approx(
-            expected, rel=1e-6
+            _mpa(SAMPLE[valid]), rel=1e-6
         )
 
     def test_mpa_is_negative_everywhere_valid(self):
         bands = build_bands(SAMPLE)
         assert np.all(bands.band("matric_potential_MPa")[bands.valid] < 0)
 
-    def test_suction_is_positive_everywhere_valid(self):
-        bands = build_bands(SAMPLE)
-        assert np.all(bands.band("suction_cm")[bands.valid] > 0)
-
     def test_nodata_is_not_exponentiated(self):
         """10 ** -9999 is 0.0, which would read as perfectly wet soil."""
         bands = build_bands(SAMPLE)
         gap = ~bands.valid
         assert gap.sum() == 1
-        for name in ("log10_suction_cm", "matric_potential_MPa", "suction_cm"):
-            assert np.all(bands.band(name)[gap] == NODATA_VALUE)
+        assert np.all(bands.band("matric_potential_MPa")[gap] == NODATA_VALUE)
 
     def test_nan_counts_as_invalid(self):
         data = SAMPLE.copy()
         data[0, 0] = np.nan
         bands = build_bands(data)
         assert not bands.valid[0, 0]
-        assert bands.band("suction_cm")[0, 0] == NODATA_VALUE
+        assert bands.band("matric_potential_MPa")[0, 0] == NODATA_VALUE
 
     def test_wilting_point_is_minus_1p5_mpa(self):
         """4.18 is the rounded figure quoted in the docs; this is the exact one."""
@@ -159,18 +158,15 @@ class TestRoundTrip:
 
         with rasterio.open(out) as src:
             names = list(src.descriptions)
-            log10 = src.read(names.index("log10_suction_cm") + 1)
             mpa = src.read(names.index("matric_potential_MPa") + 1)
-            suction = src.read(names.index("suction_cm") + 1)
             nodata = src.nodata
 
-        valid = log10 != nodata
-        expected = -np.power(10.0, log10[valid].astype(np.float64)) / MPA_TO_CM
-        assert mpa[valid] == pytest.approx(expected, rel=1e-6)
-        assert np.all(mpa[valid] < 0)
-        assert suction[valid] == pytest.approx(
-            np.power(10.0, log10[valid].astype(np.float64)), rel=1e-6
+        valid = mpa != nodata
+        assert valid.sum() == bands.valid.sum()
+        assert mpa[valid] == pytest.approx(
+            _mpa(SAMPLE[bands.valid]).astype(np.float32), rel=1e-6
         )
+        assert np.all(mpa[valid] < 0)
 
     def test_grid_and_nodata_are_preserved(self, tmp_path):
         out = write_geotiff(
@@ -183,7 +179,7 @@ class TestRoundTrip:
         with rasterio.open(out) as src:
             assert src.crs.to_epsg() == 6933
             assert src.nodata == NODATA_VALUE
-            assert src.count == 3
+            assert src.count == 1
 
     def test_band_metadata_is_written(self, tmp_path):
         out = write_geotiff(
@@ -196,7 +192,7 @@ class TestRoundTrip:
         )
         with rasterio.open(out) as src:
             file_tags = src.tags()
-            mpa_tags = src.tags(2)
+            mpa_tags = src.tags(1)
 
         assert file_tags["Conventions"].startswith("CF-")
         assert file_tags["product_level"] == "1"
@@ -215,7 +211,7 @@ class TestRoundTrip:
             date_str="20240101",
         )
         with rasterio.open(out) as src:
-            assert "standard_name" not in src.tags(2)
+            assert "standard_name" not in src.tags(1)
 
     def test_standard_name_written_when_pinned(self, tmp_path):
         out = write_geotiff(
@@ -227,7 +223,7 @@ class TestRoundTrip:
             standard_names={"matric_potential_MPa": "soil_water_potential"},
         )
         with rasterio.open(out) as src:
-            assert src.tags(2)["standard_name"] == "soil_water_potential"
+            assert src.tags(1)["standard_name"] == "soil_water_potential"
 
 
 class TestGapfillFlag:
@@ -343,56 +339,84 @@ class TestQuantilePair:
 
     Width is derivable from the pair and the pair is not derivable from a
     width, so the pair is what ships. These tests hold that line -- both bands
-    present or neither, in the model's own units, bracketing the median.
+    present or neither, in signed MPa, bracketing the median -- and pin the
+    swap: negation reverses quantile order, so the released q025 band is the
+    transform of the model-native q975 raster and vice versa.
     """
 
-    def test_band_names_are_the_levels_in_per_mille(self):
+    def test_source_band_names_are_the_levels_in_per_mille(self):
         assert quantile_band_name(0.025) == "log10_suction_cm_q025"
         assert quantile_band_name(0.975) == "log10_suction_cm_q975"
         assert (Q025_BAND_NAME, Q975_BAND_NAME) == tuple(
             quantile_band_name(q) for q in QUANTILE_LEVELS
         )
 
-    def test_pair_follows_the_three_representations(self):
+    def test_released_band_order(self):
         low, high = _interval(SAMPLE)
         bands = build_bands(SAMPLE, q025=low, q975=high)
         assert [s.name for s in bands.specs] == [
-            "log10_suction_cm",
             "matric_potential_MPa",
-            "suction_cm",
-            Q025_BAND_NAME,
-            Q975_BAND_NAME,
+            "matric_potential_MPa_q025",
+            "matric_potential_MPa_q975",
         ]
 
-    def test_pair_is_in_the_model_s_own_units(self):
+    def test_the_bounds_trade_places_under_the_sign_change(self):
+        """Released q025 <- source q975, released q975 <- source q025.
+
+        The driest suction quantile is the most negative matric potential.
+        A naive per-band conversion would label the upper bound q025.
+        """
         low, high = _interval(SAMPLE)
         bands = build_bands(SAMPLE, q025=low, q975=high)
-        for name in (Q025_BAND_NAME, Q975_BAND_NAME):
+        valid = bands.valid
+        assert bands.band("matric_potential_MPa_q025")[valid] == pytest.approx(
+            _mpa(high[valid]).astype(np.float32), rel=1e-6
+        )
+        assert bands.band("matric_potential_MPa_q975")[valid] == pytest.approx(
+            _mpa(low[valid]).astype(np.float32), rel=1e-6
+        )
+
+    def test_released_pair_brackets_the_released_median(self):
+        low, high = _interval(SAMPLE)
+        bands = build_bands(SAMPLE, q025=low, q975=high)
+        valid = bands.valid
+        median = bands.band("matric_potential_MPa")[valid]
+        assert np.all(bands.band("matric_potential_MPa_q025")[valid] <= median)
+        assert np.all(median <= bands.band("matric_potential_MPa_q975")[valid])
+
+    def test_pair_is_signed_mpa(self):
+        low, high = _interval(SAMPLE)
+        bands = build_bands(SAMPLE, q025=low, q975=high)
+        for name in ("matric_potential_MPa_q025", "matric_potential_MPa_q975"):
             spec = bands.specs[bands.index(name)]
-            assert spec.units == "log10(cm)"
-            assert spec.sign == "positive"
+            assert spec.units == "MPa"
+            assert spec.sign == "negative"
             assert spec.dtype == "float32"
             assert spec.fill_value == NODATA_VALUE
+            assert np.all(bands.band(name)[bands.valid] < 0)
 
-    def test_width_is_recoverable_from_the_pair(self):
+    def test_log_width_is_recoverable_from_the_pair(self):
+        """log10|q025| - log10|q975| recovers the model-native log-space width."""
         low, high = _interval(SAMPLE, below=0.20, above=0.55)
         bands = build_bands(SAMPLE, q025=low, q975=high)
         valid = bands.valid
-        width = bands.band(Q975_BAND_NAME)[valid] - bands.band(Q025_BAND_NAME)[valid]
-        assert width == pytest.approx(0.75, rel=1e-5)
+        width = np.log10(-bands.band("matric_potential_MPa_q025")[valid]) - np.log10(
+            -bands.band("matric_potential_MPa_q975")[valid]
+        )
+        assert width == pytest.approx(0.75, rel=1e-4)
 
     def test_gap_pixels_stay_gaps(self):
         low, high = _interval(SAMPLE)
         bands = build_bands(SAMPLE, q025=low, q975=high)
         gap = ~bands.valid
         assert gap.sum() == 1
-        for name in (Q025_BAND_NAME, Q975_BAND_NAME):
+        for name in ("matric_potential_MPa_q025", "matric_potential_MPa_q975"):
             assert np.all(bands.band(name)[gap] == NODATA_VALUE)
 
     def test_absent_pair_is_a_run_without_quantiles(self):
         """A non-quantile run is a legitimate product, just without an interval."""
         names = [s.name for s in build_bands(SAMPLE).specs]
-        assert Q025_BAND_NAME not in names and Q975_BAND_NAME not in names
+        assert names == ["matric_potential_MPa"]
 
     @pytest.mark.parametrize("given", ["q025", "q975"])
     def test_half_a_pair_raises(self, given):
@@ -402,7 +426,7 @@ class TestQuantilePair:
             build_bands(SAMPLE, **kwargs)
 
     def test_a_pair_that_does_not_bracket_the_median_raises(self):
-        """q025 above the median means the bands were paired up wrongly."""
+        """Source q025 above the median means the bands were paired up wrongly."""
         low, high = _interval(SAMPLE)
         with pytest.raises(ValueError, match="does not bracket the median"):
             build_bands(SAMPLE, q025=high, q975=low)
@@ -411,7 +435,9 @@ class TestQuantilePair:
         """A degenerate interval is unusual, not invalid."""
         bands = build_bands(SAMPLE, q025=SAMPLE.copy(), q975=SAMPLE.copy())
         valid = bands.valid
-        assert np.all(bands.band(Q025_BAND_NAME)[valid] == SAMPLE[valid])
+        assert bands.band("matric_potential_MPa_q025")[valid] == pytest.approx(
+            bands.band("matric_potential_MPa")[valid]
+        )
 
     def test_nodata_in_one_quantile_where_the_median_is_valid_raises(self):
         low, high = _interval(SAMPLE)
@@ -431,19 +457,19 @@ class TestQuantilePair:
         )
         with rasterio.open(out) as src:
             names = list(src.descriptions)
-            log10 = src.read(names.index("log10_suction_cm") + 1)
-            q025 = src.read(names.index(Q025_BAND_NAME) + 1)
-            q975 = src.read(names.index(Q975_BAND_NAME) + 1)
-            tags = src.tags(names.index(Q025_BAND_NAME) + 1)
-            assert src.dtypes[names.index(Q975_BAND_NAME)] == "float32"
+            mpa = src.read(names.index("matric_potential_MPa") + 1)
+            q025 = src.read(names.index(MPA_Q025.name) + 1)
+            q975 = src.read(names.index(MPA_Q975.name) + 1)
+            tags = src.tags(names.index(MPA_Q025.name) + 1)
+            assert src.dtypes[names.index(MPA_Q975.name)] == "float32"
             assert src.nodata == NODATA_VALUE
 
-        valid = log10 != NODATA_VALUE
-        assert np.all(q025[valid] <= log10[valid])
-        assert np.all(log10[valid] <= q975[valid])
+        valid = mpa != NODATA_VALUE
+        assert np.all(q025[valid] <= mpa[valid])
+        assert np.all(mpa[valid] <= q975[valid])
         assert np.all(q025[~valid] == NODATA_VALUE)
-        assert tags["units"] == "log10(cm)"
-        assert tags["sign_convention"] == "positive"
+        assert tags["units"] == "MPa"
+        assert tags["sign_convention"] == "negative"
         assert tags["_FillValue"] == str(NODATA_VALUE)
 
     def test_survives_the_netcdf_round_trip(self, tmp_path):
@@ -461,19 +487,21 @@ class TestQuantilePair:
         )
         with netCDF4.Dataset(written[0]) as ds:
             ds.set_auto_mask(False)
-            var = ds[Q975_BAND_NAME]
+            var = ds[MPA_Q975.name]
             assert var.dtype == np.float32
             assert var._FillValue == np.float32(NODATA_VALUE)
-            assert var.units == "log10(cm)"
+            assert var.units == "MPa"
             assert var.grid_mapping == "crs"
-            log10 = ds["log10_suction_cm"][0]
-            q025 = ds[Q025_BAND_NAME][0]
+            mpa = ds["matric_potential_MPa"][0]
+            q025 = ds[MPA_Q025.name][0]
             q975 = var[0]
 
-        valid = log10 != NODATA_VALUE
-        np.testing.assert_allclose(q975[valid] - q025[valid], 0.75, rtol=1e-5)
-        assert np.all(q025[valid] <= log10[valid])
-        assert np.all(log10[valid] <= q975[valid])
+        valid = mpa != NODATA_VALUE
+        np.testing.assert_allclose(
+            np.log10(-q025[valid]) - np.log10(-q975[valid]), 0.75, rtol=1e-4
+        )
+        assert np.all(q025[valid] <= mpa[valid])
+        assert np.all(mpa[valid] <= q975[valid])
 
     def test_packaging_carries_the_pair_end_to_end(self, tmp_path):
         src = tmp_path / "inference"
@@ -488,8 +516,9 @@ class TestQuantilePair:
             source_dir=str(src), output_dir=str(tmp_path / "release"), level=1
         )
         with rasterio.open(written[0]) as dst:
-            assert Q025_BAND_NAME in dst.descriptions
-            assert Q975_BAND_NAME in dst.descriptions
+            assert MPA_Q025.name in dst.descriptions
+            assert MPA_Q975.name in dst.descriptions
+            assert Q025_BAND_NAME not in dst.descriptions
 
 
 class TestRequireQuantiles:
@@ -517,7 +546,7 @@ class TestRequireQuantiles:
             str(self._median_only(tmp_path)), str(tmp_path / "out"), level=1
         )
         with rasterio.open(written[0]) as dst:
-            assert Q025_BAND_NAME not in dst.descriptions
+            assert list(dst.descriptions) == ["matric_potential_MPa"]
 
     def test_geotiff_refuses_a_day_without_the_pair(self, tmp_path):
         with pytest.raises(ValueError, match="no quantile bands"):
@@ -560,7 +589,22 @@ class TestRequireQuantiles:
             require_quantiles=True,
         )
         with rasterio.open(written[0]) as dst:
-            assert Q025_BAND_NAME in dst.descriptions
+            assert MPA_Q025.name in dst.descriptions
+
+    def test_refused_outright_at_level_2(self, tmp_path):
+        """Gapfill is single-band by design; the interval ships at Level 1 only.
+
+        Failing per-file with re-run-inference advice would send the operator
+        the wrong way, so the combination is rejected before any file is read.
+        """
+        with pytest.raises(ValueError, match="Level 1 only"):
+            package_release(
+                str(self._median_only(tmp_path)),
+                str(tmp_path / "out"),
+                level=2,
+                level1_dir=str(tmp_path / "l1"),
+                require_quantiles=True,
+            )
 
 
 class TestHelpers:
@@ -582,24 +626,6 @@ class TestHelpers:
     def test_parse_standard_names_rejects_malformed(self):
         with pytest.raises(SystemExit, match="BAND=NAME"):
             parse_standard_names(["nope"])
-
-
-class TestLinearSuctionBand:
-    """suction_cm is an exact transform and the first band worth dropping."""
-
-    def test_included_by_default(self):
-        assert "suction_cm" in [s.name for s in build_bands(SAMPLE).specs]
-
-    def test_can_be_dropped(self):
-        bands = build_bands(SAMPLE, include_linear_suction=False)
-        names = [s.name for s in bands.specs]
-        assert names == ["log10_suction_cm", "matric_potential_MPa"]
-
-    def test_dropping_it_leaves_the_others_untouched(self):
-        full = build_bands(SAMPLE)
-        lean = build_bands(SAMPLE, include_linear_suction=False)
-        for name in ("log10_suction_cm", "matric_potential_MPa"):
-            np.testing.assert_array_equal(full.band(name), lean.band(name))
 
 
 class TestGridMetadata:
@@ -677,11 +703,11 @@ class TestNetCDFRelease:
         written = self._release(tmp_path)
         with netCDF4.Dataset(written[0]) as ds:
             ds.set_auto_mask(False)
-            log10 = ds["log10_suction_cm"][0]
             mpa = ds["matric_potential_MPa"][0]
-        valid = log10 != NODATA_VALUE
-        expected = -np.power(10.0, log10[valid].astype(np.float64)) / MPA_TO_CM
-        np.testing.assert_allclose(mpa[valid], expected, rtol=1e-6)
+        valid = SAMPLE != NODATA_VALUE
+        np.testing.assert_allclose(
+            mpa[valid], _mpa(SAMPLE[valid]).astype(np.float32), rtol=1e-6
+        )
         assert (mpa[valid] < 0).all()
         assert (mpa[~valid] == NODATA_VALUE).all()
 
@@ -709,14 +735,14 @@ class TestNetCDFRelease:
             assert ds.Conventions == "CF-1.10"
             assert ds.time_coverage_start == "20240101"
             assert ds.time_coverage_end == "20240102"
-            assert ds["log10_suction_cm"].grid_mapping == "crs"
+            assert ds["matric_potential_MPa"].grid_mapping == "crs"
             assert ds["crs"].epsg_code == f"EPSG:{GRID_EPSG}"
 
     def test_chunking_clamps_to_the_array(self, tmp_path):
         netCDF4 = pytest.importorskip("netCDF4")
         written = self._release(tmp_path)
         with netCDF4.Dataset(written[0]) as ds:
-            time_chunk, y_chunk, x_chunk = ds["log10_suction_cm"].chunking()
+            time_chunk, y_chunk, x_chunk = ds["matric_potential_MPa"].chunking()
         assert time_chunk == 1  # one day in the file
         assert y_chunk == min(CHUNK_Y, SAMPLE.shape[0])
         assert x_chunk == min(CHUNK_X, SAMPLE.shape[1])
@@ -759,10 +785,11 @@ class TestNetCDFRelease:
         """Point time series in one read is why the deposit is stacked."""
         xr = pytest.importorskip("xarray")
         written = self._release(tmp_path, dates=("20240101", "20240102"))
+        expected = float(_mpa(np.float32(5.0)))
         with xr.open_dataset(written[0], decode_coords="all") as ds:
-            series = ds["log10_suction_cm"].isel(y=0, x=0)
+            series = ds["matric_potential_MPa"].isel(y=0, x=0)
             assert series.sizes == {"time": 2}
-            assert series.values == pytest.approx([5.0, 5.0])
+            assert series.values == pytest.approx([expected, expected], rel=1e-6)
             assert str(ds["time"].values[0])[:10] == "2024-01-01"
 
 

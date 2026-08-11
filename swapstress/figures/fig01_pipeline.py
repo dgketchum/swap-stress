@@ -4,11 +4,11 @@ A schematic of the prediction chain: static landscape covariates and daily
 SMAP L3 soil moisture enter a quantile random forest trained on harmonised
 (theta, suction) pairs, which emits a median and a 95% prediction interval on
 the days SMAP retrieved -- Level 1 -- and, after a temporal gap-fill, a value
-for every calendar day -- Level 2. Matric potential in megapascals is the unit
-the descriptor presents throughout, so both released levels are labelled in it;
-the two band names stay on the card as the file spec, with
-``log10_suction_cm`` marked for what it is -- the model's native target, not
-the unit a reuser is asked to read.
+for every calendar day -- Level 2. Matric potential in signed MPa is the only
+unit the released files carry (the model-native log10 suction is internal), so
+the cards name the released bands: the median plus its q025/q975 pair at
+Level 1, the median plus ``gapfill_flag`` at Level 2 -- the interval ships at
+Level 1 only, because on a filled day the model never ran.
 Feature groups reflect the global-pruned ablation (sentinel-1, SMAP climatology
 and land cover were dropped at threshold r2_drop <= 0).
 
@@ -386,7 +386,7 @@ def build_figure():
         NEUTRAL,
         [
             ("Level 1", TITLE_PT, "bold", INK),
-            ("QRF median ψ + q025 / q975", BODY_PT, "normal", BODY_INK),
+            ("QRF median ψ + q025 / q975 (MPa)", BODY_PT, "normal", BODY_INK),
             ("9 km, 2015–present", BODY_PT, "normal", BODY_INK),
             (f"{VALID_PIXELS} land pixels", BODY_PT, "normal", BODY_INK),
             ("Retrieval days only", NOTE_PT, "normal", BODY_INK),
@@ -420,8 +420,7 @@ def build_figure():
         [
             ("Level 2", TITLE_PT, "bold", INK),
             ("Gap-filled daily median ψ (MPa)", BODY_PT, "normal", BODY_INK),
-            ("matric_potential_MPa (negative)", BODY_PT, "normal", BODY_INK),
-            ("log10_suction_cm (model target)", BODY_PT, "normal", BODY_INK),
+            ("median + gapfill_flag; interval in L1", BODY_PT, "normal", BODY_INK),
             ("Same grid, every calendar day", NOTE_PT, "normal", BODY_INK),
         ],
         fill=0.13,
