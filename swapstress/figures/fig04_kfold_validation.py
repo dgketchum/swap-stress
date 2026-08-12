@@ -153,8 +153,13 @@ def load_conus_states() -> gpd.GeoDataFrame:
 # ---------------------------------------------------------------------------
 
 
-def draw_scatter(ax, pred_df, summary):
-    """Hexbin density of pooled predictions. Returns the mappable for the key."""
+def draw_scatter(ax, pred_df):
+    """Hexbin density of pooled predictions. Returns the mappable for the key.
+
+    No metric annotation here: the panel shows the pooled cloud, but the fold
+    summaries are per-fold statistics, and panel c already states them --
+    printing them on the pooled density would read as describing it.
+    """
     obs = log10_suction_cm_to_log10_abs_mpa(pred_df["observed"].values)
     prd = log10_suction_cm_to_log10_abs_mpa(pred_df["predicted"].values)
 
@@ -182,22 +187,6 @@ def draw_scatter(ax, pred_df, summary):
     ax.set_xlabel(f"Observed {style.LOG10_ABS_MPA_AXIS}")
     ax.set_ylabel(f"Predicted {style.LOG10_ABS_MPA_AXIS}")
 
-    agg = summary["aggregated"]
-    n_total = sum(f["n_test"] for f in summary["per_fold"])
-    ax.text(
-        0.04,
-        0.96,
-        f"R$^2$ = {agg['r2']['mean']:.3f} ± {agg['r2']['std']:.3f}\n"
-        f"RMSE = {agg['rmse']['mean']:.3f} ± {agg['rmse']['std']:.3f}\n"
-        f"n = {n_total:,}",
-        transform=ax.transAxes,
-        va="top",
-        ha="left",
-        fontsize=BODY_PT,
-        linespacing=1.35,
-        zorder=6,
-        bbox=dict(facecolor="white", alpha=0.8, edgecolor="none", pad=1.2),
-    )
     ax.set_title("Observed vs predicted, all holdouts", loc="left", pad=2.5)
     style.panel_label(ax, "a", dx=-0.14, dy=1.02)
     return hb
@@ -209,9 +198,12 @@ def draw_scatter(ax, pred_df, summary):
 
 
 def draw_tile_map(ax, tiles_gdf, states):
-    """CONUS map of MGRS tiles rendered as true 100 km grid polygons."""
-    states.boundary.plot(ax=ax, color="0.65", linewidth=0.3)
+    """CONUS map of MGRS tiles rendered as true 100 km grid polygons.
 
+    Drawn in EPSG:5070 so the silhouette matches the other CONUS maps (Figs
+    3, 6 and 7), with the state boundaries painted after the tiles so the
+    geographic context sits on top rather than under the blocks.
+    """
     # Filter to CONUS on each tile's bounding-box midpoint. A true centroid of
     # a lon/lat polygon is what geopandas warns about, and this is only a
     # coarse "is the tile in the country" test -- the midpoint answers it
@@ -221,6 +213,9 @@ def draw_tile_map(ax, tiles_gdf, states):
     mid_lat = (box["miny"] + box["maxy"]) / 2.0
     conus = tiles_gdf[mid_lat.between(24, 50) & mid_lon.between(-125, -66)].copy()
 
+    conus = conus.to_crs("EPSG:5070")
+    states = states.to_crs("EPSG:5070")
+
     for k in range(N_FOLDS):
         conus[conus["fold"] == k].plot(
             ax=ax,
@@ -228,12 +223,16 @@ def draw_tile_map(ax, tiles_gdf, states):
             edgecolor="white",
             linewidth=0.25,
             alpha=0.75,
-            zorder=3,
+            zorder=2,
         )
+    states.boundary.plot(ax=ax, color="0.65", linewidth=0.3, zorder=3)
 
-    ax.set_xlim(-126, -65)
-    ax.set_ylim(23, 51)
-    ax.set_aspect(1.3)
+    x0, y0, x1, y1 = states.total_bounds
+    pad_x = 0.01 * (x1 - x0)
+    pad_y = 0.01 * (y1 - y0)
+    ax.set_xlim(x0 - pad_x, x1 + pad_x)
+    ax.set_ylim(y0 - pad_y, y1 + pad_y)
+    ax.set_aspect("equal")
     ax.set_xticks([])
     ax.set_yticks([])
     for spine in ax.spines.values():
@@ -246,7 +245,7 @@ def draw_tile_map(ax, tiles_gdf, states):
                 edgecolor="white",
                 linewidth=0.25,
                 alpha=0.75,
-                label=f"Fold {k}",
+                label=f"Fold {k + 1}",
             )
             for k in range(N_FOLDS)
         ],
@@ -313,7 +312,8 @@ def draw_table(ax, summary):
         for cx, txt in zip(
             col_x,
             [
-                str(f["fold"]),
+                # Displayed 1-based; the stored fold indices stay 0-based.
+                str(f["fold"] + 1),
                 f"{f['r2']:.3f}",
                 f"{f['rmse']:.3f}",
                 f"{f['n_test']:,}",
@@ -362,7 +362,7 @@ def render(pred_df, summary, tiles_gdf, states, output_dir: str) -> Path:
     ax_map = fig.add_subplot(gs[0, 1])
     ax_table = fig.add_subplot(gs[1, 1])
 
-    hb = draw_scatter(ax_scatter, pred_df, summary)
+    hb = draw_scatter(ax_scatter, pred_df)
     draw_tile_map(ax_map, tiles_gdf, states)
     draw_table(ax_table, summary)
 
@@ -375,11 +375,6 @@ def render(pred_df, summary, tiles_gdf, states, output_dir: str) -> Path:
     bar.ax.tick_params(labelsize=BODY_PT, length=1.8, width=0.4, pad=1.5)
     bar.outline.set_linewidth(0.4)
     bar.outline.set_edgecolor(style.AXIS_COLOR)
-
-    fig.suptitle(
-        "5-fold spatial cross-validation on MGRS tiles (100 km blocks)",
-        fontsize=style.MAX_TEXT_PT,
-    )
 
     return style.save(fig, Path(output_dir) / "fig04_kfold_validation")
 
