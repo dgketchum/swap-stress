@@ -13,7 +13,7 @@ b  95% prediction-interval width for the same days. The map is the monthly mean
    spatially structured rather than flat: the interval is a per-pixel statement
    tracking soil and climate gradients, not a global error bar quoted once.
    Drawn in ``style.SEQUENTIAL_ALT`` (single-hue purples) rather than the
-   median's cividis, so yellow does not mean "dry" on one map and "uncertain"
+   median's viridis, so yellow does not mean "dry" on one map and "uncertain"
    on the other.
 
 Land the month never retrieved is filled ``style.NO_DATA_GRAY`` and keyed once
@@ -329,7 +329,7 @@ def render(median, width, n_days, mesh_x, mesh_y, states, month, output_dir):
         borderaxespad=0.1,
     )
 
-    # A second sequential ramp for the width: with cividis on both panels,
+    # A second sequential ramp for the width: with viridis on both panels,
     # yellow would mean "dry" on one map and "uncertain" on the other.
     mesh_w = draw_map(
         ax_width,

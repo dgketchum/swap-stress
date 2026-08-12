@@ -70,9 +70,13 @@ CATEGORICAL = ("#2166AC", "#D55E00", "#7B3294")
 
 # Perceptually uniform and CVD-safe. Sequential for magnitude; diverging only
 # where zero or a midpoint means something, with its neutral in the middle.
-SEQUENTIAL = "cividis"
+# Viridis rather than cividis (2026-08-12): the same uniformity and CVD safety
+# without cividis's drab, gray-shouldered midsection, which also sat too close
+# to NO_DATA_GRAY on the maps. It never touches white, keeping white free for
+# water and outside-domain.
+SEQUENTIAL = "viridis"
 # Second sequential ramp for when two magnitude fields share a figure and must
-# not share a semantic (Fig 7 maps interval width beside the cividis median;
+# not share a semantic (Fig 7 maps interval width beside the viridis median;
 # one ramp would give yellow two meanings). Single hue, monotonic lightness.
 # Truncated so the low end is a visibly tinted lavender rather than white:
 # on the maps, white is reserved for water and outside-domain background, so
