@@ -2,14 +2,22 @@
 
 Two maps of the same month, side by side, from the Level 1 record:
 
-a  Median matric potential, July 2023. The per-pixel mean over the month's
-   SMAP retrieval days of the released median, presented as log10|psi| in MPa.
-   This is the product's central statement: dry (yellow) in the interior West,
-   wet (dark) in the East -- the psi field a reuser would actually take.
+a  Matric potential, July 2023: the per-pixel mean over the month's SMAP
+   retrieval days of the released daily QRF median, presented as log10|psi| in
+   MPa. This is the product's central statement: dry (yellow) in the interior
+   West, wet (dark) in the East -- the psi field a reuser would actually take.
+   The title carries no statistic word because "median" up front reads as a
+   temporal median; the caption defines the aggregation.
 b  95% prediction-interval width for the same days. The map is the monthly mean
    of ``q975 - q025`` in log10 units. The point is that the uncertainty is
    spatially structured rather than flat: the interval is a per-pixel statement
    tracking soil and climate gradients, not a global error bar quoted once.
+   Drawn in ``style.SEQUENTIAL_ALT`` (single-hue purples) rather than the
+   median's cividis, so yellow does not mean "dry" on one map and "uncertain"
+   on the other.
+
+Land the month never retrieved is filled ``style.NO_DATA_GRAY`` and keyed once
+in panel a; white stays reserved for water and land outside the domain.
 
 A monthly composite rather than a single day, because Level 1 follows the SMAP
 swath: any one day is stripes, and the stripes are about orbit geometry, not
@@ -51,6 +59,7 @@ import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 import rasterio
+from matplotlib.patches import Patch
 from pyproj import Transformer
 
 from swapstress.figures import style
@@ -215,13 +224,20 @@ def robust_limits(field, step=0.05):
     return float(np.floor(lo / step) * step), float(np.ceil(hi / step) * step)
 
 
-def draw_map(ax, mesh_x, mesh_y, field, states, extent, vmin, vmax):
-    """A CONUS field under recessive state outlines."""
+def draw_map(ax, mesh_x, mesh_y, field, states, extent, vmin, vmax, cmap):
+    """A CONUS field under recessive state outlines.
+
+    The states are filled ``style.NO_DATA_GRAY`` under the mesh, so land the
+    month never retrieved reads as gray rather than borrowing white from the
+    water and outside-domain background -- the set-wide missing-data
+    convention, keyed once in panel a.
+    """
+    states.plot(ax=ax, facecolor=style.NO_DATA_GRAY, edgecolor="none", zorder=0.5)
     mesh = ax.pcolormesh(
         mesh_x,
         mesh_y,
         field,
-        cmap=style.SEQUENTIAL,
+        cmap=cmap,
         vmin=vmin,
         vmax=vmax,
         shading="flat",
@@ -276,21 +292,54 @@ def render(median, width, n_days, mesh_x, mesh_y, states, month, output_dir):
     extent = padded_extent(states.total_bounds)
 
     mesh_m = draw_map(
-        ax_median, mesh_x, mesh_y, median, states, extent, *robust_limits(median)
+        ax_median,
+        mesh_x,
+        mesh_y,
+        median,
+        states,
+        extent,
+        *robust_limits(median),
+        cmap=style.SEQUENTIAL,
     )
     # The month lives in the title rather than a corner note: land fills the
     # frame on this window, so any in-axes annotation sits on data pixels.
-    # Panel b shares the composite, and its caption says so.
+    # "Matric potential" without a statistic -- "median" up front reads as a
+    # temporal median, when the field is the monthly mean of the daily QRF
+    # medians; the caption defines the aggregation.
     ax_median.set_title(
-        f"Median matric potential, {month_title(month)}",
+        f"Matric potential, {month_title(month)}",
         fontsize=style.MAX_TEXT_PT,
         pad=2.5,
     )
     style.panel_label(ax_median, "a", dx=0.0, dy=1.0)
     _map_colorbar(fig, mesh_m, ax_median, style.LOG10_ABS_MPA_AXIS)
+    # The gray no-data convention is keyed once, on the first panel.
+    ax_median.legend(
+        handles=[Patch(facecolor=style.NO_DATA_GRAY, edgecolor="none")],
+        labels=["land, no retrieval this month"],
+        loc="lower left",
+        fontsize=style.MIN_TEXT_PT,
+        frameon=True,
+        framealpha=0.8,
+        edgecolor="none",
+        facecolor="white",
+        handlelength=1.1,
+        handleheight=1.1,
+        handletextpad=0.4,
+        borderaxespad=0.1,
+    )
 
+    # A second sequential ramp for the width: with cividis on both panels,
+    # yellow would mean "dry" on one map and "uncertain" on the other.
     mesh_w = draw_map(
-        ax_width, mesh_x, mesh_y, width, states, extent, *robust_limits(width)
+        ax_width,
+        mesh_x,
+        mesh_y,
+        width,
+        states,
+        extent,
+        *robust_limits(width),
+        cmap=style.SEQUENTIAL_ALT,
     )
     ax_width.set_title(
         "95% prediction-interval width", fontsize=style.MAX_TEXT_PT, pad=2.5
