@@ -98,8 +98,13 @@ def build_figure(output_dir=OUT_DIR) -> Path:
 
     # -- a: site map -------------------------------------------------------
     land.plot(ax=ax_map, facecolor="#e8e8e6", edgecolor="none", zorder=1)
-    # Largest source first so the sparse ones stay visible on top of it.
-    for key, (_, color) in SOURCES.items():
+    # Map draw order is descending site count -- the biggest network is painted
+    # first so the sparse ones land on top of it in the crowded CONUS cluster.
+    # Only the painting order changes: the legend and bar panel keep the fixed
+    # SOURCES order, and color stays assigned by entity.
+    draw_order = sorted(SOURCES, key=lambda k: int(site_counts[k]), reverse=True)
+    for key in draw_order:
+        color = SOURCES[key][1]
         sel = pts[pts["source"] == key]
         ax_map.scatter(
             sel.geometry.x,
@@ -165,13 +170,14 @@ def build_figure(output_dir=OUT_DIR) -> Path:
     ax_bar.set_xlabel("Paired observations")
     style.panel_label(ax_bar, "b", dx=-0.32)
 
-    # Global-unique sites, not the per-source sum: co-located sites shared
+    # Global-unique locations, not the per-source sum: co-located sites shared
     # between sources (NCSS rows GSHP ingested) would otherwise double-count,
-    # and the figure must agree with Table 1's 2,607.
+    # and the figure must agree with Table 1's 2,607. The legend's per-source
+    # counts are within-source sites, so "unique locations" is said explicitly.
     total_pairs = int(pairs.sum())
     total_sites = df[["lat_r", "lon_r"]].drop_duplicates().shape[0]
     ax_bar.set_title(
-        f"{total_pairs:,} pairs at {total_sites:,} sites",
+        f"{total_pairs:,} pairs at {total_sites:,} unique locations",
         fontsize=style.MAX_TEXT_PT - 1,
         color=style.MUTED_INK,
         loc="right",
