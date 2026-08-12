@@ -1,10 +1,20 @@
 """Descriptor Fig 5: validation scatter -- the direct model against PTF baselines.
 
-Observed vs predicted matric potential for three estimators on the same
-observations: our direct quantile RF (its median, which is the released Level 1
-value), Rosetta, and POLARIS. The PTF columns come from
+Observed vs predicted matric potential for three estimators, each over its
+available cases: our direct quantile RF (its median, which is the released
+Level 1 value), Rosetta, and POLARIS. The PTF columns come from
 ``swapstress.validation.ptf_baseline``, which pushes each site's published van
 Genuchten parameters through the retention equation at the observed theta.
+The candidate observations are the same held-out rows for all three panels,
+but each method's metrics keep only the pairs where that method returns a
+finite value, so the displayed n differs by method -- the caption says
+"available cases by method" rather than claiming identical samples.
+
+Off-scale honesty: the axes are held to the shared window (expanding them to
+include the PTF tails would collapse the QRF structure), so the fraction of
+each method's pairs that lands outside the window is stated in the metric
+block, and the off-scale predictions are marked as carets on the top/bottom
+axis edge at their observed x.
 
 Both axes are ``log10|psi|`` with psi in MPa, the descriptor's presentation
 unit, converted from the stored ``log10_suction_cm`` by the exact additive
@@ -152,21 +162,27 @@ def load_holdout(model_dir: str, ptf_dir: str) -> pd.DataFrame:
     return merged
 
 
-def off_scale(observed: np.ndarray, predicted: np.ndarray) -> int:
-    """Pairs the metrics count but the axes cannot show.
+def off_scale(observed: np.ndarray, predicted: np.ndarray):
+    """Masks for the pairs the metrics count but the axes cannot show.
 
-    Rosetta and POLARIS put a sixth of their predictions outside the drawn
-    window, far beyond anything the observations reach. They stay in the RMSE
-    and R2 -- they are real errors -- but they land off the panel, so the count
-    is printed in the corner rather than left to be silently cropped.
+    Rosetta puts 17% of its predictions outside the drawn window and POLARIS
+    7%, far beyond anything the observations reach. They stay in the RMSE and
+    R2 -- they are real errors -- but they land off the panel, so their share
+    is quoted in the metric block and each one is marked at the axis edge
+    rather than left to be silently cropped. A couple of *observations* also
+    sit just past the window's low end, so both axes are checked. Returns
+    ``(above, below, left, right)`` boolean masks: predicted past the top or
+    bottom edge, observed past the left or right edge.
     """
     observed = np.asarray(observed, dtype=float)
     predicted = np.asarray(predicted, dtype=float)
     keep = np.isfinite(observed) & np.isfinite(predicted)
     low, high = AXIS_LIMITS
-    inside = (predicted >= low) & (predicted <= high)
-    inside &= (observed >= low) & (observed <= high)
-    return int((keep & ~inside).sum())
+    above = keep & (predicted > high)
+    below = keep & (predicted < low)
+    left = keep & (observed < low)
+    right = keep & (observed > high)
+    return above, below, left, right
 
 
 def render(df: pd.DataFrame, output_dir: str) -> Path:
@@ -215,13 +231,47 @@ def render(df: pd.DataFrame, output_dir: str) -> Path:
         ax.set_yticks(DECADE_TICKS)
         ax.set_title(label, pad=2.5)
         style.panel_label(ax, letter, dx=-0.10, dy=1.02)
+
+        # Off-scale predictions: their share goes in the metric block, and each
+        # one is a caret on the axis edge at its observed x, so the clipped
+        # mass is visible in proportion to its consequence.
+        above, below, left, right = off_scale(observed, predicted)
+        dropped = int((above | below | left | right).sum())
+        low, high = AXIS_LIMITS
+        rug_kw = dict(
+            s=5.0,
+            color=color,
+            alpha=0.2,
+            linewidths=0.5,
+            rasterized=True,
+            clip_on=False,
+            zorder=2,
+        )
+        if above.any():
+            ax.scatter(observed[above], np.full(above.sum(), high), marker=10, **rug_kw)
+        if below.any():
+            ax.scatter(observed[below], np.full(below.sum(), low), marker=11, **rug_kw)
+        if left.any():
+            clipped = np.clip(predicted[left], low, high)
+            ax.scatter(np.full(left.sum(), low), clipped, marker=8, **rug_kw)
+        if right.any():
+            clipped = np.clip(predicted[right], low, high)
+            ax.scatter(np.full(right.sum(), high), clipped, marker=9, **rug_kw)
+
+        lines = [
+            f"n = {stats['n']:,}",
+            f"RMSE = {stats['rmse']:.2f}",
+            f"bias = {stats['bias']:+.2f}",
+            f"R$^2$ = {stats['r2']:+.2f}",
+        ]
+        if dropped:
+            pct = 100.0 * dropped / stats["n"]
+            share = "<0.1%" if pct < 0.1 else f"{pct:.1f}%"
+            lines.append(f"{share} outside axes")
         ax.text(
             0.035,
             0.97,
-            f"n = {stats['n']:,}\n"
-            f"RMSE = {stats['rmse']:.2f}\n"
-            f"bias = {stats['bias']:+.2f}\n"
-            f"R$^2$ = {stats['r2']:+.2f}",
+            "\n".join(lines),
             transform=ax.transAxes,
             va="top",
             ha="left",
@@ -230,19 +280,6 @@ def render(df: pd.DataFrame, output_dir: str) -> Path:
             zorder=4,
             bbox=dict(facecolor="white", alpha=0.7, edgecolor="none", pad=1.2),
         )
-        dropped = off_scale(observed, predicted)
-        if dropped:
-            ax.text(
-                0.97,
-                0.03,
-                f"{dropped:,} off scale",
-                transform=ax.transAxes,
-                va="bottom",
-                ha="right",
-                fontsize=style.MIN_TEXT_PT,
-                color=style.MUTED_INK,
-                zorder=4,
-            )
 
     axes[0].set_ylabel(f"Predicted {style.LOG10_ABS_MPA_AXIS}")
     fig.supxlabel(f"Observed {style.LOG10_ABS_MPA_AXIS}", fontsize=style.MAX_TEXT_PT)
