@@ -71,7 +71,22 @@ CATEGORICAL = ("#2166AC", "#D55E00", "#7B3294")
 # Perceptually uniform and CVD-safe. Sequential for magnitude; diverging only
 # where zero or a midpoint means something, with its neutral in the middle.
 SEQUENTIAL = "cividis"
+# Second sequential ramp for when two magnitude fields share a figure and must
+# not share a semantic (Fig 7 maps interval width beside the cividis median;
+# one ramp would give yellow two meanings). Single hue, monotonic lightness.
+# Truncated so the low end is a visibly tinted lavender rather than white:
+# on the maps, white is reserved for water and outside-domain background, so
+# a ramp that starts at white would let a low value impersonate no data.
+SEQUENTIAL_ALT = mpl.colors.LinearSegmentedColormap.from_list(
+    "purples_deep",
+    mpl.colormaps["Purples"]([0.25 + 0.75 * i / 255.0 for i in range(256)]),
+)
 DIVERGING = "RdBu_r"
+
+# The set-wide missing-data convention: white is water or outside the domain,
+# this light gray is land the product did not evaluate or never retrieved --
+# keyed once in any figure where it occurs.
+NO_DATA_GRAY = "#d2d2d2"
 
 GRID_COLOR = "#d9d9d9"
 AXIS_COLOR = "#333333"
