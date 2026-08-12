@@ -1,9 +1,22 @@
 """Descriptor Fig 3: data coverage of the Level 1 product.
 
-A CONUS map of the fraction of days each pixel carries a valid raw retrieval
-over the record, with an inset time series of the daily valid-pixel count.
+a  A CONUS map of the fraction of days each pixel carries a valid raw
+   retrieval over the record.
+b  An inset time series of the daily valid-pixel count.
+
 Together these say where and when the raw product is dense or sparse, which is
 the argument for shipping the gap-filled level alongside it.
+
+The title is a short identifier; the record dates, raster/day counts and the
+in-frame median print to stdout and live in the caption (2026-08-12 handoff:
+internal text is not the place for experimental metadata). CONUS land that
+never carries a valid retrieval is painted light gray so it cannot be read as
+ocean, which stays white -- the same no-data convention as Figs 6 and 7.
+
+The colour ramp ends at the in-frame maximum (52%) and the key is ticked
+0-50% in even steps inside that range, so every part of the bar encodes a
+value that occurs; the earlier 0/20/40/60 ticks made matplotlib extend the
+bar to 60% and left a white 52-60% cap that encoded nothing.
 
 The denominator is **calendar days spanned, not files present**. SMAP's revisit
 leaves whole days with no overpass and therefore no raster at all -- 67 of 366
@@ -42,17 +55,22 @@ from typing import List, Optional
 import matplotlib
 
 matplotlib.use("Agg")
+import geopandas as gpd
 import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
 import numpy as np
 import rasterio
-from matplotlib.patches import Rectangle
+from matplotlib.patches import Patch, Rectangle
 from pyproj import Transformer
 from rasterio.windows import Window
 from rasterio.windows import transform as window_transform
 
 from swapstress.figures import style
-from swapstress.figures.basemap import load_conus_states, pixel_corner_lonlat
+from swapstress.figures.basemap import (
+    lakes_shapefile,
+    load_conus_states,
+    pixel_corner_lonlat,
+)
 
 DATE_PATTERN = re.compile(r"_(\d{8})\.tif$")
 
@@ -89,6 +107,13 @@ BOUNDARY_WIDTH = 0.3
 # past the ceiling and clamp to the top color; they sit outside the domain the
 # statistics describe, so no "max" arrow is drawn for them.
 COLOR_MAX = 0.52
+# Ticks stay inside the ramp: a tick beyond vmax (the old 60%) makes the bar
+# extend past the data and leaves an unencoded cap.
+COLOR_TICKS = (0.0, 0.1, 0.2, 0.3, 0.4, 0.5)
+
+# CONUS land that never sees a valid retrieval, distinct from white water --
+# the shared no-data convention across the map figures, defined in ``style``.
+NO_RETRIEVAL_GRAY = style.NO_DATA_GRAY
 
 # Inset plot box, and the white backing that carries its title and tick labels,
 # both in axes fractions. The corner is the Pacific dead space off southern
@@ -281,9 +306,28 @@ def _frame_map(ax, frame: MapFrame) -> None:
     The outlines are white because cividis is dark at the low end, where a grey
     hairline disappears. There are no ticks: projected metres mean nothing to a
     reader, and the state outlines already say where everything is.
+
+    The states are filled ``NO_RETRIEVAL_GRAY`` *under* the mesh: a valid cell
+    covers its patch of gray, so gray survives only where CONUS land never
+    carries a retrieval, and it cannot be confused with white water. Lakes are
+    painted back white on top for the same reason in reverse.
     """
+    frame.states.plot(ax=ax, facecolor=NO_RETRIEVAL_GRAY, edgecolor="none", zorder=0.5)
+    lakes = gpd.read_file(lakes_shapefile())
+    lakes = lakes[lakes["scalerank"] <= 3].to_crs(MAP_CRS)
+    lakes.plot(ax=ax, facecolor="white", edgecolor="none", zorder=2)
     frame.states.boundary.plot(
         ax=ax, edgecolor=BOUNDARY_COLOR, linewidth=BOUNDARY_WIDTH, alpha=0.85, zorder=3
+    )
+    ax.legend(
+        handles=[Patch(facecolor=NO_RETRIEVAL_GRAY, edgecolor="none")],
+        labels=["land, never retrieved"],
+        loc="lower right",
+        frameon=False,
+        fontsize=style.MIN_TEXT_PT + 1,
+        handlelength=1.0,
+        handleheight=1.0,
+        handletextpad=0.4,
     )
     x0, y0, x1, y1 = frame.extent
     ax.set_xlim(x0, x1)
@@ -296,12 +340,12 @@ def _add_colorbar(fig, mesh, ax) -> None:
     """Colour key, in per cent so it reads against the median quoted above."""
     bar = fig.colorbar(mesh, ax=ax, shrink=0.86, aspect=24, pad=0.012)
     bar.set_label(
-        "Days with a valid Level 1 retrieval (% of calendar days)",
+        "Valid retrieval days (%)",
         fontsize=style.MAX_TEXT_PT,
         labelpad=3,
     )
-    bar.set_ticks([0.0, 0.2, 0.4, 0.6])
-    bar.set_ticklabels(["0", "20", "40", "60"])
+    bar.set_ticks(list(COLOR_TICKS))
+    bar.set_ticklabels([f"{tick:.0%}".rstrip("%") for tick in COLOR_TICKS])
     bar.ax.tick_params(labelsize=style.MAX_TEXT_PT - 1, length=2.0, width=0.5, pad=1.5)
     bar.outline.set_linewidth(0.5)
     bar.outline.set_edgecolor(style.AXIS_COLOR)
@@ -341,11 +385,16 @@ def _add_daily_inset(ax, coverage: Coverage) -> None:
     _panel_backing(ax)
     counts = np.array(coverage.daily_counts) / 1e3
     inset = ax.inset_axes(INSET_RECT)
+    # A light fill rather than a solid block: the opaque version carried more
+    # visual mass than its physical size and competed with the coverage map
+    # the inset supports. No line on top -- eleven years of daily steps at any
+    # weight shade themselves back into a block.
     inset.fill_between(
         coverage.calendar,
         counts,
         step="mid",
         color=style.CATEGORICAL[0],
+        alpha=0.35,
         linewidth=0.0,
     )
     inset.set_title(
@@ -402,24 +451,40 @@ def render(coverage: Coverage, frame: MapFrame, output_dir: str) -> Path:
     _frame_map(ax, frame)
     _add_colorbar(fig, mesh, ax)
 
+    # The record's metadata goes to the caption, not the artwork; print it so
+    # the caption writer has the exact numbers this render was cut from.
     first, last = coverage.calendar[0], coverage.calendar[-1]
     print(
-        f"{quoted.size} retrieved pixels in frame; "
-        f"median {np.median(quoted):.1%} of calendar days per pixel"
-    )
-    ax.set_title(
-        f"Level 1 retrieval coverage, {first:%-d %b %Y} – {last:%-d %b %Y}; "
-        "CONUS detail of the global product\n"
+        f"For the caption: {first:%-d %b %Y} – {last:%-d %b %Y}; "
         f"{coverage.n_files} daily rasters over {coverage.n_days} calendar days "
-        f"({coverage.absent_days} with no overpass); median "
-        f"{np.median(quoted):.0%} of days per pixel across the frame",
+        f"({coverage.absent_days} with no overpass); {quoted.size} retrieved "
+        f"pixels in frame; median {np.median(quoted):.1%} of calendar days "
+        "per pixel"
+    )
+    # Centered, so the short title clears the panel letter at top-left.
+    ax.set_title(
+        "Valid Level 1 retrieval days",
         fontsize=style.MAX_TEXT_PT,
         color=style.AXIS_COLOR,
-        loc="left",
         pad=3.0,
     )
+    style.panel_label(ax, "a", dx=0.0, dy=1.005)
 
     _add_daily_inset(ax, coverage)
+    # The inset is panel b: its label sits at the top-left of the white
+    # backing card, clear of the mesh underneath.
+    bx, by, _, bh = INSET_BACKING
+    ax.text(
+        bx + 0.008,
+        by + bh - 0.012,
+        "b",
+        transform=ax.transAxes,
+        fontsize=style.PANEL_LABEL_PT,
+        fontweight="bold",
+        va="top",
+        ha="left",
+        zorder=6,
+    )
 
     return style.save(fig, Path(output_dir) / "fig03_coverage")
 
