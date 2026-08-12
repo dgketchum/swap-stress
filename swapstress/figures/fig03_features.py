@@ -11,8 +11,9 @@ Theta dominates by an order of magnitude, so its bar is broken at the static
 axis limit and labeled with its value; drawing it to scale would flatten every
 other bar into invisibility. Bars are colored by input kind with the validated
 categorical trio -- dynamic theta, static landscape covariates, per-sample
-descriptors (depth, Rosetta level) -- and panel a renders theta in the purples
-ramp against the sequential-ramp statics to carry the same distinction.
+descriptors (depth, Rosetta level). Panel a gives every layer its own ramp --
+the panel is a schematic with no colorbars, so distinct ramps read as distinct
+variables -- keeping theta on the purples ramp to match its bar color.
 
 The representative band shown for each group is that group's top-ranked
 feature in the importance table (falling back down the ranking to one that
@@ -50,16 +51,33 @@ OUT_DIR = Path("figs/descriptor")
 STEM = "fig03_features"
 
 FIG_WIDTH_MM = style.DOUBLE_COLUMN_MM
-FIG_HEIGHT_MM = 95.0
+FIG_HEIGHT_MM = 120.0
 
-# Static covariate groups: display name and the raster carrying their bands
-# (the global ET0 climatology is exported inside the WorldClim stack).
+# Static covariate groups: display name, the raster carrying their bands (the
+# global ET0 climatology is exported inside the WorldClim stack), and the ramp
+# the layer renders in. One ramp per layer, each thematically its own: the
+# panel is a schematic with no colorbars, so the distinct ramps say "distinct
+# variables" rather than encoding a shared scale. The theta layer keeps
+# ``style.SEQUENTIAL_ALT`` so purple stays the dynamic input's color.
 GROUPS = {
-    "worldclim": ("WorldClim climate", FEATURES_DIR / "worldclim_9km.tif"),
-    "soilgrids": ("SoilGrids soil properties", FEATURES_DIR / "soilgrids_9km.tif"),
-    "fao": ("FAO HWSD soil units", FEATURES_DIR / "fao_hwsd_9km.tif"),
-    "global_et0": ("Global reference ET", FEATURES_DIR / "worldclim_9km.tif"),
-    "landsat_bands": ("Landsat reflectance", FEATURES_DIR / "landsat_bands_9km.tif"),
+    "worldclim": ("WorldClim climate", FEATURES_DIR / "worldclim_9km.tif", "viridis"),
+    # YlOrBr truncated off its white end so low values stay a visible cream
+    # and the layer's coastline does not dissolve into the page.
+    "soilgrids": (
+        "SoilGrids soil properties",
+        FEATURES_DIR / "soilgrids_9km.tif",
+        mpl.colors.LinearSegmentedColormap.from_list(
+            "ylorbr_deep",
+            mpl.colormaps["YlOrBr"]([0.12 + 0.88 * i / 255.0 for i in range(256)]),
+        ),
+    ),
+    "fao": ("FAO HWSD soil units", FEATURES_DIR / "fao_hwsd_9km.tif", "tab20"),
+    "global_et0": ("Global reference ET", FEATURES_DIR / "worldclim_9km.tif", "magma"),
+    "landsat_bands": (
+        "Landsat reflectance",
+        FEATURES_DIR / "landsat_bands_9km.tif",
+        "bone",
+    ),
 }
 
 # Input kinds share the validated categorical trio across both panels.
@@ -69,11 +87,13 @@ COLOR_THETA = style.CATEGORICAL[2]
 
 N_BARS = 15
 
-# Stack geometry: each layer is the CONUS raster flattened and sheared into a
-# parallelogram, stacked bottom-up with a fixed rise.
-LAYER_SKEW_DEG = -38.0
-LAYER_YSCALE = 0.42
-LAYER_RISE = 0.34
+# Stack geometry: each layer is the CONUS raster sheared into a parallelogram,
+# stacked bottom-up with a fixed rise. The y-scale stays near 1 so CONUS keeps
+# close to its true Albers proportions -- the earlier 0.42 flattening read as
+# a smeared projection rather than a tilted card.
+LAYER_SKEW_DEG = -24.0
+LAYER_YSCALE = 0.88
+LAYER_RISE = 0.60
 LAYER_ASPECT = 360.0 / 667.0
 
 SEASONS = {"winter": "winter", "spring": "spring", "summer": "summer", "fall": "fall"}
@@ -224,7 +244,7 @@ def draw_stack(ax, df: pd.DataFrame) -> None:
             img = np.where(np.isfinite(img), (img * 2654435761) % 97, np.nan)
         img = normalize(img)
         line2 = f"{counts[group]} bands · {shares[group]:.0%} of static importance"
-        layers.append((img, style.SEQUENTIAL, GROUPS[group][0], line2))
+        layers.append((img, GROUPS[group][2], GROUPS[group][0], line2))
     theta_img = normalize(read_theta_on_stack_grid())
     layers.append(
         (
