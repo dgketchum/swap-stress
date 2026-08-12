@@ -23,16 +23,20 @@ import importlib
 import traceback
 from typing import List, Optional
 
-# Descriptor mains (2026-07-29 lineup) -> module providing main(argv). Module
-# numbers match the paper's Fig 1-7 order.
+# Descriptor figures (2026-08-12 lineup) -> module providing main(argv).
+# Module numbers match the paper's Fig 1-7 order plus the supplement:
+# the feature stack/importance figure took the Fig 3 slot from coverage,
+# which moved to Supplementary Fig 1 but stays in ``all`` -- it is still
+# a paper figure.
 MAIN_FIGURES = {
     "pipeline": "swapstress.figures.fig01_pipeline",
     "training-sources": "swapstress.figures.fig02_training_sources",
-    "coverage": "swapstress.figures.fig03_coverage",
+    "features": "swapstress.figures.fig03_features",
     "kfold": "swapstress.figures.fig04_kfold_validation",
     "validation-scatter": "swapstress.figures.fig05_ptf_comparison",
     "spatial-skill": "swapstress.figures.fig06_regional_skill",
     "uncertainty": "swapstress.figures.fig07_product_maps",
+    "coverage": "swapstress.figures.figS1_coverage",
 }
 
 # Rendered on request, not part of --figure all. pixel-series dropped from

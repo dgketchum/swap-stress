@@ -1,4 +1,8 @@
-"""Descriptor Fig 3: data coverage of the Level 1 product.
+"""Descriptor Supplementary Fig 1: data coverage of the Level 1 product.
+
+Held the main-text Fig 3 slot until 2026-08-12, when the feature stack and
+released-model importance figure took it; the coverage story supports the
+gap-filled level's motivation and reads fine from the supplement.
 
 a  A CONUS map of the fraction of days each pixel carries a valid raw
    retrieval over the record.
@@ -40,7 +44,7 @@ through a distortion that has nothing to do with the satellite.
 
 Usage:
     uv run swapstress-figures --figure coverage
-    uv run python -m swapstress.figures.fig03_coverage --source-dir <level1-dir>
+    uv run python -m swapstress.figures.figS1_coverage --source-dir <level1-dir>
 """
 
 from __future__ import annotations
@@ -303,7 +307,7 @@ def _cells_inside(mesh_x, mesh_y, extent) -> np.ndarray:
 def _frame_map(ax, frame: MapFrame) -> None:
     """Equal-area CONUS frame: state outlines, extent, no axis furniture.
 
-    The outlines are white because cividis is dark at the low end, where a grey
+    The outlines are white because the ramp is dark at the low end, where a grey
     hairline disappears. There are no ticks: projected metres mean nothing to a
     reader, and the state outlines already say where everything is.
 
@@ -486,13 +490,13 @@ def render(coverage: Coverage, frame: MapFrame, output_dir: str) -> Path:
         zorder=6,
     )
 
-    return style.save(fig, Path(output_dir) / "fig03_coverage")
+    return style.save(fig, Path(output_dir) / "figS1_coverage")
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="fig03_coverage",
-        description="Descriptor Fig 3: Level 1 retrieval coverage.",
+        prog="figS1_coverage",
+        description="Descriptor Supplementary Fig 1: Level 1 retrieval coverage.",
     )
     parser.add_argument(
         "--source-dir",
