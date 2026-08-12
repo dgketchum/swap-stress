@@ -10,7 +10,11 @@ the cards name the released bands: the median plus its q025/q975 pair at
 Level 1, the median plus ``gapfill_flag`` at Level 2 -- the interval ships at
 Level 1 only, because on a filled day the model never ran.
 Feature groups reflect the global-pruned ablation (sentinel-1, SMAP climatology
-and land cover were dropped at threshold r2_drop <= 0).
+and land cover were dropped at threshold r2_drop <= 0). The covariate card
+counts only the 127 static features; theta (the SMAP card) and the two fixed
+sample descriptors depth_cm and rosetta_level -- real model features held at
+constant values for the product run -- are named on the model card, so the
+inputs shown sum to the model's 130 features.
 
 Gap-fill is drawn as a stage of its own rather than folded into a line of the
 product card. The Level 1 / Level 2 split is what Figs 2 and 3 are about -- Fig
@@ -104,17 +108,18 @@ GROUPS = [
     (r"Global $\mathregular{ET_o}$", 6),
 ]
 
-TOTAL_FEATURES = 130  # 127 from groups + theta + depth_cm + rosetta_level
+# The covariate card shows only the static stack; theta (SMAP card) and the two
+# fixed sample descriptors (model card) bring the model's input count to 130.
+STATIC_FEATURES = sum(n for _, n in GROUPS)  # 127
+MODEL_INPUTS = STATIC_FEATURES + 3  # + theta + depth_cm + rosetta_level
 
-# Training data
+# Training data (profile / depth-sample counts live in the caption)
 TRAIN_OBS = "193K"
-TRAIN_SITES = "2,723"
-TRAIN_PROFILES = "3,300"
-TRAIN_SAMPLES = "13,361"
+TRAIN_LOCATIONS = "2,607"
 TRAIN_SOURCES = 5
 
 # Output
-VALID_PIXELS = "~125,000"
+VALID_PIXELS = "119,693"
 
 ROW_H_MM = 6.2
 ROW_GAP_MM = 1.1
@@ -248,7 +253,7 @@ def _covariate_stack(ax) -> None:
     """
     header = [
         ("Static landscape covariates", TITLE_PT, "bold", INK),
-        (f"{TOTAL_FEATURES} features, 9 km grid", BODY_PT, "normal", BODY_INK),
+        (f"{STATIC_FEATURES} features, 9 km grid", BODY_PT, "normal", BODY_INK),
     ]
     rows_h = len(GROUPS) * ROW_H_MM + (len(GROUPS) - 1) * ROW_GAP_MM
     h = PAD_MM + _block_height(header) + 1.4 + rows_h + PAD_MM
@@ -343,13 +348,7 @@ def build_figure():
         [
             ("Training data", TITLE_PT, "bold", INK),
             (f"{TRAIN_OBS} θ–ψ observations", BODY_PT, "normal", BODY_INK),
-            (
-                f"{TRAIN_SITES} sites / {TRAIN_PROFILES} profiles",
-                BODY_PT,
-                "normal",
-                BODY_INK,
-            ),
-            (f"{TRAIN_SAMPLES} depth-samples", BODY_PT, "normal", BODY_INK),
+            (f"{TRAIN_LOCATIONS} unique locations", BODY_PT, "normal", BODY_INK),
             (f"{TRAIN_SOURCES} sources", NOTE_PT, "normal", BODY_INK),
         ],
     )
@@ -363,9 +362,14 @@ def build_figure():
         NEUTRAL,
         [
             ("Quantile random forest", TITLE_PT, "bold", INK),
-            ("250 trees", BODY_PT, "normal", BODY_INK),
-            ("Median imputation", BODY_PT, "normal", BODY_INK),
-            ("9 km spatial-group holdout", BODY_PT, "normal", BODY_INK),
+            (
+                f"{MODEL_INPUTS} inputs: {STATIC_FEATURES} covariates + θ",
+                BODY_PT,
+                "normal",
+                BODY_INK,
+            ),
+            ("+ depth & Rosetta level (fixed)", BODY_PT, "normal", BODY_INK),
+            ("9 km spatial-group holdout", NOTE_PT, "normal", BODY_INK),
         ],
     )
 
