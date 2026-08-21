@@ -57,15 +57,18 @@ DEFAULT_OUTPUT_DIR = "figs/descriptor"
 N_FOLDS = 5
 EXCLUDE_STUSPS = {"AK", "HI", "AS", "GU", "MP", "PR", "VI"}
 
-# Fold identity is a nominal label, not a quantity, so it needs a qualitative
-# set -- and five of them, which is more than the validated categorical trio in
-# ``style`` covers. Same five-slot extension of that trio as the Fig 2 source
-# palette (``training_sources.SOURCES``): the trio unchanged plus two hues,
-# validated as a set in this adjacency (worst adjacent pair dE 11.0 protan,
-# normal-vision floor 21.9). The earlier Tableau 10 leading five failed the
-# same checks (chroma floor, green-teal normal-vision dE 14.0). Folds and
-# sources share no semantics across figures; reuse keeps one validated set.
-FOLD_COLORS = ["#2166AC", "#D55E00", "#7B3294", "#117733", "#BB8800"]
+# Fold identity is a nominal label, but rather than a second hue family the
+# fold colors are five evenly spaced samples of the same ramp panel a uses
+# (``style.SEQUENTIAL``), keeping the figure in one palette. The samples sit
+# far enough apart on the ramp to read as categories, and the span stops
+# short of both ends so the darkest tile stays distinct from near-black text
+# and the lightest keeps contrast against the white map background. Viridis
+# is perceptually uniform and colorblind-safe, which the discrete samples
+# inherit.
+FOLD_COLORS = [
+    matplotlib.colors.to_hex(matplotlib.colormaps[style.SEQUENTIAL](x))
+    for x in (0.05, 0.275, 0.5, 0.725, 0.95)
+]
 
 # Double column. The scatter is equal-aspect and the map needs the width to
 # keep 100 km tiles from merging, so the two sit side by side rather than
@@ -188,7 +191,6 @@ def draw_scatter(ax, pred_df):
     ax.set_ylabel(f"Predicted {style.LOG10_ABS_MPA_AXIS}")
 
     ax.set_title("Observed vs predicted, all holdouts", loc="left", pad=2.5)
-    style.panel_label(ax, "a", dx=-0.14, dy=1.02)
     return hb
 
 
@@ -263,7 +265,6 @@ def draw_tile_map(ax, tiles_gdf, states):
         loc="left",
         pad=2.5,
     )
-    style.panel_label(ax, "b", dx=-0.045, dy=1.02)
 
 
 # ---------------------------------------------------------------------------
@@ -287,7 +288,9 @@ def draw_table(ax, summary):
     head = dict(fontsize=BODY_PT, fontweight="bold", color=style.AXIS_COLOR)
     body = dict(fontsize=BODY_PT, color=style.AXIS_COLOR)
 
-    for cx, hdr in zip(col_x, ["Fold", "R²", "RMSE", "n"]):
+    for cx, hdr in zip(
+        col_x, ["Fold", "R²", f"RMSE ({style.LOG10_ABS_MPA_UNIT})", "n"]
+    ):
         ax.text(cx, header_y, hdr, ha="center", va="center", **head)
     ax.plot(
         [0.02, 0.98],
@@ -375,6 +378,31 @@ def render(pred_df, summary, tiles_gdf, states, output_dir: str) -> Path:
     bar.ax.tick_params(labelsize=BODY_PT, length=1.8, width=0.4, pad=1.5)
     bar.outline.set_linewidth(0.4)
     bar.outline.set_edgecolor(style.AXIS_COLOR)
+
+    # The a and b letters sit on one horizontal plane, which axes-relative
+    # placement cannot give: the equal-aspect scatter and the map settle at
+    # different heights inside their cells. Anchor both to the top of their
+    # cells, resolve the constrained layout, then place the letters in figure
+    # coordinates at a shared height -- and freeze the layout so the save
+    # pass cannot shift the axes out from under them.
+    ax_scatter.set_anchor("N")
+    ax_map.set_anchor("N")
+    fig.canvas.draw()
+    fig.set_layout_engine("none")
+    pos_a = ax_scatter.get_position()
+    pos_b = ax_map.get_position()
+    y = max(pos_a.y1, pos_b.y1) + 0.012
+    for pos, letter, dx in ((pos_a, "a", -0.14), (pos_b, "b", -0.045)):
+        fig.text(
+            pos.x0 + dx * pos.width,
+            y,
+            letter,
+            fontsize=style.PANEL_LABEL_PT,
+            fontweight="bold",
+            fontstyle="normal",
+            va="bottom",
+            ha="left",
+        )
 
     return style.save(fig, Path(output_dir) / "fig04_kfold_validation")
 
