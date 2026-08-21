@@ -309,20 +309,9 @@ def draw_stack(ax, df: pd.DataFrame) -> None:
             ha="left",
         )
 
-    ax.text(
-        0.0,
-        -0.16,
-        "plus per-sample depth and Rosetta level",
-        fontsize=style.MAX_TEXT_PT - 1,
-        color=style.MUTED_INK,
-        va="top",
-        ha="left",
-        transform=ax.transData,
-    )
-
     skew_dx = abs(np.tan(np.radians(LAYER_SKEW_DEG))) * LAYER_ASPECT * LAYER_YSCALE
     ax.set_xlim(-skew_dx - 0.03, 2.05)
-    ax.set_ylim(-0.24, (len(layers) - 1) * LAYER_RISE + LAYER_ASPECT * LAYER_YSCALE)
+    ax.set_ylim(-0.04, (len(layers) - 1) * LAYER_RISE + LAYER_ASPECT * LAYER_YSCALE)
     ax.set_aspect("equal")
     ax.set_axis_off()
 
