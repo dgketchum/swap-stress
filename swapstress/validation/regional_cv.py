@@ -6,9 +6,15 @@ each training observation's lat/lon. Runs two levels of holdout:
   1. Major-zone (A/B/C/D/E) leave-one-out
   2. Sub-class (Cfa, BSk, Dfa, ...) leave-one-out for classes with >min_samples
 
+By default, both fitting and scoring use the global observation pool. With
+``--evaluation-domain conus``, each fold still removes the held climate class
+from the global training pool, but its score is calculated only from held-out
+observations inside the lower-48 state union. This matches the global-training,
+CONUS-application design of the released product.
+
 Produces:
-    - regional_cv_results.csv     (per-fold overall metrics)
-    - regional_cv_summary.png     (bar chart by region)
+    - regional_cv_results*.csv     (per-fold overall metrics and provenance)
+    - regional_cv_summary*.png     (bar chart by region)
 """
 
 from __future__ import annotations
@@ -30,7 +36,31 @@ import matplotlib.pyplot as plt
 from swapstress.validation.reconstruct_test_set import sample_beck_koppen
 from swapstress.model.metrics import compute_metrics
 
-MODEL_DIR = "/nas/soils/swapstress/models/direct_rf_9km_global_pruned"
+MODEL_DIR = "/nas/soils/swapstress/models/direct_qrf_9km_global_pruned"
+
+
+def evaluation_domain_mask(df: pd.DataFrame, domain: str) -> np.ndarray:
+    """Return rows eligible for scoring in *domain*.
+
+    The CONUS definition is the same lower-48 state-polygon union used by the
+    descriptor figures; a bounding box would also retain parts of Canada and
+    Mexico.
+    """
+    if domain == "global":
+        return np.ones(len(df), dtype=bool)
+    if domain != "conus":
+        raise ValueError(f"unknown evaluation domain: {domain}")
+
+    import geopandas as gpd
+
+    from swapstress.figures.basemap import load_conus_states
+
+    points = gpd.GeoSeries(
+        gpd.points_from_xy(df["lon"], df["lat"]),
+        crs="EPSG:4326",
+    )
+    conus = load_conus_states().union_all()
+    return points.within(conus).to_numpy()
 
 
 def run_regional_cv(
@@ -40,6 +70,7 @@ def run_regional_cv(
     random_state: int = 42,
     min_samples: int = 100,
     level: str = "major",
+    evaluation_domain: str = "global",
     n_jobs: int = -1,
 ) -> pd.DataFrame:
     """Run leave-one-climate-region-out CV using Beck et al. (2018) Koppen.
@@ -52,6 +83,10 @@ def run_regional_cv(
     ----------
     level : str
         "major" for 5 major zones (A-E), "subclass" for 30 Beck sub-classes.
+    evaluation_domain : str
+        "global" scores every observation in the held climate class. "conus"
+        scores only held-class observations inside the lower-48 state union;
+        training still uses all global observations outside the held class.
 
     Returns
     -------
@@ -61,10 +96,7 @@ def run_regional_cv(
     df = pd.read_parquet(obs_table)
     df = df.dropna(subset=["theta", "log10_suction_cm", "lat", "lon"])
 
-    # Must have lat/lon for Beck sampling
-    df = df.dropna(subset=["lat", "lon"])
-
-    codes, labels, major = sample_beck_koppen(df["lat"].values, df["lon"].values)
+    _, labels, major = sample_beck_koppen(df["lat"].values, df["lon"].values)
 
     if level == "major":
         df["region"] = major
@@ -74,10 +106,17 @@ def run_regional_cv(
     # Drop unknowns (ocean/nodata)
     df = df[df["region"] != "unknown"]
 
-    regions = sorted(df["region"].unique())
-    region_counts = df["region"].value_counts()
+    evaluation_df = df.loc[evaluation_domain_mask(df, evaluation_domain)].copy()
+    if evaluation_df.empty:
+        raise ValueError(
+            f"No observations fall within evaluation domain {evaluation_domain!r}."
+        )
+    regions = sorted(evaluation_df["region"].unique())
+    region_counts = evaluation_df["region"].value_counts()
     print(f"Level: {level}")
-    print(f"Regions ({len(regions)}): {dict(region_counts)}")
+    print("Training domain: global")
+    print(f"Evaluation domain: {evaluation_domain}")
+    print(f"Evaluation regions ({len(regions)}): {dict(region_counts)}")
 
     result_rows = []
     for held_out in regions:
@@ -89,7 +128,7 @@ def run_regional_cv(
         print(f"\nRegion holdout: {held_out} ({n_test} samples)")
 
         train_df = df[df["region"] != held_out]
-        test_df = df[df["region"] == held_out]
+        test_df = evaluation_df[evaluation_df["region"] == held_out]
 
         X_train = train_df[all_features].values.astype(np.float32)
         X_test = test_df[all_features].values.astype(np.float32)
@@ -117,10 +156,24 @@ def run_regional_cv(
                 "held_out_region": held_out,
                 "n_train": len(train_df),
                 "n_test": len(test_df),
+                "n_test_locations": len(
+                    test_df[["lat", "lon"]].round(5).drop_duplicates()
+                ),
+                "training_domain": "global",
+                "evaluation_domain": evaluation_domain,
+                "estimator": type(rf).__name__,
+                "n_estimators": n_estimators,
+                "random_state": random_state,
+                "min_samples": min_samples,
                 **metrics,
             }
         )
 
+    if not result_rows:
+        raise ValueError(
+            f"No {level} regions in {evaluation_domain!r} met the "
+            f"minimum support of {min_samples} observations."
+        )
     return pd.DataFrame(result_rows)
 
 
@@ -208,6 +261,15 @@ def main():
         help="Holdout level: major (A-E), subclass (Cfa, BSk, ...), or both.",
     )
     parser.add_argument(
+        "--evaluation-domain",
+        choices=["global", "conus"],
+        default="global",
+        help=(
+            "Rows used to score each held class. Training remains global with "
+            "that class removed (default: global)."
+        ),
+    )
+    parser.add_argument(
         "--n-jobs",
         type=int,
         default=-1,
@@ -243,11 +305,16 @@ def main():
             random_state=config.get("random_state", 42),
             min_samples=args.min_samples,
             level=level,
+            evaluation_domain=args.evaluation_domain,
             n_jobs=args.n_jobs,
         )
         results_df["level"] = level
+        results_df["reference_model_dir"] = str(model_path)
 
-        suffix = f"_{level}" if args.level == "both" else ""
+        if args.evaluation_domain == "conus":
+            suffix = f"_{level}_conus"
+        else:
+            suffix = f"_{level}" if args.level == "both" else ""
         csv_path = os.path.join(output_dir, f"regional_cv_results{suffix}.csv")
         results_df.to_csv(csv_path, index=False)
         print(f"Saved {csv_path}")
@@ -267,9 +334,12 @@ def main():
 
     if len(all_results) > 1:
         combined = pd.concat(all_results, ignore_index=True)
-        combined.to_csv(
-            os.path.join(output_dir, "regional_cv_results.csv"), index=False
+        combined_name = (
+            "regional_cv_results_conus.csv"
+            if args.evaluation_domain == "conus"
+            else "regional_cv_results.csv"
         )
+        combined.to_csv(os.path.join(output_dir, combined_name), index=False)
 
 
 if __name__ == "__main__":

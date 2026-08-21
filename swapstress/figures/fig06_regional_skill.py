@@ -1,10 +1,11 @@
-"""Descriptor Fig 6: transferability to withheld climate classes -- two panels.
+"""Descriptor Fig 6: CONUS transferability to withheld climate classes.
 
-a  Major Koppen class (A-E) leave-one-class-out R2 painted onto the CONUS
-   extent of each class. One score per withheld class: the map's color
-   resolution is the statistical resolution, five values, nothing finer.
-b  The ranked A-E summary behind the map: R2 as a dot on the shared 0-0.8
-   scale, with RMSE, bias, and n as aligned text columns.
+a  Major Koppen-class leave-one-class-out R2, evaluated only on CONUS
+   observations, painted onto the CONUS extent of each evaluated class. One
+   score per withheld class: the map's color resolution is the statistical
+   resolution, nothing finer.
+b  The ranked CONUS-class summary behind the map: R2 as a dot on the shared
+   scale, with RMSE, bias, and observation/location support as aligned text.
 
 This is the major-class redesign of 2026-08-12 (figures_handoff.md). The old
 three-panel form -- a 20-color Beck classification map, a subclass R2
@@ -14,21 +15,20 @@ aggregate score, and the displayed subclasses did not match the manuscript's
 Technical Validation narrative, which reports the five major classes. Subclass
 results remain in the deposited ``regional_cv_results_subclass.csv``.
 
-The R2 scale is 0-0.8: the five scores run 0.29-0.63, so nothing clips and no
-negative range spends contrast (the old -0.10 floor served a subclass row that
-no longer appears). Sequential, not diverging, because every score is positive
-and the encoded quantity is magnitude of skill.
+The sequential R2 scale spans 0.2-0.7, bracketing the five CONUS scores
+(0.27-0.63). Exact values remain printed in panel b, so the truncated scale is
+explicit while the map retains enough contrast to distinguish the two broad
+performance groups.
 
 Classes B, C, and D are labeled directly on their (large) map patches; A's
 CONUS extent is the southern tip of Florida, labeled with a short leader, and
 E is scattered alpine tundra too small to label at final size -- the caption
-carries that. B and C render nearly the same color because their scores are
-nearly the same (0.29 vs 0.33); that is the honest reading, and the letters do
-the telling-apart.
+carries that. Class letters identify regions independently of the R2 colors.
 
-The regional refits behind these scores use a standard random forest with the
-production features and hyperparameters, not the quantile forest -- the
-caption must keep saying so.
+Each refit removes one climate class from the global training pool and uses a
+standard random forest with the production features and hyperparameters, not
+the quantile forest. Only its held-out CONUS observations are scored; the
+caption must keep both domain statements explicit.
 
 Usage:
     uv run swapstress-figures --figure spatial-skill
@@ -58,11 +58,10 @@ matplotlib.use("Agg")
 
 # ── Paths ────────────────────────────────────────────────────────────
 BECK_TIF = Path("/nas/soils/swapstress/ancillary/Beck_KG_V1_present_0p0083.tif")
-# Stage 04 writes the regional CV straight into its ``--output-dir``; the 0.3
-# release run leaves the tables in the release evaluation tree. The major-class
-# file carries exactly the five rows the manuscript quotes.
+# The CONUS suffix is deliberate. The older major-class table was scored on
+# global observations and must not be painted onto a CONUS-only map.
 EVAL_DIR = Path("/nas/soils/swapstress/releases/v03_20260729/evaluation")
-CV_CSV = EVAL_DIR / "regional_cv_results_major.csv"
+CV_CSV = EVAL_DIR / "regional_cv_results_major_conus.csv"
 STATES_SHP = Path(states_shapefile())
 LAKES_SHP = Path(lakes_shapefile())
 OUT_DIR = Path("figs/descriptor")
@@ -80,10 +79,11 @@ CONUS_RES_M = 800.0
 EXCLUDE_STUSPS = {"AK", "HI", "AS", "GU", "MP", "PR", "VI"}
 
 # ── R2 encoding ──────────────────────────────────────────────────────
-# 0-0.8 with even ticks: the five major-class scores run 0.29-0.63, so the
-# range clips nothing and wastes nothing on negative values that do not occur.
-R2_VMIN, R2_VMAX = 0.0, 0.8
-R2_TICKS = (0.0, 0.2, 0.4, 0.6, 0.8)
+# All five CONUS scores are positive and span 0.27-0.63. A clean 0.2-0.7
+# sequential range makes their relative differences visible; panel b prints
+# every value so the non-zero lower bound is unmistakable.
+R2_VMIN, R2_VMAX = 0.2, 0.7
+R2_TICKS = (0.2, 0.3, 0.4, 0.5, 0.6, 0.7)
 
 # ── Beck code -> major class ─────────────────────────────────────────
 MAJOR_OF_CODE = {
@@ -98,7 +98,7 @@ MAJOR_DESCRIPTIONS = {
     "B": "Arid",
     "C": "Temperate",
     "D": "Continental",
-    "E": "Polar",
+    "E": "Alpine tundra",
 }
 
 # On-map class letters, placed on each class's largest coherent CONUS patch
@@ -112,22 +112,25 @@ BOUNDARY_COLOR = "#7a7a7a"
 BOUNDARY_WIDTH = 0.25
 
 FIG_HEIGHT_MM = 68.0
-WIDTH_RATIOS = (1.5, 0.62, 0.55)
+WIDTH_RATIOS = (1.32, 0.66, 0.82)
 
 NOTE_PT = 6.0
 
 # Text-column x positions in the summary panel's axes fraction.
-COL_RMSE = 0.34
-COL_BIAS = 0.70
-COL_N = 1.00
+COL_RMSE = 0.16
+COL_BIAS = 0.43
+COL_N = 0.70
+COL_LOCATIONS = 1.00
+METRIC_HEADER_Y = 0.985
+METRIC_UNIT_Y = 0.94
 
 
 def load_conus_major():
-    """Beck Koppen over CONUS in Albers, aggregated to major classes.
+    """Beck Koppen codes over CONUS in Albers.
 
     Nearest neighbour, because the values are class codes and must not be
-    averaged. Returns an array of major-class letters ('' outside), plus the
-    transform.
+    averaged. Returns an array of integer Beck codes (0 outside), plus the
+    transform; ``MAJOR_OF_CODE`` provides the major-class aggregation.
     """
     with rasterio.open(BECK_TIF) as src:
         window = from_bounds(LON_MIN, LAT_MIN, LON_MAX, LAT_MAX, src.transform)
@@ -162,21 +165,61 @@ def load_conus_major():
 
 
 def read_major_cv(path: Path) -> pd.DataFrame:
-    """The five major-class LOCO rows, ranked by decreasing R2."""
+    """CONUS-scored major-class LOCO rows, ranked by decreasing R2."""
     if not path.exists():
         raise FileNotFoundError(
-            f"No major-class regional CV table at {path}. Fig 6 draws the "
-            "A-E leave-one-class-out scores; run `swapstress-validate "
-            "--analysis regional-cv --level major` (or `both`) to produce it."
+            f"No CONUS-scored major-class regional CV table at {path}. Run "
+            "`python -m swapstress.validation.regional_cv --level major "
+            "--evaluation-domain conus` to produce it."
         )
     cv = pd.read_csv(path)
-    missing = set(MAJOR_DESCRIPTIONS) - set(cv["held_out_region"])
+    required = {
+        "held_out_region",
+        "r2",
+        "rmse",
+        "bias",
+        "n_test",
+        "n_test_locations",
+        "training_domain",
+        "evaluation_domain",
+        "estimator",
+        "n_estimators",
+        "level",
+        "reference_model_dir",
+    }
+    missing = required - set(cv)
     if missing:
+        raise ValueError(f"{path} is missing required column(s) {sorted(missing)}.")
+    if not (cv["evaluation_domain"] == "conus").all():
+        raise ValueError(f"{path} contains results not evaluated in CONUS.")
+    if not (cv["training_domain"] == "global").all():
+        raise ValueError(f"{path} contains results not trained on the global pool.")
+    if not (cv["estimator"] == "RandomForestRegressor").all():
+        raise ValueError(f"{path} contains results from an unexpected estimator.")
+    if not (cv["n_estimators"] == 250).all():
+        raise ValueError(f"{path} does not contain the specified 250-tree refits.")
+    if not (cv["level"] == "major").all():
         raise ValueError(
-            f"{path} is missing major class(es) {sorted(missing)}; the map "
-            "paints all five and a silently absent class would render as a "
-            "hole in the CONUS silhouette."
+            f"{path} contains results above or below the major-class level."
         )
+    expected_reference = "/nas/soils/swapstress/models/direct_qrf_9km_global_pruned"
+    if not (cv["reference_model_dir"] == expected_reference).all():
+        raise ValueError(f"{path} does not reference the released QRF configuration.")
+    unknown = set(cv["held_out_region"]) - set(MAJOR_DESCRIPTIONS)
+    if unknown:
+        raise ValueError(f"{path} contains unknown major class(es) {sorted(unknown)}.")
+    absent = set(MAJOR_DESCRIPTIONS) - set(cv["held_out_region"])
+    if absent:
+        raise ValueError(
+            f"{path} is missing CONUS-supported major class(es) {sorted(absent)}."
+        )
+    if cv["held_out_region"].duplicated().any():
+        raise ValueError(f"{path} contains duplicate held-out major classes.")
+    if cv.empty:
+        raise ValueError(f"{path} contains no CONUS climate classes.")
+    metric_columns = ["r2", "rmse", "bias", "n_test", "n_test_locations"]
+    if not np.isfinite(cv[metric_columns].to_numpy(dtype=float)).all():
+        raise ValueError(f"{path} contains non-finite metrics or support counts.")
     return cv.sort_values("r2", ascending=False).reset_index(drop=True)
 
 
@@ -208,11 +251,14 @@ def build_figure(output_dir=OUT_DIR):
     left, bottom, right, top = array_bounds(rows, cols, dst_transform)
     extent = [left, right, bottom, top]
 
-    # One score per withheld class, painted onto that class's CONUS extent.
+    # One CONUS score per withheld class, painted onto that class's CONUS
+    # extent. The gray base exposes any unmapped land instead of silently
+    # making it look like water or background.
     r2_of_major = dict(zip(cv["held_out_region"], cv["r2"]))
     r2_map = np.full(codes.shape, np.nan, dtype=np.float32)
     for code, major in MAJOR_OF_CODE.items():
-        r2_map[codes == code] = r2_of_major[major]
+        if major in r2_of_major:
+            r2_map[codes == code] = r2_of_major[major]
 
     x0, y0, x1, y1 = conus_states.total_bounds
     pad = 0.012 * (x1 - x0)
@@ -229,13 +275,25 @@ def build_figure(output_dir=OUT_DIR):
     ax_dot = fig.add_subplot(gs[0, 1])
     ax_txt = fig.add_subplot(gs[0, 2])
 
-    # ── a: major-class LOCO R2 map ────────────────────────────────────
-    cmap = matplotlib.colormaps[style.SEQUENTIAL]
+    # ── a: CONUS-scored major-class LOCO R2 map ──────────────────────
+    cmap = matplotlib.colormaps[style.SEQUENTIAL].copy()
+    cmap.set_bad(alpha=0.0)
+    norm = matplotlib.colors.Normalize(vmin=R2_VMIN, vmax=R2_VMAX)
+    gray_cmap = matplotlib.colors.ListedColormap([style.NO_DATA_GRAY])
+    gray_cmap.set_bad(alpha=0.0)
+    ax_map.imshow(
+        np.where(codes > 0, 0.0, np.nan),
+        cmap=gray_cmap,
+        vmin=0.0,
+        vmax=1.0,
+        extent=extent,
+        origin="upper",
+        interpolation="nearest",
+    )
     im = ax_map.imshow(
         r2_map,
-        cmap=style.SEQUENTIAL,
-        vmin=R2_VMIN,
-        vmax=R2_VMAX,
+        cmap=cmap,
+        norm=norm,
         extent=extent,
         origin="upper",
         interpolation="nearest",
@@ -248,14 +306,15 @@ def build_figure(output_dir=OUT_DIR):
     ax_map.set_ylim(bounds[2], bounds[3])
     ax_map.set_aspect("equal")
     ax_map.set_axis_off()
-    ax_map.set_title("Held-out R² by withheld climate class", pad=3)
+    ax_map.set_title("Held-class R² within CONUS", pad=3)
     style.panel_label(ax_map, "a", dx=0.0, dy=1.02)
 
     # Letters carry class identity; the fill carries only the score, so
     # near-equal scores (B vs C) legitimately render near-identical colors.
     to_albers = Transformer.from_crs("EPSG:4326", CONUS_CRS, always_xy=True)
-    norm = matplotlib.colors.Normalize(R2_VMIN, R2_VMAX)
     for major, lonlat in LETTER_LONLAT.items():
+        if major not in r2_of_major:
+            continue
         x, y = to_albers.transform(*lonlat)
         r, g, b, _ = cmap(norm(r2_of_major[major]))
         luminance = 0.299 * r + 0.587 * g + 0.114 * b
@@ -265,39 +324,28 @@ def build_figure(output_dir=OUT_DIR):
             major,
             fontsize=style.MAX_TEXT_PT,
             fontweight="bold",
-            color="white" if luminance < 0.5 else style.AXIS_COLOR,
+            color="white" if luminance < 0.5 else "black",
             ha="center",
             va="center",
             zorder=6,
         )
-    ax_a = to_albers.transform(*A_LETTER_LONLAT)
-    a_target = to_albers.transform(*A_TARGET_LONLAT)
-    ax_map.annotate(
-        "A",
-        xy=a_target,
-        xytext=ax_a,
-        fontsize=style.MAX_TEXT_PT,
-        fontweight="bold",
-        color=style.AXIS_COLOR,
-        ha="center",
-        va="center",
-        zorder=6,
-        arrowprops=dict(
-            arrowstyle="-", linewidth=0.4, color=style.MUTED_INK, shrinkB=1.5
-        ),
-    )
-    # The empty Pacific corner inside the CONUS-clipped frame, stating the
-    # map's statistical resolution where a reader looks for fine structure.
-    ax_map.text(
-        0.01,
-        0.02,
-        "one score per withheld class",
-        transform=ax_map.transAxes,
-        fontsize=NOTE_PT,
-        color=style.MUTED_INK,
-        ha="left",
-        va="bottom",
-    )
+    if "A" in r2_of_major:
+        ax_a = to_albers.transform(*A_LETTER_LONLAT)
+        a_target = to_albers.transform(*A_TARGET_LONLAT)
+        ax_map.annotate(
+            "A",
+            xy=a_target,
+            xytext=ax_a,
+            fontsize=style.MAX_TEXT_PT,
+            fontweight="bold",
+            color="black",
+            ha="center",
+            va="center",
+            zorder=6,
+            arrowprops=dict(
+                arrowstyle="-", linewidth=0.4, color=BOUNDARY_COLOR, shrinkB=1.5
+            ),
+        )
 
     cbar = fig.colorbar(
         im,
@@ -307,13 +355,22 @@ def build_figure(output_dir=OUT_DIR):
         shrink=0.62,
         aspect=34,
         pad=0.015,
+        extend=(
+            "both"
+            if cv["r2"].min() < R2_VMIN and cv["r2"].max() > R2_VMAX
+            else "min"
+            if cv["r2"].min() < R2_VMIN
+            else "max"
+            if cv["r2"].max() > R2_VMAX
+            else "neither"
+        ),
     )
     cbar.set_label("Held-out R²", fontsize=NOTE_PT, labelpad=1.5)
     cbar.ax.tick_params(labelsize=NOTE_PT, length=1.8, width=0.4, pad=1.5)
     cbar.outline.set_linewidth(0.4)
     cbar.outline.set_edgecolor(style.AXIS_COLOR)
 
-    # ── b: ranked A-E summary, dot plus text ──────────────────────────
+    # ── b: ranked CONUS summary, dot plus text ────────────────────────
     ypos = np.arange(len(cv))
     ax_dot.grid(axis="x", color=style.GRID_COLOR, linewidth=0.4, zorder=1)
     ax_dot.scatter(
@@ -331,7 +388,7 @@ def build_figure(output_dir=OUT_DIR):
             y,
             f"{r2:.2f}",
             fontsize=NOTE_PT,
-            color=style.AXIS_COLOR,
+            color="black",
             ha="left",
             va="center",
         )
@@ -346,41 +403,47 @@ def build_figure(output_dir=OUT_DIR):
     ax_dot.set_xlim(R2_VMIN, R2_VMAX)
     ax_dot.set_xticks(list(R2_TICKS))
     ax_dot.set_xlabel("Held-out R²")
-    ax_dot.tick_params(axis="y", length=0)
+    ax_dot.tick_params(axis="y", length=0, colors="black")
     ax_dot.spines["left"].set_visible(False)
     style.panel_label(ax_dot, "b", dx=-0.36, dy=1.02)
 
     # ── text columns: RMSE, bias, n ───────────────────────────────────
     ax_txt.set_axis_off()
     ax_txt.set_ylim(*ax_dot.get_ylim())
-    # Axes-fraction placement, so the headers hang directly over their
-    # columns at panel-label height instead of floating at the canvas edge.
+    # Keep the metric header below the panel-letter row. It remains above the
+    # first class row without competing with the figure's primary hierarchy.
     head = dict(
         fontsize=NOTE_PT,
         fontweight="bold",
-        color=style.AXIS_COLOR,
+        color="black",
         ha="right",
         va="baseline",
         transform=ax_txt.transAxes,
     )
-    ax_txt.text(COL_RMSE, 1.055, "RMSE", **head)
-    ax_txt.text(COL_BIAS, 1.055, "Bias", **head)
-    ax_txt.text(COL_N, 1.055, "n", **head)
+    ax_txt.text(COL_RMSE, METRIC_HEADER_Y, "RMSE", **head)
+    ax_txt.text(COL_BIAS, METRIC_HEADER_Y, "Bias", **head)
+    ax_txt.text(COL_N, METRIC_HEADER_Y, "n", **head)
+    ax_txt.text(COL_LOCATIONS, METRIC_HEADER_Y, "Locations", **head)
     ax_txt.text(
         (COL_RMSE + COL_BIAS) / 2.0,
-        0.995,
+        METRIC_UNIT_Y,
         f"({style.LOG10_ABS_MPA_UNIT})",
         fontsize=NOTE_PT,
-        color=style.MUTED_INK,
+        color="black",
         ha="center",
         va="baseline",
         transform=ax_txt.transAxes,
     )
-    body = dict(fontsize=NOTE_PT, color=style.AXIS_COLOR, ha="right", va="center")
+    body = dict(fontsize=NOTE_PT, color="black", ha="right", va="center")
     for y, (_, r) in zip(ypos, cv.iterrows()):
+        rounded_bias = round(float(r["bias"]), 2)
+        bias_text = (
+            "0.00" if rounded_bias == 0.0 else f"{rounded_bias:+.2f}".replace("-", "−")
+        )
         ax_txt.text(COL_RMSE, y, f"{r['rmse']:.2f}", **body)
-        ax_txt.text(COL_BIAS, y, f"{r['bias']:+.2f}", **body)
+        ax_txt.text(COL_BIAS, y, bias_text, **body)
         ax_txt.text(COL_N, y, f"{int(r['n_test']):,}", **body)
+        ax_txt.text(COL_LOCATIONS, y, f"{int(r['n_test_locations']):,}", **body)
 
     out_dir = Path(output_dir)
     png = style.save(fig, out_dir / "fig06_regional_skill")
