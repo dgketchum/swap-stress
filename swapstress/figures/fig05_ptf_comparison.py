@@ -1,54 +1,48 @@
-"""Descriptor Fig 5: validation scatter -- the direct model against PTF baselines.
+"""Descriptor Fig 5: PTF applicability and common-subset error.
 
-Observed vs predicted matric potential for three estimators, each over its
-available cases: our direct quantile RF (its median, which is the released
-Level 1 value), Rosetta, and POLARIS. The PTF columns come from
-``swapstress.validation.ptf_baseline``, which pushes each site's published van
-Genuchten parameters through the retention equation at the observed theta.
-The candidate observations are the same held-out rows for all three panels,
-but each method's metrics keep only the pairs where that method returns a
-finite value, so the displayed n differs by method -- the caption says
-"available cases by method" rather than claiming identical samples.
+This figure is deliberately not a three-panel prediction contest. It answers
+two narrower questions that are useful to a data-product reader:
 
-Off-scale honesty: the axes are held to the shared window (expanding them to
-include the PTF tails would collapse the QRF structure), so the fraction of
-each method's pairs that lands outside the window is stated in the metric
-block, and the off-scale predictions are marked as carets on the top/bottom
-axis edge at their observed x.
+1. Over the 5,244 held-out measured theta-potential pairs assembled for the
+   mapped-parameter comparison, where can each route return an estimate under
+   its own mathematical rules?
+2. On the identical rows where both mapped van Genuchten curves are strictly
+   invertible, what are the conditional RMSE and MAE of SWAP, Rosetta, and
+   depth-matched POLARIS?
 
-Both axes are ``log10|psi|`` with psi in MPa, the descriptor's presentation
-unit, converted from the stored ``log10_suction_cm`` by the exact additive
-shift in ``swapstress.units``. Because the shift is common to observed and
-predicted, RMSE, bias and R2 are numerically unchanged by it.
+Panel a separates a method's applicability from its accuracy. For SWAP,
+"evaluable" means that the direct QRF returns a finite estimate. For Rosetta
+and POLARIS, it means that mapped parameters are available and the measured
+water content satisfies ``theta_r < theta < theta_s``. Water contents outside
+that interval are labeled by the curve boundary they exceed; they are not
+called invalid observations and epsilon-clipped inversions are never plotted.
 
-**Held-out rows only.** ``ptf_baseline evaluate`` falls back to predicting every
-row with the single fitted model when no k-fold artifacts are present, and that
-branch includes the rows the model trained on -- the released
-``ptf_comparison_observations.parquet`` was produced that way. Plotting it as-is
-would put an in-sample RF beside genuinely out-of-sample PTFs, which is the
-first thing a reviewer probes. This module therefore keeps only the
-observations that fall in the model's spatial holdout, so all three estimators
-are being asked the same out-of-sample question.
+Panel b uses the common three-way strict subset for every method. RMSE and MAE
+are shown together because they support different conclusions in this sample:
+POLARIS has lower observation-weighted squared error, whereas SWAP has lower
+absolute error. The panel therefore documents conditional behavior without
+claiming universal method superiority. Conventional equal-site-weighted
+metrics will be added only after their dedicated reproducible artifact is
+persisted.
 
-Drawn to ``swapstress.figures.style``: 183 mm double-column, panel labels at
-8 pt bold and everything else between 5 and 7 pt, one sans typeface throughout,
-and only the point clouds rasterised.
+The input is ``ptf_depth_matched_observations.parquet`` from
+``swapstress.validation.ptf_depth_matched``. It contains held-out measured
+theta-potential pairs, the released SWAP predictions, mapped Rosetta central
+parameters, depth-matched POLARIS mean parameters, and strict domain statuses.
+This is an accuracy and applicability audit at the comparison observations;
+it is not a SMAP-conditioned accuracy test.
 
-The defaults point at the 0.3 release. ``ptf_baseline evaluate`` writes
-``ptf_comparison_observations.parquet`` straight into the directory given as its
-``--output`` -- it makes no subdirectory of its own -- so the release rerun
-against ``.../releases/v03_20260729/evaluation`` leaves the table there, beside
-the coverage tables the other stage-04 analyses wrote.
+Drawn to ``swapstress.figures.style`` at 183 mm double-column width. Text and
+line art remain vector.
 
 Usage:
     uv run swapstress-figures --figure validation-scatter
-    uv run python -m swapstress.figures.fig05_ptf_comparison --model-dir <dir>
+    uv run python -m swapstress.figures.fig05_ptf_comparison --observations <path>
 """
 
 from __future__ import annotations
 
 import argparse
-import math
 import os
 from pathlib import Path
 from typing import List, Optional
@@ -59,255 +53,387 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from matplotlib.lines import Line2D
+from matplotlib.patches import Patch
 
 from swapstress.figures import style
 from swapstress.units import log10_suction_cm_to_log10_abs_mpa
+from swapstress.validation.ptf_depth_matched import DEFAULT_OBSERVATIONS
 
-DEFAULT_MODEL_DIR = "/nas/soils/swapstress/models/direct_qrf_9km_global_pruned"
-DEFAULT_PTF_DIR = "/nas/soils/swapstress/releases/v03_20260729/evaluation"
 DEFAULT_OUTPUT_DIR = "figs/descriptor"
 
-# The columns that identify one observation in both tables.
-JOIN_KEYS = ["sample_id", "source", "theta", "log10_suction_cm"]
-
-# Colours are the validated categorical trio, taken in a fixed order so each
-# estimator keeps its hue across the descriptor.
-ESTIMATORS = [
-    ("rf_pred", "SWAP direct QRF", style.CATEGORICAL[0]),
-    ("ros_log10_suction", "Rosetta", style.CATEGORICAL[1]),
-    ("pol_log10_suction", "POLARIS", style.CATEGORICAL[2]),
-]
-
-PANEL_LETTERS = ("a", "b", "c")
-
-# The drawn window, declared in the pipeline's internal units -- 0 to 7 log10
-# cm covers everything the observations reach -- and then shifted once into the
-# descriptor's presentation unit. Declaring it this way keeps the panels
-# showing exactly the region they always showed: the shift is additive, so the
-# window moves with the data rather than cropping a different part of it.
-AXIS_LIMITS_LOG10_CM = (0.0, 7.0)
-AXIS_LIMITS = tuple(
-    float(log10_suction_cm_to_log10_abs_mpa(v)) for v in AXIS_LIMITS_LOG10_CM
+# Prediction column, strict-status column (None for SWAP), display label, and
+# method colour. POLARIS uses the capped column only because it is the persisted
+# numeric column; the common strict mask guarantees that no capped boundary
+# value enters panel b.
+ESTIMATORS = (
+    ("rf_pred", None, "SWAP direct", style.CATEGORICAL[0]),
+    (
+        "ros_log10_suction",
+        "rosetta_domain_status",
+        "Rosetta",
+        style.CATEGORICAL[1],
+    ),
+    (
+        "pol_depth_matched_log10_suction_capped",
+        "polaris_domain_status",
+        "POLARIS",
+        style.CATEGORICAL[2],
+    ),
 )
-# One tick per decade of potential, as before -- the shift makes the window
-# ends non-integer, so the whole decades inside it are taken explicitly rather
-# than by truncating the limits (which rounds the wrong way below zero).
-DECADE_TICKS = list(range(math.ceil(AXIS_LIMITS[0]), math.floor(AXIS_LIMITS[1]) + 1))
 
-# The two-column width. The height is chosen so three equal-aspect panels fill
-# that width exactly: any shorter and the square panels shrink, leaving gaps at
-# the sides; any taller and the extra is dead space under the axes.
+DOMAIN_STATUSES = (
+    "missing_parameters",
+    "invalid_parameters",
+    "below_or_equal_theta_r",
+    "above_or_equal_theta_s",
+    "in_domain",
+)
+
+# Panel-a categories are exhaustive and mutually exclusive over the candidate
+# set. "Unavailable" includes missing/invalid parameters and any unexpected
+# non-finite prediction on a row otherwise marked in-domain.
+APPLICABILITY = (
+    ("evaluable", "Evaluated / strict inverse", "#1B9E77"),
+    ("below", r"θ ≤ θ$_r$", "#D95F02"),
+    ("above", r"θ ≥ θ$_s$", "#7570B3"),
+    ("unavailable", "Unavailable", style.NO_DATA_GRAY),
+)
+
 FIGURE_WIDTH_MM = style.DOUBLE_COLUMN_MM
-FIGURE_HEIGHT_MM = 66.0
+FIGURE_HEIGHT_MM = 76.0
 
 
-def metrics(observed: np.ndarray, predicted: np.ndarray) -> dict:
-    """RMSE, bias and R2 over the pairs where both are finite."""
+def metrics(observed: np.ndarray, predicted: np.ndarray) -> dict[str, float | int]:
+    """Return conventional observation-weighted error summaries."""
     observed = np.asarray(observed, dtype=float)
     predicted = np.asarray(predicted, dtype=float)
     keep = np.isfinite(observed) & np.isfinite(predicted)
-    observed, predicted = observed[keep], predicted[keep]
+    observed = observed[keep]
+    predicted = predicted[keep]
+    if observed.size == 0:
+        raise ValueError("Cannot calculate metrics without finite pairs.")
+
     residual = predicted - observed
-    ss_res = float((residual**2).sum())
-    ss_tot = float(((observed - observed.mean()) ** 2).sum())
+    ss_res = float(np.sum(residual**2))
+    ss_tot = float(np.sum((observed - observed.mean()) ** 2))
     return {
-        "n": int(keep.sum()),
-        "rmse": float(np.sqrt((residual**2).mean())),
-        "bias": float(residual.mean()),
+        "n": int(observed.size),
+        "rmse": float(np.sqrt(np.mean(residual**2))),
+        "mae": float(np.mean(np.abs(residual))),
+        "bias": float(np.mean(residual)),
         "r2": 1.0 - ss_res / ss_tot if ss_tot > 0 else np.nan,
     }
 
 
-def load_holdout(model_dir: str, ptf_dir: str) -> pd.DataFrame:
-    """PTF comparison rows restricted to the model's spatial holdout.
-
-    ``predictions.parquet`` is row-aligned with ``test_set_full.parquet``; that
-    is checked rather than assumed, because a silent misalignment would produce
-    a plausible-looking and entirely wrong scatter.
-    """
-    model = Path(model_dir)
-    test = pd.read_parquet(model / "test_set_full.parquet")
-    preds = pd.read_parquet(model / "predictions.parquet")
-    if len(test) != len(preds):
-        raise ValueError(
-            f"{model.name}: test_set_full has {len(test):,} rows and "
-            f"predictions has {len(preds):,}; they must be row-aligned."
-        )
-    if not np.allclose(
-        test["log10_suction_cm"].values, preds["observed"].values, equal_nan=True
-    ):
-        raise ValueError(
-            f"{model.name}: predictions.parquet is not row-aligned with "
-            "test_set_full.parquet -- 'observed' does not match "
-            "'log10_suction_cm'."
-        )
-
-    holdout = test[JOIN_KEYS].copy()
-    holdout["rf_pred"] = preds["predicted"].values
-    holdout = holdout.drop_duplicates(subset=JOIN_KEYS)
-
-    ptf = pd.read_parquet(Path(ptf_dir) / "ptf_comparison_observations.parquet")
-    ptf = ptf.drop_duplicates(subset=JOIN_KEYS)
-
-    merged = ptf.merge(holdout, on=JOIN_KEYS, how="inner")
-    print(
-        f"{len(ptf):,} PTF observations, {len(holdout):,} held-out rows, "
-        f"{len(merged):,} in both"
+def load_depth_matched(observations_path: str) -> pd.DataFrame:
+    """Load and validate the held-out, depth-matched comparison table."""
+    df = pd.read_parquet(observations_path)
+    required = (
+        {"log10_suction_cm", "sample_id", "source"}
+        | {column for column, _, _, _ in ESTIMATORS}
+        | {status for _, status, _, _ in ESTIMATORS if status is not None}
     )
-    if merged.empty:
+    missing = required - set(df.columns)
+    if missing:
         raise ValueError(
-            "No PTF observations fall in the model's spatial holdout; the "
-            "figure would have nothing out-of-sample to show."
+            f"{observations_path}: missing required column(s) {sorted(missing)}; "
+            "was this built by `swapstress.validation.ptf_depth_matched build`?"
         )
-    return merged
+
+    if not np.isfinite(df["log10_suction_cm"].to_numpy(dtype=float)).all():
+        raise ValueError(f"{observations_path}: candidate observations must be finite.")
+
+    allowed = set(DOMAIN_STATUSES)
+    for _, status_column, label, _ in ESTIMATORS:
+        if status_column is None:
+            continue
+        observed_statuses = set(df[status_column].dropna().astype(str).unique())
+        unknown = observed_statuses - allowed
+        if unknown:
+            raise ValueError(
+                f"{observations_path}: {label} has unknown domain status(es) "
+                f"{sorted(unknown)}."
+            )
+
+    print(
+        f"{len(df):,} depth-matched held-out rows, "
+        f"{df['sample_id'].nunique():,} sample-layer identifiers"
+    )
+    return df
 
 
-def off_scale(observed: np.ndarray, predicted: np.ndarray):
-    """Masks for the pairs the metrics count but the axes cannot show.
+def applicability_counts(df: pd.DataFrame) -> pd.DataFrame:
+    """Count mutually exclusive applicability outcomes for each method."""
+    rows = []
+    n_total = len(df)
 
-    Rosetta puts 17% of its predictions outside the drawn window and POLARIS
-    7%, far beyond anything the observations reach. They stay in the RMSE and
-    R2 -- they are real errors -- but they land off the panel, so their share
-    is quoted in the metric block and each one is marked at the axis edge
-    rather than left to be silently cropped. A couple of *observations* also
-    sit just past the window's low end, so both axes are checked. Returns
-    ``(above, below, left, right)`` boolean masks: predicted past the top or
-    bottom edge, observed past the left or right edge.
-    """
-    observed = np.asarray(observed, dtype=float)
-    predicted = np.asarray(predicted, dtype=float)
-    keep = np.isfinite(observed) & np.isfinite(predicted)
-    low, high = AXIS_LIMITS
-    above = keep & (predicted > high)
-    below = keep & (predicted < low)
-    left = keep & (observed < low)
-    right = keep & (observed > high)
-    return above, below, left, right
+    for column, status_column, label, _ in ESTIMATORS:
+        finite_prediction = np.isfinite(df[column].to_numpy(dtype=float))
+        if status_column is None:
+            row = {
+                "method": label,
+                "evaluable": int(finite_prediction.sum()),
+                "below": 0,
+                "above": 0,
+                "unavailable": int((~finite_prediction).sum()),
+            }
+        else:
+            status = df[status_column].astype(str).to_numpy()
+            in_domain = status == "in_domain"
+            below = status == "below_or_equal_theta_r"
+            above = status == "above_or_equal_theta_s"
+            assigned = (in_domain & finite_prediction) | below | above
+            row = {
+                "method": label,
+                "evaluable": int((in_domain & finite_prediction).sum()),
+                "below": int(below.sum()),
+                "above": int(above.sum()),
+                "unavailable": int((~assigned).sum()),
+            }
+
+        if sum(row[key] for key, _, _ in APPLICABILITY) != n_total:
+            raise ValueError(f"Applicability outcomes do not sum to n={n_total:,}.")
+        rows.append(row)
+
+    return pd.DataFrame(rows).set_index("method")
+
+
+def common_strict_mask(df: pd.DataFrame) -> np.ndarray:
+    """Rows with finite observations/predictions and both PTFs in-domain."""
+    keep = np.isfinite(df["log10_suction_cm"].to_numpy(dtype=float))
+    for column, status_column, _, _ in ESTIMATORS:
+        keep &= np.isfinite(df[column].to_numpy(dtype=float))
+        if status_column is not None:
+            keep &= df[status_column].astype(str).to_numpy() == "in_domain"
+    return keep
+
+
+def common_subset_metrics(df: pd.DataFrame) -> pd.DataFrame:
+    """Observation-weighted metrics on one identical strict subset."""
+    keep = common_strict_mask(df)
+    observed = log10_suction_cm_to_log10_abs_mpa(
+        df.loc[keep, "log10_suction_cm"].to_numpy(dtype=float)
+    )
+    rows = []
+    for column, _, label, color in ESTIMATORS:
+        predicted = log10_suction_cm_to_log10_abs_mpa(
+            df.loc[keep, column].to_numpy(dtype=float)
+        )
+        rows.append({"method": label, "color": color, **metrics(observed, predicted)})
+    return pd.DataFrame(rows).set_index("method")
+
+
+def _plot_applicability(ax, counts: pd.DataFrame) -> None:
+    """Panel a: stacked shares of the common candidate set."""
+    methods = [label for _, _, label, _ in ESTIMATORS]
+    y = np.arange(len(methods))[::-1]
+    totals = counts.loc[methods].sum(axis=1).to_numpy(dtype=float)
+    left = np.zeros(len(methods), dtype=float)
+
+    for key, legend_label, color in APPLICABILITY:
+        values = 100.0 * counts.loc[methods, key].to_numpy(dtype=float) / totals
+        ax.barh(
+            y,
+            values,
+            left=left,
+            height=0.58,
+            color=color,
+            edgecolor="white",
+            linewidth=0.5,
+            label=legend_label,
+        )
+        for row_y, start, value in zip(y, left, values):
+            if value < 8.0:
+                continue
+            text_color = style.AXIS_COLOR if key == "unavailable" else "white"
+            precision = 0 if np.isclose(value, 100.0) else 1
+            ax.text(
+                start + value / 2.0,
+                row_y,
+                f"{value:.{precision}f}%",
+                ha="center",
+                va="center",
+                fontsize=style.MIN_TEXT_PT,
+                color=text_color,
+                fontweight="bold",
+            )
+        left += values
+
+    ax.set_yticks(y, methods)
+    ax.set_xlim(0.0, 100.0)
+    ax.set_xticks((0, 25, 50, 75, 100))
+    ax.set_xlabel("Share of candidate pairs (%)")
+    ax.set_title("Applicability over held-out measured pairs", pad=18)
+    ax.text(
+        0.0,
+        1.02,
+        f"n = {int(totals[0]):,}; SWAP finite estimate, PTF strict inverse",
+        transform=ax.transAxes,
+        ha="left",
+        va="bottom",
+        fontsize=style.MIN_TEXT_PT,
+        color=style.MUTED_INK,
+    )
+    ax.grid(axis="x", linewidth=0.35, color=style.GRID_COLOR, zorder=0)
+    ax.set_axisbelow(True)
+    handles = [
+        Patch(facecolor=color, edgecolor="none", label=label)
+        for _, label, color in APPLICABILITY
+    ]
+    # Matplotlib fills a two-column legend column-first. Reorder so the visual
+    # reading order is evaluable, below theta_r, above theta_s, unavailable.
+    handles = [handles[0], handles[2], handles[1], handles[3]]
+    ax.legend(
+        handles=handles,
+        loc="upper center",
+        bbox_to_anchor=(0.5, -0.26),
+        ncol=2,
+        columnspacing=1.2,
+        handlelength=1.2,
+    )
+    style.panel_label(ax, "a", dx=-0.10, dy=1.13)
+
+
+def _plot_common_error(ax, common: pd.DataFrame) -> None:
+    """Panel b: RMSE and MAE on the identical common strict subset."""
+    methods = [label for _, _, label, _ in ESTIMATORS]
+    y = np.arange(len(methods))[::-1]
+
+    for row_y, method in zip(y, methods):
+        row = common.loc[method]
+        mae = float(row["mae"])
+        rmse = float(row["rmse"])
+        color = str(row["color"])
+        ax.plot([mae, rmse], [row_y, row_y], color=color, alpha=0.5, linewidth=1.2)
+        ax.scatter(
+            mae,
+            row_y,
+            marker="D",
+            s=26,
+            color=color,
+            edgecolor="white",
+            linewidth=0.5,
+            zorder=3,
+        )
+        ax.scatter(
+            rmse,
+            row_y,
+            marker="o",
+            s=30,
+            color=color,
+            edgecolor="white",
+            linewidth=0.5,
+            zorder=3,
+        )
+        ax.annotate(
+            f"{mae:.3f}",
+            (mae, row_y),
+            xytext=(-4, 7),
+            textcoords="offset points",
+            ha="right",
+            va="bottom",
+            fontsize=style.MIN_TEXT_PT,
+            color=color,
+        )
+        ax.annotate(
+            f"{rmse:.3f}",
+            (rmse, row_y),
+            xytext=(4, 7),
+            textcoords="offset points",
+            ha="left",
+            va="bottom",
+            fontsize=style.MIN_TEXT_PT,
+            color=color,
+        )
+
+    n_common = int(common["n"].iloc[0])
+    ax.set_yticks(y, methods)
+    ax.set_ylim(-0.55, 2.55)
+    ax.set_xlim(0.0, 0.86)
+    ax.set_xticks(np.arange(0.0, 0.81, 0.2))
+    ax.set_xlabel(r"Error (log$_{10}$ |MPa|; lower is better)")
+    ax.set_title("Conditional error on the common strict subset", pad=18)
+    ax.text(
+        0.0,
+        1.02,
+        f"n = {n_common:,}; identical rows, observation weighted",
+        transform=ax.transAxes,
+        ha="left",
+        va="bottom",
+        fontsize=style.MIN_TEXT_PT,
+        color=style.MUTED_INK,
+    )
+    ax.grid(axis="x", linewidth=0.35, color=style.GRID_COLOR, zorder=0)
+    ax.set_axisbelow(True)
+    ax.legend(
+        handles=(
+            Line2D(
+                [],
+                [],
+                marker="o",
+                linestyle="none",
+                markerfacecolor=style.MUTED_INK,
+                markeredgecolor="white",
+                label="RMSE",
+            ),
+            Line2D(
+                [],
+                [],
+                marker="D",
+                linestyle="none",
+                markerfacecolor=style.MUTED_INK,
+                markeredgecolor="white",
+                label="MAE",
+            ),
+        ),
+        loc="upper center",
+        bbox_to_anchor=(0.5, -0.26),
+        ncol=2,
+        columnspacing=1.5,
+    )
+    style.panel_label(ax, "b", dx=-0.10, dy=1.13)
 
 
 def render(df: pd.DataFrame, output_dir: str) -> Path:
+    """Render applicability and common-subset error to the standard outputs."""
     style.apply()
-    # Everything drawn and every metric quoted is in the presentation unit. The
-    # shift is common to both axes, so RMSE, bias and R2 are the same numbers
-    # they were in log10 cm -- converting here rather than in the caption means
-    # the panel and its annotation can never disagree about which unit they are.
-    observed = log10_suction_cm_to_log10_abs_mpa(df["log10_suction_cm"].values)
+    counts = applicability_counts(df)
+    common = common_subset_metrics(df)
+    if common["n"].nunique() != 1:
+        raise ValueError("Every common-subset metric must use the same denominator.")
+
     fig, axes = plt.subplots(
         1,
-        3,
+        2,
         figsize=style.figsize(FIGURE_WIDTH_MM, FIGURE_HEIGHT_MM),
-        sharex=True,
-        sharey=True,
+        gridspec_kw={"width_ratios": (1.08, 0.92)},
         layout="constrained",
     )
-
-    for ax, letter, (column, label, color) in zip(axes, PANEL_LETTERS, ESTIMATORS):
-        predicted = log10_suction_cm_to_log10_abs_mpa(df[column].values)
-        stats = metrics(observed, predicted)
-        # Rasterised marks only: the axes, the 1:1 line and every label below
-        # stay vector, which is what the artwork guide asks for.
-        ax.scatter(
-            observed,
-            predicted,
-            s=2.0,
-            alpha=0.22,
-            color=color,
-            edgecolors="none",
-            rasterized=True,
-            zorder=2,
-        )
-        ax.plot(
-            AXIS_LIMITS,
-            AXIS_LIMITS,
-            color="black",
-            linewidth=0.6,
-            dashes=(2.6, 1.8),
-            zorder=3,
-        )
-        ax.set_xlim(*AXIS_LIMITS)
-        ax.set_ylim(*AXIS_LIMITS)
-        ax.set_aspect("equal")
-        ax.set_xticks(DECADE_TICKS)
-        ax.set_yticks(DECADE_TICKS)
-        ax.set_title(label, pad=2.5)
-        style.panel_label(ax, letter, dx=-0.10, dy=1.02)
-
-        # Off-scale predictions: their share goes in the metric block, and each
-        # one is a caret on the axis edge at its observed x, so the clipped
-        # mass is visible in proportion to its consequence.
-        above, below, left, right = off_scale(observed, predicted)
-        dropped = int((above | below | left | right).sum())
-        low, high = AXIS_LIMITS
-        rug_kw = dict(
-            s=5.0,
-            color=color,
-            alpha=0.2,
-            linewidths=0.5,
-            rasterized=True,
-            clip_on=False,
-            zorder=2,
-        )
-        if above.any():
-            ax.scatter(observed[above], np.full(above.sum(), high), marker=10, **rug_kw)
-        if below.any():
-            ax.scatter(observed[below], np.full(below.sum(), low), marker=11, **rug_kw)
-        if left.any():
-            clipped = np.clip(predicted[left], low, high)
-            ax.scatter(np.full(left.sum(), low), clipped, marker=8, **rug_kw)
-        if right.any():
-            clipped = np.clip(predicted[right], low, high)
-            ax.scatter(np.full(right.sum(), high), clipped, marker=9, **rug_kw)
-
-        lines = [
-            f"n = {stats['n']:,}",
-            f"RMSE = {stats['rmse']:.2f}",
-            f"bias = {stats['bias']:+.2f}",
-            f"R$^2$ = {stats['r2']:+.2f}",
-        ]
-        if dropped:
-            pct = 100.0 * dropped / stats["n"]
-            share = "<0.1%" if pct < 0.1 else f"{pct:.1f}%"
-            lines.append(f"{share} outside axes")
-        ax.text(
-            0.035,
-            0.97,
-            "\n".join(lines),
-            transform=ax.transAxes,
-            va="top",
-            ha="left",
-            fontsize=style.MAX_TEXT_PT - 1,
-            linespacing=1.35,
-            zorder=4,
-            bbox=dict(facecolor="white", alpha=0.7, edgecolor="none", pad=1.2),
-        )
-
-    axes[0].set_ylabel(f"Predicted {style.LOG10_ABS_MPA_AXIS}")
-    fig.supxlabel(f"Observed {style.LOG10_ABS_MPA_AXIS}", fontsize=style.MAX_TEXT_PT)
-
+    _plot_applicability(axes[0], counts)
+    _plot_common_error(axes[1], common)
     return style.save(fig, Path(output_dir) / "fig05_ptf_comparison")
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="fig05_ptf_comparison",
-        description="Descriptor Fig 5: held-out validation scatter against PTF baselines.",
+        description="Descriptor Fig 5: PTF applicability and common-subset error.",
     )
-    parser.add_argument("--model-dir", default=DEFAULT_MODEL_DIR)
-    parser.add_argument("--ptf-dir", default=DEFAULT_PTF_DIR)
+    parser.add_argument("--observations", default=DEFAULT_OBSERVATIONS)
     parser.add_argument("--output-dir", default=DEFAULT_OUTPUT_DIR)
     return parser
 
 
 def main(argv: Optional[List[str]] = None) -> None:
     args = build_parser().parse_args(argv)
-    df = load_holdout(args.model_dir, args.ptf_dir)
-    observed = log10_suction_cm_to_log10_abs_mpa(df["log10_suction_cm"].values)
-    for column, label, _ in ESTIMATORS:
-        stats = metrics(observed, log10_suction_cm_to_log10_abs_mpa(df[column].values))
-        print(
-            f"  {label:16} n={stats['n']:5,d}  RMSE={stats['rmse']:.3f}  "
-            f"bias={stats['bias']:+.3f}  R2={stats['r2']:+.3f}"
-        )
+    df = load_depth_matched(args.observations)
+    counts = applicability_counts(df)
+    common = common_subset_metrics(df)
+    print("Applicability counts (candidate denominator):")
+    print(counts.to_string())
+    print("Common strict-subset metrics (observation weighted):")
+    print(common[["n", "rmse", "mae", "bias", "r2"]].to_string())
     path = render(df, args.output_dir)
     print(f"Saved to {os.path.abspath(path)}")
 
