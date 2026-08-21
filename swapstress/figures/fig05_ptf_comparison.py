@@ -3,7 +3,7 @@
 This figure is deliberately not a three-panel prediction contest. It answers
 two narrower questions that are useful to a data-product reader:
 
-1. Over the 5,244 held-out measured theta-potential pairs assembled for the
+1. Over the CONUS held-out measured theta-potential pairs assembled for the
    mapped-parameter comparison, where can each route return an estimate under
    its own mathematical rules?
 2. On the identical rows where both mapped van Genuchten curves are strictly
@@ -32,6 +32,13 @@ parameters, depth-matched POLARIS mean parameters, and strict domain statuses.
 This is an accuracy and applicability audit at the comparison observations;
 it is not a SMAP-conditioned accuracy test.
 
+The comparison is restricted to observations inside the lower-48
+state-polygon union, because Rosetta and POLARIS are released as CONUS
+products: absence outside their released domain is not method unavailability.
+The filter joins ``sample_id`` to coordinates in
+``site_vg_params_depth_matched.parquet`` and is applied independently of
+method availability, before any counting or scoring.
+
 Drawn to ``swapstress.figures.style`` at 183 mm double-column width. Text and
 line art remain vector.
 
@@ -56,9 +63,12 @@ import pandas as pd
 from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
 
-from swapstress.figures import style
+from swapstress.figures import basemap, style
 from swapstress.units import log10_suction_cm_to_log10_abs_mpa
-from swapstress.validation.ptf_depth_matched import DEFAULT_OBSERVATIONS
+from swapstress.validation.ptf_depth_matched import (
+    DEFAULT_OBSERVATIONS,
+    DEFAULT_SITE_PARAMS_DEPTH_MATCHED,
+)
 
 DEFAULT_OUTPUT_DIR = "figs/descriptor"
 
@@ -161,6 +171,35 @@ def load_depth_matched(observations_path: str) -> pd.DataFrame:
         f"{df['sample_id'].nunique():,} sample-layer identifiers"
     )
     return df
+
+
+def filter_conus(df: pd.DataFrame, site_params_path: str) -> pd.DataFrame:
+    """Keep rows whose sample layer lies inside the lower-48 state union.
+
+    The restriction is applied independently of method availability so the
+    denominator is not selected by the outcome being evaluated.
+    """
+    import geopandas as gpd
+
+    sites = pd.read_parquet(site_params_path, columns=["sample_id", "lat", "lon"])
+    unmatched = set(df["sample_id"]) - set(sites["sample_id"])
+    if unmatched:
+        raise ValueError(
+            f"{site_params_path}: no coordinates for {len(unmatched)} sample "
+            f"layer(s), e.g. {sorted(unmatched)[:3]}."
+        )
+
+    points = gpd.GeoSeries(gpd.points_from_xy(sites["lon"], sites["lat"]), crs=4326)
+    conus = basemap.load_conus_states().union_all()
+    sites = sites.loc[points.within(conus).to_numpy()]
+
+    kept = df[df["sample_id"].isin(set(sites["sample_id"]))].reset_index(drop=True)
+    print(
+        f"CONUS filter: kept {len(kept):,} of {len(df):,} rows "
+        f"({kept['sample_id'].nunique():,} of {df['sample_id'].nunique():,} "
+        "sample-layer identifiers)"
+    )
+    return kept
 
 
 def applicability_counts(df: pd.DataFrame) -> pd.DataFrame:
@@ -406,6 +445,7 @@ def build_parser() -> argparse.ArgumentParser:
         description="Descriptor Fig 5: PTF applicability and common-subset error.",
     )
     parser.add_argument("--observations", default=DEFAULT_OBSERVATIONS)
+    parser.add_argument("--site-params", default=DEFAULT_SITE_PARAMS_DEPTH_MATCHED)
     parser.add_argument("--output-dir", default=DEFAULT_OUTPUT_DIR)
     return parser
 
@@ -413,6 +453,7 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: Optional[List[str]] = None) -> None:
     args = build_parser().parse_args(argv)
     df = load_depth_matched(args.observations)
+    df = filter_conus(df, args.site_params)
     counts = applicability_counts(df)
     common = common_subset_metrics(df)
     print("Applicability counts (candidate denominator):")
