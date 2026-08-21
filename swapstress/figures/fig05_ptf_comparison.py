@@ -268,7 +268,7 @@ def _plot_applicability(ax, counts: pd.DataFrame) -> None:
     ax.text(
         0.0,
         1.02,
-        f"n = {int(totals[0]):,}; SWAP finite estimate, PTF strict inverse",
+        f"n = {int(totals[0]):,}",
         transform=ax.transAxes,
         ha="left",
         va="bottom",
@@ -334,7 +334,7 @@ def _plot_common_error(ax, common: pd.DataFrame) -> None:
             ha="right",
             va="bottom",
             fontsize=style.MIN_TEXT_PT,
-            color=color,
+            color=style.AXIS_COLOR,
         )
         ax.annotate(
             f"{rmse:.3f}",
@@ -344,10 +344,9 @@ def _plot_common_error(ax, common: pd.DataFrame) -> None:
             ha="left",
             va="bottom",
             fontsize=style.MIN_TEXT_PT,
-            color=color,
+            color=style.AXIS_COLOR,
         )
 
-    n_common = int(common["n"].iloc[0])
     ax.set_yticks(y, methods)
     ax.set_ylim(-0.55, 2.55)
     ax.set_xlim(0.0, 0.86)
@@ -357,7 +356,7 @@ def _plot_common_error(ax, common: pd.DataFrame) -> None:
     ax.text(
         0.0,
         1.02,
-        f"n = {n_common:,}; identical rows, observation weighted",
+        f"n = {int(common['n'].iloc[0]):,}; identical rows, observation weighted",
         transform=ax.transAxes,
         ha="left",
         va="bottom",
