@@ -345,7 +345,10 @@ def render(median, width, n_days, mesh_x, mesh_y, states, month, output_dir):
         "95% prediction-interval width", fontsize=style.MAX_TEXT_PT, pad=2.5
     )
     style.panel_label(ax_width, "b", dx=0.0, dy=1.0)
-    _map_colorbar(fig, mesh_w, ax_width, f"q975 − q025 ({style.LOG10_ABS_MPA_UNIT})")
+    # "Interval width" rather than the band names: q975/q025 are internal
+    # identifiers; the caption defines the width as their difference. The
+    # title already says 95%, so the bar does not repeat it.
+    _map_colorbar(fig, mesh_w, ax_width, f"Interval width ({style.LOG10_ABS_MPA_UNIT})")
 
     print(f"Composite over {n_days} retrieval days in {month}")
 
