@@ -1,23 +1,24 @@
-"""Descriptor Fig 3: the model's inputs, and what they contribute.
+"""Descriptor Fig 3: model inputs and feature permutation importance.
 
 Panel a draws the feature stack as stacked CONUS layers -- the dynamic SMAP L3
-theta field on top, then one representative 9 km raster per static covariate
-group, each labeled with the group's band count and its share of static
-permutation importance. Panel b gives the per-feature permutation importance
-of the *released* QRF (``swapstress.model.qrf_permutation``): the drop in
-median-prediction R2 on the spatial holdout when one feature is shuffled.
+volumetric water content (VWC) field on top, then one representative 9 km
+raster per static covariate group. Each static layer is labeled with the number
+of model features in its group and the specific feature mapped. Panel b gives
+the per-feature permutation importance of the *released* QRF
+(``swapstress.model.qrf_permutation``): the drop in median-prediction R2 on the
+spatial holdout when one feature is shuffled.
 
-Theta dominates by an order of magnitude, so its bar is broken at the static
+VWC dominates by an order of magnitude, so its bar is broken at the remaining
 axis limit and labeled with its value; drawing it to scale would flatten every
 other bar into invisibility. Bars are colored by input kind with the validated
-categorical trio -- dynamic theta, static landscape covariates, per-sample
-descriptors (depth, Rosetta level). Panel a gives every layer its own ramp --
+categorical trio -- dynamic VWC, static landscape covariates, per-sample
+descriptors (depth, depth class). Panel a gives every layer its own ramp --
 the panel is a schematic with no colorbars, so distinct ramps read as distinct
-variables -- keeping theta on the purples ramp to match its bar color.
+variables -- keeping VWC on the purples ramp to match its bar color.
 
 The representative band shown for each group is that group's top-ranked
 feature in the importance table (falling back down the ranking to one that
-exists as a band in the group's raster). The theta layer is a single real
+exists as a band in the group's raster). The VWC layer is a single real
 retrieval day, gaps and all, because the daily field *is* the input.
 
 Usage:
@@ -45,7 +46,7 @@ IMPORTANCE_CSV = Path(
 )
 FEATURES_DIR = Path("/nas/soils/swapstress/inference/conus_features")
 # One real retrieval day, in Fig 7's July 2023 window.
-SMAP_THETA_TIF = Path("/nas/soils/smap/SPL3SMP_E/daily_tif/smap_sm_20230707.tif")
+SMAP_VWC_TIF = Path("/nas/soils/smap/SPL3SMP_E/daily_tif/smap_sm_20230707.tif")
 
 OUT_DIR = Path("figs/descriptor")
 STEM = "fig03_features"
@@ -57,10 +58,9 @@ FIG_HEIGHT_MM = 120.0
 # global ET0 climatology is exported inside the WorldClim stack), and the ramp
 # the layer renders in. One ramp per layer, each thematically its own: the
 # panel is a schematic with no colorbars, so the distinct ramps say "distinct
-# variables" rather than encoding a shared scale. The theta layer keeps
+# variables" rather than encoding a shared scale. The VWC layer keeps
 # ``style.SEQUENTIAL_ALT`` so purple stays the dynamic input's color.
 GROUPS = {
-    "worldclim": ("WorldClim climate", FEATURES_DIR / "worldclim_9km.tif", "viridis"),
     # YlOrBr truncated off its white end so low values stay a visible cream
     # and the layer's coastline does not dissolve into the page.
     "soilgrids": (
@@ -71,19 +71,37 @@ GROUPS = {
             mpl.colormaps["YlOrBr"]([0.12 + 0.88 * i / 255.0 for i in range(256)]),
         ),
     ),
-    "fao": ("FAO HWSD soil units", FEATURES_DIR / "fao_hwsd_9km.tif", "tab20"),
-    "global_et0": ("Global reference ET", FEATURES_DIR / "worldclim_9km.tif", "magma"),
     "landsat_bands": (
         "Landsat reflectance",
         FEATURES_DIR / "landsat_bands_9km.tif",
         "bone",
     ),
+    "worldclim": ("WorldClim climate", FEATURES_DIR / "worldclim_9km.tif", "viridis"),
+    "fao": ("FAO HWSD soil properties", FEATURES_DIR / "fao_hwsd_9km.tif", "YlGnBu"),
+    "global_et0": ("Global reference ET", FEATURES_DIR / "worldclim_9km.tif", "magma"),
+}
+
+# Top-to-bottom order below VWC, matching the static-covariate card in Fig 1.
+STATIC_GROUPS_TOP_DOWN = tuple(GROUPS)
+
+# Only nominal FAO/HWSD fields should receive a categorical ramp and integer
+# hashing. The current representative field is AWC, which is continuous.
+FAO_CATEGORICAL_FEATURES = {
+    "HWSD2_ID",
+    "WISE30s_ID",
+    "WRB4",
+    "WRB_PHASES",
+    "WRB2_CODE",
+    "FAO90",
+    "KOPPEN",
+    "TEXTURE_USDA",
+    "DRAINAGE",
 }
 
 # Input kinds share the validated categorical trio across both panels.
 COLOR_STATIC = style.CATEGORICAL[0]
 COLOR_SAMPLE = style.CATEGORICAL[1]
-COLOR_THETA = style.CATEGORICAL[2]
+COLOR_VWC = style.CATEGORICAL[2]
 
 N_BARS = 15
 
@@ -96,7 +114,18 @@ LAYER_YSCALE = 0.88
 LAYER_RISE = 0.60
 LAYER_ASPECT = 360.0 / 667.0
 
-SEASONS = {"winter": "winter", "spring": "spring", "summer": "summer", "fall": "fall"}
+SEASONS = {
+    "winter": "winter",
+    "spring": "spring",
+    "summer": "summer",
+    "autumn": "autumn",
+    "fall": "fall",
+    "gs": "growing season",
+    "1": "Q1",
+    "2": "Q2",
+    "3": "Q3",
+    "4": "Q4",
+}
 WC_VARS = {
     "prec": "Precipitation",
     "tavg": "Mean temperature",
@@ -117,9 +146,10 @@ SOILGRIDS_VARS = {
     "soc": "Soil organic C",
 }
 FIXED_LABELS = {
-    "theta": "θ (SMAP L3 soil moisture)",
+    "theta": "VWC (SMAP L3)",
     "depth_cm": "Sample depth",
-    "rosetta_level": "Rosetta level",
+    "rosetta_level": "Depth class",
+    "AWC": "Available water capacity",
     "WISE30s_ID": "WISE soil map unit",
     "HWSD2_ID": "HWSD soil map unit",
     "WRB4": "WRB soil group",
@@ -142,15 +172,26 @@ def pretty_name(feature: str) -> str:
     if len(parts) == 3 and parts[0] in SOILGRIDS_VARS and parts[2] == "mean":
         depth = parts[1].replace("cm", " cm").replace("-", "–")
         return f"{SOILGRIDS_VARS[parts[0]]}, {depth}"
-    if parts[0].startswith("B") and len(parts) == 3 and parts[2] == "gs":
+    if parts[0].startswith("B") and len(parts) == 3:
         stat = "s.d." if parts[1] == "stdDev" else parts[1]
-        return f"Landsat {parts[0]} {stat}, grow. season"
+        period = SEASONS.get(parts[2], parts[2])
+        return f"Landsat {parts[0]} {stat}, {period}"
     return feature
+
+
+def mapped_feature_name(group: str, feature: str) -> str:
+    """Short feature label when the source group is already the title."""
+    label = pretty_name(feature)
+    if group == "landsat_bands":
+        return label.removeprefix("Landsat ")
+    if group == "global_et0":
+        return label.removeprefix("Reference ET, ").capitalize()
+    return label
 
 
 def bar_color(group: str) -> str:
     if group == "theta":
-        return COLOR_THETA
+        return COLOR_VWC
     if group == "depth":
         return COLOR_SAMPLE
     return COLOR_STATIC
@@ -184,12 +225,12 @@ def read_band(path: Path, band_name: str) -> np.ndarray:
     return arr
 
 
-def read_theta_on_stack_grid() -> np.ndarray:
+def read_vwc_on_stack_grid() -> np.ndarray:
     """The daily SMAP field warped onto the 9 km static-stack grid."""
     ref_path = GROUPS["soilgrids"][1]
     with rasterio.open(ref_path) as ref:
         dst = np.full(ref.shape, np.nan)
-        with rasterio.open(SMAP_THETA_TIF) as src:
+        with rasterio.open(SMAP_VWC_TIF) as src:
             reproject(
                 source=rasterio.band(src, 1),
                 destination=dst,
@@ -220,42 +261,38 @@ def layer_transform(ax, index: int) -> mtransforms.Transform:
 
 
 def draw_stack(ax, df: pd.DataFrame) -> None:
-    """Stacked CONUS layers: static groups bottom-up, the theta day on top."""
+    """Stacked CONUS layers: static groups bottom-up, the VWC day on top."""
     # Restrict to the released model's landscape groups: an importance table
     # from a wider feature set (the archived pre-release run used for layout
     # checks) may carry groups the pruned model no longer has.
     landscape = df[df["group"].isin(GROUPS)]
-    # Negative permutation importance is sampling noise around zero; clipping
-    # before summing keeps the shares a partition of the positive signal.
-    shares = landscape.groupby("group")["importance_mean"].apply(
-        lambda s: s.clip(lower=0).sum()
-    )
-    shares = (shares / shares.sum()).sort_values()  # ascending: bottom layer first
     counts = landscape["group"].value_counts()
 
     layers = []
-    for group in shares.index:
+    for group in reversed(STATIC_GROUPS_TOP_DOWN):
         band = representative_band(group, df)
         img = read_band(GROUPS[group][1], band)
-        if group == "fao":
+        cmap = GROUPS[group][2]
+        if group == "fao" and band in FAO_CATEGORICAL_FEATURES:
             # Map-unit IDs are nominal: stretched raw they draw a north-south
             # gradient that implies a value field. A fixed integer hash spreads
             # adjacent units across the ramp so they read as categorical.
             img = np.where(np.isfinite(img), (img * 2654435761) % 97, np.nan)
+            cmap = "tab20"
         img = normalize(img)
-        line2 = f"{counts[group]} bands · {shares[group]:.0%} of static importance"
-        layers.append((img, GROUPS[group][2], GROUPS[group][0], line2))
-    theta_img = normalize(read_theta_on_stack_grid())
+        line2 = f"{counts[group]} features · {mapped_feature_name(group, band)}"
+        layers.append((img, cmap, GROUPS[group][0], line2))
+    vwc_img = normalize(read_vwc_on_stack_grid())
     layers.append(
         (
-            theta_img,
+            vwc_img,
             style.SEQUENTIAL_ALT,
-            "SMAP L3 θ",
-            "one day of retrievals · gray = no overpass",
+            "SMAP L3 VWC",
+            "Gray indicates no valid retrieval",
         )
     )
 
-    # Land mask from a static band: under the theta layer it renders the
+    # Land mask from a static band: under the VWC layer it renders the
     # set-wide convention -- gray is land the day's swaths did not cover.
     land = np.isfinite(read_band(GROUPS["soilgrids"][1], "silt_5-15cm_mean"))
 
@@ -289,13 +326,12 @@ def draw_stack(ax, df: pd.DataFrame) -> None:
             zorder=i + 1,
         )
         y_mid = i * LAYER_RISE + 0.5 * LAYER_ASPECT * LAYER_YSCALE
-        color = COLOR_THETA if title.startswith("SMAP") else style.AXIS_COLOR
         ax.text(
             1.06,
             y_mid + 0.035,
             title,
             fontsize=style.MAX_TEXT_PT,
-            color=color,
+            color="black",
             va="bottom",
             ha="left",
         )
@@ -304,7 +340,7 @@ def draw_stack(ax, df: pd.DataFrame) -> None:
             y_mid + 0.02,
             subtitle,
             fontsize=style.MAX_TEXT_PT - 1.5,
-            color=style.MUTED_INK,
+            color="black",
             va="top",
             ha="left",
         )
@@ -318,8 +354,8 @@ def draw_stack(ax, df: pd.DataFrame) -> None:
 
 def draw_importance(ax, df: pd.DataFrame) -> None:
     top = df.head(N_BARS)
-    static_max = top.loc[top["group"] != "theta", "importance_mean"].max()
-    xlim = static_max * 1.25
+    other_max = top.loc[top["group"] != "theta", "importance_mean"].max()
+    xlim = other_max * 1.25
 
     y = np.arange(len(top))[::-1]
     for yi, (_, row) in zip(y, top.iterrows()):
@@ -333,7 +369,7 @@ def draw_importance(ax, df: pd.DataFrame) -> None:
             zorder=2,
         )
         if clipped:
-            # Broken-bar convention: the theta bar runs off the static scale.
+            # Broken-bar convention: the VWC bar runs off the remaining scale.
             for dx in (0.955, 0.975):
                 ax.plot(
                     [xlim * dx, xlim * (dx - 0.012)],
@@ -344,9 +380,9 @@ def draw_importance(ax, df: pd.DataFrame) -> None:
                     clip_on=False,
                 )
             ax.text(
-                xlim * 0.93,
+                xlim * 0.91,
                 yi,
-                f"{val:.2f}",
+                f"{val:.2f} ± {row['importance_std']:.2f}",
                 va="center",
                 ha="right",
                 fontsize=style.MAX_TEXT_PT - 1,
@@ -369,14 +405,14 @@ def draw_importance(ax, df: pd.DataFrame) -> None:
     ax.set_xlim(0, xlim)
     ax.tick_params(axis="y", length=0)
     ax.spines["left"].set_visible(False)
-    ax.set_xlabel("Permutation importance (ΔR², median prediction)")
+    ax.set_xlabel("Decrease in holdout R² after feature permutation")
 
     handles = [
         plt.Rectangle((0, 0), 1, 1, color=c, label=lbl)
         for c, lbl in (
-            (COLOR_THETA, "dynamic θ"),
-            (COLOR_STATIC, "static covariate"),
-            (COLOR_SAMPLE, "sample descriptor"),
+            (COLOR_VWC, "Dynamic VWC"),
+            (COLOR_STATIC, "Static covariate"),
+            (COLOR_SAMPLE, "Sample descriptor"),
         )
     ]
     ax.legend(handles=handles, loc="lower right", handlelength=1.0, borderaxespad=0.2)
@@ -394,7 +430,7 @@ def build_figure(output_dir=OUT_DIR, importance_csv=IMPORTANCE_CSV) -> Path:
     )
 
     draw_stack(ax_stack, df)
-    style.panel_label(ax_stack, "a", dx=0.0, dy=0.98)
+    style.panel_label(ax_stack, "a", dx=0.0)
 
     draw_importance(ax_bar, df)
     style.panel_label(ax_bar, "b", dx=-0.42)
