@@ -264,16 +264,9 @@ def _plot_applicability(ax, counts: pd.DataFrame) -> None:
     ax.set_xlim(0.0, 100.0)
     ax.set_xticks((0, 25, 50, 75, 100))
     ax.set_xlabel("Share of candidate pairs (%)")
-    ax.set_title("Applicability over held-out measured pairs", pad=18)
-    ax.text(
-        0.0,
-        1.02,
-        f"n = {int(totals[0]):,}",
-        transform=ax.transAxes,
-        ha="left",
-        va="bottom",
-        fontsize=style.MIN_TEXT_PT,
-        color=style.MUTED_INK,
+    ax.set_title(
+        f"Applicability over held-out measured pairs (n = {int(totals[0]):,})",
+        pad=18,
     )
     ax.grid(axis="x", linewidth=0.35, color=style.GRID_COLOR, zorder=0)
     ax.set_axisbelow(True)
@@ -352,16 +345,9 @@ def _plot_common_error(ax, common: pd.DataFrame) -> None:
     ax.set_xlim(0.0, 0.86)
     ax.set_xticks(np.arange(0.0, 0.81, 0.2))
     ax.set_xlabel(r"Error (log$_{10}$ |MPa|; lower is better)")
-    ax.set_title("Conditional error on the common strict subset", pad=18)
-    ax.text(
-        0.0,
-        1.02,
-        f"n = {int(common['n'].iloc[0]):,}; identical rows, observation weighted",
-        transform=ax.transAxes,
-        ha="left",
-        va="bottom",
-        fontsize=style.MIN_TEXT_PT,
-        color=style.MUTED_INK,
+    ax.set_title(
+        f"Conditional error on the common strict subset (n = {int(common['n'].iloc[0]):,})",
+        pad=18,
     )
     ax.grid(axis="x", linewidth=0.35, color=style.GRID_COLOR, zorder=0)
     ax.set_axisbelow(True)
