@@ -1,17 +1,17 @@
 """Descriptor Fig 1: how the dataset is built.
 
-A schematic of the prediction chain: static landscape covariates and daily
-SMAP L3 soil moisture enter a quantile random forest trained on harmonised
-(theta, suction) pairs, which emits a median and a 95% prediction interval on
-the days SMAP retrieved -- Level 1 -- and, after a temporal gap-fill, a value
-for every calendar day -- Level 2. Matric potential in signed MPa is the only
-unit the released files carry (the model-native log10 suction is internal), so
-the cards name the released bands: the median plus its q025/q975 pair at
-Level 1, the median plus ``gapfill_flag`` at Level 2 -- the interval ships at
-Level 1 only, because on a filled day the model never ran.
+A schematic of the prediction chain: static landscape covariates and SMAP L3
+volumetric water content enter a quantile random forest trained on harmonised
+paired observations of volumetric water content and soil water potential. The
+forest emits a median and a 95% prediction interval where SMAP retrieved --
+Level 1 -- and, after a temporal gap-fill, a median for every calendar day --
+Level 2. Signed soil water potential in MPa is the released quantity (the
+model-native log10 suction is internal). Level 1 carries the median plus its
+q025/q975 pair; Level 2 carries the gap-filled median plus ``gapfill_flag``.
+The interval remains in Level 1 because the model does not run on filled days.
 Feature groups reflect the global-pruned ablation (sentinel-1, SMAP climatology
 and land cover were dropped at threshold r2_drop <= 0). The covariate card
-counts only the 127 static features; theta (the SMAP card) and the two fixed
+counts only the 127 static features; VWC (the SMAP card) and the two fixed
 sample descriptors depth_cm and rosetta_level -- real model features held at
 constant values for the product run -- are named on the model card, so the
 inputs shown sum to the model's 130 features.
@@ -29,6 +29,10 @@ written as a PDF with the text still text (``pdf.fonttype`` 42). Nature accepts
 PDF/EPS vector artwork and asks that line art and text never be rasterised; the
 previous SVG used ``feDropShadow``, which any SVG-to-PDF step flattens to a
 bitmap, so the shadows are gone.
+
+All human-readable labels use sentence case. Established product names,
+acronyms, units and mathematical symbols retain their conventional casing, and
+a line break within a phrase does not trigger a new capital letter.
 
 Geometry is in millimetres. A single full-bleed axes spans the figure and its
 data limits are the figure's millimetre extent, so every constant below is a
@@ -88,7 +92,7 @@ NOTE_PT = 5.5
 LEADING = 1.55  # multiple of the type size
 
 INK = "#1a1a1a"
-BODY_INK = "#3a3a3a"
+BODY_INK = INK
 ARROW_INK = "#555555"
 
 # Colour marks the role, not the box: the three data streams that feed the
@@ -108,18 +112,15 @@ GROUPS = [
     (r"Global $\mathregular{ET_o}$", 6),
 ]
 
-# The covariate card shows only the static stack; theta (SMAP card) and the two
+# The covariate card shows only the static stack; VWC (SMAP card) and the two
 # fixed sample descriptors (model card) bring the model's input count to 130.
 STATIC_FEATURES = sum(n for _, n in GROUPS)  # 127
-MODEL_INPUTS = STATIC_FEATURES + 3  # + theta + depth_cm + rosetta_level
+MODEL_INPUTS = STATIC_FEATURES + 3  # + VWC + depth_cm + rosetta_level
 
-# Training data (profile / depth-sample counts live in the caption)
+# Concise training-data summary for the schematic
 TRAIN_OBS = "193K"
 TRAIN_LOCATIONS = "2,607"
 TRAIN_SOURCES = 5
-
-# Output
-VALID_PIXELS = "119,693"
 
 ROW_H_MM = 6.2
 ROW_GAP_MM = 1.1
@@ -333,8 +334,8 @@ def build_figure():
         SMAP,
         [
             ("SMAP L3", TITLE_PT, "bold", INK),
-            ("Daily soil moisture (θ)", BODY_PT, "normal", BODY_INK),
-            ("AM pass, 9 km EASE-Grid 2", BODY_PT, "normal", BODY_INK),
+            ("Morning-overpass VWC", BODY_PT, "normal", BODY_INK),
+            ("9 km EASE-Grid 2.0", BODY_PT, "normal", BODY_INK),
         ],
     )
 
@@ -346,10 +347,10 @@ def build_figure():
         COL_C_W,
         TRAINING,
         [
-            ("Training data", TITLE_PT, "bold", INK),
-            (f"{TRAIN_OBS} θ–ψ observations", BODY_PT, "normal", BODY_INK),
+            ("Global training observations", TITLE_PT, "bold", INK),
+            (f"{TRAIN_OBS} paired observations", BODY_PT, "normal", BODY_INK),
             (f"{TRAIN_LOCATIONS} unique locations", BODY_PT, "normal", BODY_INK),
-            (f"{TRAIN_SOURCES} sources", NOTE_PT, "normal", BODY_INK),
+            (f"{TRAIN_SOURCES} data sources", NOTE_PT, "normal", BODY_INK),
         ],
     )
 
@@ -363,13 +364,13 @@ def build_figure():
         [
             ("Quantile random forest", TITLE_PT, "bold", INK),
             (
-                f"{MODEL_INPUTS} inputs: {STATIC_FEATURES} covariates + θ",
+                f"{MODEL_INPUTS} inputs: {STATIC_FEATURES} covariates + VWC",
                 BODY_PT,
                 "normal",
                 BODY_INK,
             ),
-            ("+ depth & Rosetta level (fixed)", BODY_PT, "normal", BODY_INK),
-            ("9 km spatial-group holdout", NOTE_PT, "normal", BODY_INK),
+            ("+ depth + depth class", BODY_PT, "normal", BODY_INK),
+            ("Map depth fixed at 5 cm", NOTE_PT, "normal", BODY_INK),
         ],
     )
 
@@ -390,10 +391,10 @@ def build_figure():
         NEUTRAL,
         [
             ("Level 1", TITLE_PT, "bold", INK),
-            ("QRF median ψ + q025 / q975 (MPa)", BODY_PT, "normal", BODY_INK),
-            ("9 km, 2015–present", BODY_PT, "normal", BODY_INK),
-            (f"{VALID_PIXELS} land pixels", BODY_PT, "normal", BODY_INK),
-            ("Retrieval days only", NOTE_PT, "normal", BODY_INK),
+            ("Median soil water potential (MPa)", BODY_PT, "normal", BODY_INK),
+            ("+ 95% prediction interval", BODY_PT, "normal", BODY_INK),
+            ("CONUS, 9 km; Apr 2015–Apr 2026", BODY_PT, "normal", BODY_INK),
+            ("SMAP retrieval days only", NOTE_PT, "normal", BODY_INK),
         ],
         fill=0.13,
         lw=0.9,
@@ -407,8 +408,8 @@ def build_figure():
         NEUTRAL,
         [
             ("Temporal gap-fill", TITLE_PT, "bold", INK),
-            ("Linear interpolation per pixel", BODY_PT, "normal", BODY_INK),
-            ("Ends held flat, not observed", NOTE_PT, "normal", BODY_INK),
+            ("Linear interpolation through time", BODY_PT, "normal", BODY_INK),
+            ("Nearest value fills end gaps", NOTE_PT, "normal", BODY_INK),
         ],
         fill=0.05,
         lw=0.6,
@@ -423,9 +424,8 @@ def build_figure():
         NEUTRAL,
         [
             ("Level 2", TITLE_PT, "bold", INK),
-            ("Gap-filled daily median ψ (MPa)", BODY_PT, "normal", BODY_INK),
-            ("median + gapfill_flag; interval in L1", BODY_PT, "normal", BODY_INK),
-            ("Same grid, every calendar day", NOTE_PT, "normal", BODY_INK),
+            ("Gap-filled median", BODY_PT, "normal", BODY_INK),
+            ("soil water potential (MPa)", BODY_PT, "normal", BODY_INK),
         ],
         fill=0.13,
         lw=0.9,
